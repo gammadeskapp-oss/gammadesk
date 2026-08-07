@@ -1,7 +1,9 @@
+import type { DataSource } from '@/lib/types';
+
 interface HeaderProps {
   symbol: string;
   asOfLabel: string;
-  source: 'polygon' | 'sample';
+  source: DataSource;
 }
 
 export function Header({ symbol, asOfLabel, source }: HeaderProps) {

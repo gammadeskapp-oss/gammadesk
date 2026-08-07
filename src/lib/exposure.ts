@@ -218,7 +218,7 @@ export function buildPositioning(
 
   const columnTotals = expirations.map(() => emptyMetrics());
   const grandTotal = emptyMetrics();
-  const ivSources: Record<IvSource, number> = { api: 0, solved: 0, model: 0 };
+  const ivSources: Record<IvSource, number> = { quoted: 0, solved: 0, model: 0 };
 
   let contractsUsed = 0;
 

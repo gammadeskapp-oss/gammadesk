@@ -12,6 +12,13 @@ function num(value: string | undefined, fallback: number): number {
 }
 
 export type DemoMode = 'auto' | 'always' | 'never';
+export type SourceChoice = 'cboe' | 'polygon';
+
+function sourceChoice(): SourceChoice {
+  return (process.env.GAMMADESK_DATA_SOURCE ?? 'cboe').trim().toLowerCase() === 'polygon'
+    ? 'polygon'
+    : 'cboe';
+}
 
 function demoMode(): DemoMode {
   const raw = (process.env.GAMMADESK_DEMO ?? 'auto').trim().toLowerCase();
@@ -21,6 +28,14 @@ function demoMode(): DemoMode {
 }
 
 export const config = {
+  /**
+   * Which upstream to pull the chain from. Defaults to Cboe because open
+   * interest — the basis of every number here — is not available on Polygon's
+   * free plan at all.
+   */
+  get dataSource(): SourceChoice {
+    return sourceChoice();
+  },
   get apiKey(): string | undefined {
     const key = process.env.POLYGON_API_KEY?.trim();
     return key && key !== 'your_polygon_key_here' ? key : undefined;

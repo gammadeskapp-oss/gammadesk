@@ -88,7 +88,7 @@ export function buildDemoChain(strikesEachSide: number, expirationCount: number)
           expiration,
           openInterest,
           iv: modelIv(spot, strike, T) * (0.94 + rand() * 0.12),
-          ivSource: 'model',
+          ivSource: 'model' as const,
           T,
         });
       }

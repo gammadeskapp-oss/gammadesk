@@ -3,7 +3,10 @@ export type OptionType = 'call' | 'put';
 export type MetricKey = 'gex' | 'vex' | 'cex' | 'oi';
 
 /** Where the implied vol used for a contract came from. */
-export type IvSource = 'api' | 'solved' | 'model';
+export type IvSource = 'quoted' | 'solved' | 'model';
+
+/** Upstream provider a snapshot came from. */
+export type DataSource = 'cboe' | 'polygon' | 'sample';
 
 /** One options contract, normalised out of whatever Polygon returned. */
 export interface NormalisedContract {
@@ -57,14 +60,16 @@ export interface Summary {
 }
 
 export interface DataMeta {
-  source: 'polygon' | 'sample';
+  source: DataSource;
+  /** Human-readable provider name for the UI, e.g. "Cboe (delayed)". */
+  sourceLabel: string;
   /** Server-rendered "data as of" string, e.g. `Aug 06, 2026, 16:00 ET`. */
   asOfLabel: string;
   asOfIso: string;
   /** Timestamp the underlying market data itself refers to. */
   quoteDateLabel: string;
   cacheSeconds: number;
-  polygonRequests: number;
+  upstreamRequests: number;
   contractsUsed: number;
   ivSources: Record<IvSource, number>;
   riskFreeRate: number;

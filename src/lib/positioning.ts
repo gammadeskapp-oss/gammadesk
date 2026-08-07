@@ -1,18 +1,32 @@
 import 'server-only';
 
 import { cached, invalidate, ttlRemaining } from './cache';
+import { ChainError } from './chainSource';
 import { config } from './config';
+import { fetchCboeSnapshot } from './cboe';
 import { buildDemoChain } from './demo';
 import { buildPositioning } from './exposure';
-import { fetchChainSnapshot, PolygonError } from './polygon';
+import { fetchPolygonSnapshot } from './polygon';
 import { formatAsOf } from './time';
-import type { PositioningData } from './types';
+import type { DataSource, PositioningData } from './types';
 
 const CACHE_KEY = 'positioning';
 
 function cacheKey(): string {
-  return `${CACHE_KEY}:${config.symbol}:${config.expirationCount}:${config.strikesEachSide}`;
+  return [
+    CACHE_KEY,
+    config.dataSource,
+    config.symbol,
+    config.expirationCount,
+    config.strikesEachSide,
+  ].join(':');
 }
+
+const SOURCE_LABELS: Record<DataSource, string> = {
+  cboe: 'Cboe (delayed)',
+  polygon: 'Polygon.io',
+  sample: 'generated sample',
+};
 
 function sampleData(notes: string[]): PositioningData {
   const now = new Date();
@@ -30,11 +44,12 @@ function sampleData(notes: string[]): PositioningData {
     strikesEachSide: config.strikesEachSide,
     meta: {
       source: 'sample',
+      sourceLabel: SOURCE_LABELS.sample,
       asOfLabel: formatAsOf(now),
       asOfIso: now.toISOString(),
       quoteDateLabel: formatAsOf(quoteDate),
       cacheSeconds: config.cacheSeconds,
-      polygonRequests: 0,
+      upstreamRequests: 0,
       riskFreeRate: config.riskFreeRate,
       dividendYield: config.dividendYield,
       notes: [
@@ -47,7 +62,9 @@ function sampleData(notes: string[]): PositioningData {
 
 async function liveData(): Promise<PositioningData> {
   const now = new Date();
-  const snapshot = await fetchChainSnapshot();
+  const source = config.dataSource;
+  const snapshot =
+    source === 'polygon' ? await fetchPolygonSnapshot() : await fetchCboeSnapshot();
 
   return buildPositioning(snapshot.contracts, {
     symbol: config.symbol,
@@ -57,12 +74,13 @@ async function liveData(): Promise<PositioningData> {
     expirationCount: config.expirationCount,
     strikesEachSide: config.strikesEachSide,
     meta: {
-      source: 'polygon',
+      source,
+      sourceLabel: SOURCE_LABELS[source],
       asOfLabel: formatAsOf(now),
       asOfIso: now.toISOString(),
       quoteDateLabel: formatAsOf(snapshot.quoteDate),
       cacheSeconds: config.cacheSeconds,
-      polygonRequests: snapshot.requests,
+      upstreamRequests: snapshot.requests,
       riskFreeRate: config.riskFreeRate,
       dividendYield: config.dividendYield,
       notes: snapshot.notes,
@@ -75,17 +93,16 @@ async function produce(): Promise<PositioningData> {
 
   if (mode === 'always') return sampleData([]);
 
-  if (!config.apiKey) {
+  // Only the Polygon adapter needs a key; Cboe is keyless.
+  if (config.dataSource === 'polygon' && !config.apiKey) {
     if (mode === 'never') {
-      throw new PolygonError(
+      throw new ChainError(
         'POLYGON_API_KEY is not set.',
         0,
         'Add it to .env.local locally, and to Project Settings -> Environment Variables on Vercel.',
       );
     }
-    return sampleData([
-      'POLYGON_API_KEY is not set, so no live data could be fetched.',
-    ]);
+    return sampleData(['POLYGON_API_KEY is not set, so no live data could be fetched.']);
   }
 
   try {
@@ -94,7 +111,7 @@ async function produce(): Promise<PositioningData> {
     if (mode === 'never') throw error;
 
     const reason =
-      error instanceof PolygonError
+      error instanceof ChainError
         ? [error.message, error.hint].filter(Boolean).join(' ')
         : error instanceof Error
           ? error.message
@@ -109,7 +126,7 @@ async function produce(): Promise<PositioningData> {
  *
  * Every caller shares one cached result for `GAMMADESK_CACHE_SECONDS`
  * (30 minutes by default), and concurrent callers share one in-flight fetch,
- * so a burst of traffic still costs at most one refresh.
+ * so a burst of traffic still costs at most one upstream refresh.
  */
 export async function getPositioning(
   options: { force?: boolean } = {},

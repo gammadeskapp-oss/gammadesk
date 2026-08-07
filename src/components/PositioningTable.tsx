@@ -126,7 +126,12 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
           <tbody>
             {rows.map((row) => {
               const isSpot = row.strike === spotStrike;
-              const isFlip = row.strike === flipStrike && !isSpot;
+              const isFlipRow = row.strike === flipStrike;
+              // When spot sits on the flip, one row carries both. Keep the cyan
+              // spot styling and fold the flip into its label rather than
+              // silently dropping the marker — that overlap is precisely the
+              // moment the flip level matters most.
+              const isFlip = isFlipRow && !isSpot;
 
               const rowClass = isSpot
                 ? 'bg-pos/[0.07]'
@@ -157,6 +162,9 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
                       {isSpot && (
                         <span className="text-2xs font-normal text-pos/80">
                           ← {formatPrice(spot)}
+                          {isFlipRow && (
+                            <span className="text-flip"> · flip</span>
+                          )}
                         </span>
                       )}
                       {isFlip && (

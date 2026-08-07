@@ -4,11 +4,16 @@ A step-by-step walkthrough, written assuming you have not done this before.
 Nothing here costs money — GitHub and Vercel both have free tiers that cover
 this app comfortably.
 
-There are three stages:
+There are two stages:
 
 1. **Get the code onto GitHub** — a backup of your code that Vercel can read.
 2. **Connect Vercel to GitHub** — Vercel builds and hosts the site.
-3. **Add your API key to Vercel** — so the live site can fetch real data.
+
+> **You do not need an API key.** GammaDesk pulls its option chain from Cboe's
+> free public feed, which needs no account and no key. There is nothing to
+> configure — importing the repo and clicking Deploy is the whole job.
+>
+> Stage 3 below is only relevant if you later switch to a paid Polygon plan.
 
 ---
 
@@ -121,20 +126,9 @@ Vercel recognises Next.js on its own. You should see:
 
 Leave all of it alone.
 
-### 2.4 Add your API key — do this now, before deploying
+### 2.4 Environment variables — skip this
 
-Still on the import screen, expand **Environment Variables** and add:
-
-| Field | Value |
-|-------|-------|
-| **Key** | `POLYGON_API_KEY` |
-| **Value** | your actual Polygon key |
-
-Make sure it applies to **Production**, **Preview** and **Development** (all
-three are usually ticked by default).
-
-> Adding it now saves a step. If you forget, the site still deploys — it just
-> shows sample data until you add the key and redeploy.
+There is nothing to add. Leave the **Environment Variables** section empty.
 
 ### 2.5 Deploy
 
@@ -143,16 +137,22 @@ like `gammadesk-abc123.vercel.app`. Click it — that is your live dashboard.
 
 ---
 
-## Stage 3 — Adding or changing the API key later
+## Stage 3 — Switching to Polygon later (optional)
 
-If you skipped 2.4, or your key changes:
+Only if you take out a **paid** Polygon options plan. The free plan cannot power
+this dashboard: it does not expose open interest, which every number here is
+built from, and its options snapshot endpoints return `403 NOT_AUTHORIZED`.
 
 1. Open your project on <https://vercel.com/dashboard>.
 2. **Settings** → **Environment Variables**.
-3. **Add New**:
-   - Key: `POLYGON_API_KEY`
-   - Value: your key
-   - Environments: tick all three.
+3. Add two variables, ticking **Production**, **Preview** and **Development**
+   for each:
+
+   | Key | Value |
+   |-----|-------|
+   | `GAMMADESK_DATA_SOURCE` | `polygon` |
+   | `POLYGON_API_KEY` | your Polygon key |
+
 4. Click **Save**.
 
 **Environment variables only take effect on a new build.** So then:
@@ -160,8 +160,7 @@ If you skipped 2.4, or your key changes:
 5. Go to the **Deployments** tab.
 6. On the most recent deployment, click the **…** menu → **Redeploy**.
 
-Once it finishes, the top-right of the page should show a real "data as of"
-timestamp instead of the yellow `SAMPLE DATA` badge.
+The data-quality strip at the bottom of the page shows which source is live.
 
 ---
 
@@ -206,19 +205,23 @@ That is the whole loop. Watch it build in the Vercel dashboard.
 ## Troubleshooting
 
 **Yellow "SAMPLE DATA" badge on the live site**
-The app could not get real data, so it fell back to generated numbers rather
-than showing an empty page. The reason is printed at the bottom of the page in
-the data-quality strip. Usually: the key is missing on Vercel, or you added it
-but have not redeployed since.
+The app could not reach real data, so it fell back to generated numbers rather
+than showing an empty page or wrong ones. The reason is printed at the bottom of
+the page in the data-quality strip — read that first.
+
+**"Could not reach the Cboe delayed-quote service"**
+The public feed is undocumented and has no SLA, so it can fail or change without
+notice. Usually temporary. If it persists, the feed may have moved.
+
+**"Polygon rejected the request (HTTP 403)"**
+Your Polygon plan does not include the options snapshot endpoint. The free plan
+never does. Either upgrade, or set `GAMMADESK_DATA_SOURCE=cboe` (the default)
+and redeploy.
 
 **"Polygon rate limit hit (HTTP 429)"**
 The free plan allows 5 requests per minute. The app caches for 30 minutes to
 stay under that, but you can still trip it by redeploying repeatedly. Wait a
 minute.
-
-**"Polygon rejected the request (HTTP 403)"**
-Either the key is wrong, or your Polygon plan does not include the options
-snapshot endpoint. Check the key at <https://polygon.io/dashboard/api-keys>.
 
 **Build fails on Vercel**
 Open the failed deployment and read the build log — the actual error is in

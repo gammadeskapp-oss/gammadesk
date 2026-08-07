@@ -21,9 +21,12 @@ export default function Error({
         </h1>
 
         <p className="mt-3 text-xs leading-relaxed text-term-dim">
-          The positioning snapshot could not be built. The usual causes are a
-          missing or invalid <code className="text-term-text">POLYGON_API_KEY</code>,
-          or Polygon&rsquo;s free-plan limit of 5 requests per minute being hit.
+          The positioning snapshot could not be built. The usual cause is the
+          upstream chain provider being unreachable or refusing the request. If
+          <code className="text-term-text"> GAMMADESK_DATA_SOURCE</code> is set to
+          <code className="text-term-text"> polygon</code>, check that
+          <code className="text-term-text"> POLYGON_API_KEY</code> is set and that
+          the plan includes the options snapshot endpoint.
         </p>
 
         {error.digest && (

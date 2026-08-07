@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
+import { ChainError } from '@/lib/chainSource';
 import { config } from '@/lib/config';
-import { PolygonError } from '@/lib/polygon';
 import { getPositioning, secondsUntilRefresh } from '@/lib/positioning';
 
 export const dynamic = 'force-dynamic';
@@ -45,7 +45,7 @@ export async function GET(request: Request) {
       },
     );
   } catch (error) {
-    if (error instanceof PolygonError) {
+    if (error instanceof ChainError) {
       return NextResponse.json(
         { error: error.message, detail: error.hint },
         { status: error.status >= 400 ? error.status : 502 },
