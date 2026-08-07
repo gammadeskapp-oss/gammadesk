@@ -8,7 +8,6 @@ import {
   type ChainSnapshot,
   type RawQuote,
 } from './chainSource';
-import { marketTimeToUtcMs } from './time';
 import type { OptionType } from './types';
 
 /**
@@ -107,16 +106,23 @@ function usablePrice(c: CboeContract): number | null {
 }
 
 /**
- * The payload stamps itself as `YYYY-MM-DD HH:MM:SS` in New York time with no
- * offset, so it has to be anchored to the market timezone explicitly.
+ * The payload's top-level `timestamp` is `YYYY-MM-DD HH:MM:SS` in **UTC**, with
+ * no offset or zone marker to say so.
+ *
+ * Verified against two samples taken hours apart: `2026-08-07 00:46:27` while
+ * New York was at 20:46 on 6 Aug, and `2026-08-07 19:21:16` while New York was
+ * at 15:21. Both match UTC exactly.
+ *
+ * Note that Cboe is not internally consistent here — the per-contract
+ * `last_trade_time` field IS New York time. Only this top-level stamp is UTC.
+ * Reading it as market time puts the "data as of" label four or five hours into
+ * the future, which makes live data look stale.
  */
 function parseTimestamp(raw: string | undefined): Date {
   if (!raw) return new Date();
-  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(raw.trim());
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):?(\d{2})?/.exec(raw.trim());
   if (!m) return new Date();
-  return new Date(
-    marketTimeToUtcMs(+m[1], +m[2], +m[3], +m[4], +m[5]),
-  );
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] ?? 0)));
 }
 
 export async function fetchCboeSnapshot(): Promise<ChainSnapshot> {

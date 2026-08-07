@@ -43,9 +43,18 @@ export const config = {
   get symbol(): string {
     return (process.env.GAMMADESK_SYMBOL ?? 'SPY').trim().toUpperCase();
   },
+  /**
+   * How long one upstream refresh is reused.
+   *
+   * The floor is source-dependent. Polygon's free plan allows only 5 requests
+   * per minute, so a short interval there risks the quota; Cboe is keyless,
+   * costs a single request, and has no published limit, so it can refresh
+   * often enough to be useful while the market is open.
+   */
   get cacheSeconds(): number {
-    // Floor of 5 minutes: anything shorter risks blowing the free-plan quota.
-    return Math.max(300, num(process.env.GAMMADESK_CACHE_SECONDS, 1800));
+    const floor = sourceChoice() === 'polygon' ? 300 : 60;
+    const fallback = sourceChoice() === 'polygon' ? 1800 : 300;
+    return Math.max(floor, num(process.env.GAMMADESK_CACHE_SECONDS, fallback));
   },
   get expirationCount(): number {
     return Math.min(12, Math.max(1, num(process.env.GAMMADESK_EXPIRATIONS, 5)));
