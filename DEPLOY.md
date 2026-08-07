@@ -1,0 +1,233 @@
+# Deploying GammaDesk
+
+A step-by-step walkthrough, written assuming you have not done this before.
+Nothing here costs money — GitHub and Vercel both have free tiers that cover
+this app comfortably.
+
+There are three stages:
+
+1. **Get the code onto GitHub** — a backup of your code that Vercel can read.
+2. **Connect Vercel to GitHub** — Vercel builds and hosts the site.
+3. **Add your API key to Vercel** — so the live site can fetch real data.
+
+---
+
+## Before you start: Node.js
+
+You need Node.js **20.9 or newer**. Check:
+
+```bash
+node --version
+```
+
+If that shows something older (for example `v12.13.1`), install the current LTS:
+
+```bash
+winget install OpenJS.NodeJS.LTS
+```
+
+Then **close and reopen your terminal** and check `node --version` again. This
+matters for running the app on your own machine; Vercel uses its own modern Node
+regardless.
+
+---
+
+## Stage 1 — Get the code onto GitHub
+
+### 1.1 Tell git who you are
+
+Git stamps your name on every save. Run these once (use your own name and the
+email on your GitHub account):
+
+```bash
+git config --global user.name "Your Name"
+```
+
+```bash
+git config --global user.email "you@example.com"
+```
+
+### 1.2 Create the repository on GitHub
+
+Go to <https://github.com/new> and fill in:
+
+- **Repository name**: `gammadesk`
+- **Description**: optional
+- **Public or Private**: either works. Vercel can deploy both.
+- **Do NOT tick** "Add a README file", "Add .gitignore", or "Choose a license".
+  The project already has those, and ticking them creates a conflict you would
+  then have to untangle.
+
+Click **Create repository**.
+
+GitHub then shows you a page with some commands. Ignore them — the next step
+covers it.
+
+### 1.3 Connect your local folder to it
+
+In your terminal, in the `gammadesk` folder. Replace `YOUR-USERNAME` with your
+actual GitHub username:
+
+```bash
+git remote add origin https://github.com/YOUR-USERNAME/gammadesk.git
+```
+
+### 1.4 Push the code up
+
+```bash
+git push -u origin main
+```
+
+The first time, a browser window or a prompt will ask you to sign in to GitHub.
+Do that, and the upload will finish.
+
+> **If it asks for a password in the terminal**: GitHub stopped accepting account
+> passwords for this in 2021. Either let the browser sign-in flow handle it, or
+> create a Personal Access Token at
+> <https://github.com/settings/tokens> and paste that as the password.
+
+Refresh your repository page on GitHub — your files should be there.
+
+> **Check before you continue:** you should see `README.md`, `src/`,
+> `package.json` — and you should **NOT** see `.env.local`. That file holds your
+> API key and is deliberately excluded by `.gitignore`. If you do see it, stop
+> and tell me.
+
+---
+
+## Stage 2 — Connect it to Vercel
+
+### 2.1 Sign up
+
+Go to <https://vercel.com/signup> and choose **Continue with GitHub**. Signing up
+this way means Vercel can see your repositories, which is what you want.
+
+### 2.2 Import the project
+
+1. Go to <https://vercel.com/new>.
+2. You will see a list of your GitHub repositories. Find **gammadesk** and click
+   **Import**.
+   - If it is not listed, click **Adjust GitHub App Permissions** and grant
+     Vercel access to the repo.
+
+### 2.3 Check the settings
+
+Vercel recognises Next.js on its own. You should see:
+
+- **Framework Preset**: `Next.js`
+- **Build Command**: `next build` (or "default")
+- **Output Directory**: default
+- **Root Directory**: `./`
+
+Leave all of it alone.
+
+### 2.4 Add your API key — do this now, before deploying
+
+Still on the import screen, expand **Environment Variables** and add:
+
+| Field | Value |
+|-------|-------|
+| **Key** | `POLYGON_API_KEY` |
+| **Value** | your actual Polygon key |
+
+Make sure it applies to **Production**, **Preview** and **Development** (all
+three are usually ticked by default).
+
+> Adding it now saves a step. If you forget, the site still deploys — it just
+> shows sample data until you add the key and redeploy.
+
+### 2.5 Deploy
+
+Click **Deploy** and wait a couple of minutes. When it finishes you get a URL
+like `gammadesk-abc123.vercel.app`. Click it — that is your live dashboard.
+
+---
+
+## Stage 3 — Adding or changing the API key later
+
+If you skipped 2.4, or your key changes:
+
+1. Open your project on <https://vercel.com/dashboard>.
+2. **Settings** → **Environment Variables**.
+3. **Add New**:
+   - Key: `POLYGON_API_KEY`
+   - Value: your key
+   - Environments: tick all three.
+4. Click **Save**.
+
+**Environment variables only take effect on a new build.** So then:
+
+5. Go to the **Deployments** tab.
+6. On the most recent deployment, click the **…** menu → **Redeploy**.
+
+Once it finishes, the top-right of the page should show a real "data as of"
+timestamp instead of the yellow `SAMPLE DATA` badge.
+
+---
+
+## Stage 4 — Pointing gammadesk.app at it
+
+Once you own the domain:
+
+1. Project → **Settings** → **Domains**.
+2. Type `gammadesk.app`, click **Add**.
+3. Vercel shows you DNS records to create. Where you do this depends on where
+   you bought the domain:
+   - **Bought through Vercel** — nothing to do, it configures itself.
+   - **Bought elsewhere** (Namecheap, Cloudflare, GoDaddy…) — log in there, find
+     the DNS settings, and add the exact records Vercel shows you. Usually an
+     `A` record for the root and a `CNAME` for `www`.
+4. Wait. DNS changes can take anywhere from a few minutes to a few hours.
+   Vercel's Domains page shows a green tick when it is live, and issues the
+   HTTPS certificate automatically.
+
+---
+
+## Making changes later
+
+Vercel watches your GitHub repo. Any push to `main` deploys automatically:
+
+```bash
+git add .
+```
+
+```bash
+git commit -m "Describe what you changed"
+```
+
+```bash
+git push
+```
+
+That is the whole loop. Watch it build in the Vercel dashboard.
+
+---
+
+## Troubleshooting
+
+**Yellow "SAMPLE DATA" badge on the live site**
+The app could not get real data, so it fell back to generated numbers rather
+than showing an empty page. The reason is printed at the bottom of the page in
+the data-quality strip. Usually: the key is missing on Vercel, or you added it
+but have not redeployed since.
+
+**"Polygon rate limit hit (HTTP 429)"**
+The free plan allows 5 requests per minute. The app caches for 30 minutes to
+stay under that, but you can still trip it by redeploying repeatedly. Wait a
+minute.
+
+**"Polygon rejected the request (HTTP 403)"**
+Either the key is wrong, or your Polygon plan does not include the options
+snapshot endpoint. Check the key at <https://polygon.io/dashboard/api-keys>.
+
+**Build fails on Vercel**
+Open the failed deployment and read the build log — the actual error is in
+there. If it mentions a Node version, `package.json` already declares
+`"engines": { "node": ">=20.9.0" }`; confirm the Vercel project is set to Node
+22 or newer under **Settings → General → Node.js Version**.
+
+**I accidentally committed my API key**
+Treat the key as compromised: go to
+<https://polygon.io/dashboard/api-keys>, revoke it, and generate a new one.
+Removing the file from the repo is not enough on its own — the old value stays
+in the git history.

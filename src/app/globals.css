@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #05070b;
+  color: #c8d6e5;
+}
+
+body {
+  font-feature-settings: 'tnum' 1, 'zero' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A faint scanline/grid wash so the page reads as a terminal rather than a
+   flat dark website. Purely decorative and non-interactive. */
+.terminal-grid::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 78%);
+}
+
+@layer components {
+  .panel {
+    @apply border border-term-line bg-term-panel/80 backdrop-blur-[2px];
+  }
+
+  .label-xs {
+    @apply text-2xs uppercase tracking-[0.18em] text-term-faint;
+  }
+}
+
+/* Scrollbars styled to match the terminal chrome instead of the OS default. */
+.scroll-term {
+  scrollbar-width: thin;
+  scrollbar-color: #26303f transparent;
+}
+.scroll-term::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.scroll-term::-webkit-scrollbar-track {
+  background: #0a0e15;
+}
+.scroll-term::-webkit-scrollbar-thumb {
+  background: #26303f;
+  border-radius: 2px;
+}
+.scroll-term::-webkit-scrollbar-thumb:hover {
+  background: #3a4759;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
