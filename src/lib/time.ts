@@ -59,6 +59,28 @@ export function marketToday(now: Date = new Date()): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+/** Current New York wall-clock, broken out for market-hours decisions. */
+export function marketNow(now: Date = new Date()): {
+  date: string;
+  hour: number;
+  minute: number;
+  weekday: number;
+} {
+  const parts = partsFormatter.formatToParts(now);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? '0';
+
+  const date = `${get('year')}-${get('month')}-${get('day')}`;
+  const [y, m, d] = date.split('-').map(Number);
+
+  return {
+    date,
+    hour: Number(get('hour')) % 24,
+    minute: Number(get('minute')),
+    weekday: new Date(Date.UTC(y, m - 1, d)).getUTCDay(), // 0 = Sunday
+  };
+}
+
 /** Add calendar days to a `YYYY-MM-DD` string, returning the same format. */
 export function addDays(isoDate: string, days: number): string {
   const [y, m, d] = isoDate.split('-').map(Number);

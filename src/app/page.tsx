@@ -20,6 +20,7 @@ export default async function HomePage() {
         symbol={data.symbol}
         asOfLabel={data.meta.asOfLabel}
         source={data.meta.source}
+        active="dashboard"
       />
       <Dashboard data={data} />
       <Footer />

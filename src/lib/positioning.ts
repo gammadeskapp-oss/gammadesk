@@ -1,4 +1,4 @@
-import 'server-only';
+﻿import 'server-only';
 
 import { cached, invalidate, ttlRemaining } from './cache';
 import { ChainError } from './chainSource';
@@ -48,6 +48,7 @@ function sampleData(notes: string[]): PositioningData {
       asOfLabel: formatAsOf(now),
       asOfIso: now.toISOString(),
       quoteDateLabel: formatAsOf(quoteDate),
+      quoteDateIso: quoteDate.toISOString(),
       cacheSeconds: config.cacheSeconds,
       upstreamRequests: 0,
       riskFreeRate: config.riskFreeRate,
@@ -79,6 +80,7 @@ async function liveData(): Promise<PositioningData> {
       asOfLabel: formatAsOf(now),
       asOfIso: now.toISOString(),
       quoteDateLabel: formatAsOf(snapshot.quoteDate),
+      quoteDateIso: snapshot.quoteDate.toISOString(),
       cacheSeconds: config.cacheSeconds,
       upstreamRequests: snapshot.requests,
       riskFreeRate: config.riskFreeRate,
@@ -125,8 +127,8 @@ async function produce(): Promise<PositioningData> {
  * The dashboard's single data entry point.
  *
  * Every caller shares one cached result for `GAMMADESK_CACHE_SECONDS`
- * (30 minutes by default), and concurrent callers share one in-flight fetch,
- * so a burst of traffic still costs at most one upstream refresh.
+ * (5 minutes on Cboe, 30 on Polygon), and concurrent callers share one
+ * in-flight fetch, so a burst of traffic still costs at most one refresh.
  */
 export async function getPositioning(
   options: { force?: boolean } = {},

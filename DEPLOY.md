@@ -164,6 +164,60 @@ The data-quality strip at the bottom of the page shows which source is live.
 
 ---
 
+## Stage 3b — Turning on the Accuracy Log
+
+The `/log` page needs two one-time setup steps. Until you do these it still
+loads, but nothing gets recorded.
+
+### Create somewhere durable to store it
+
+Vercel wipes the filesystem on every deploy, so the log has to live outside it.
+
+1. Vercel dashboard → your project → **Storage** tab.
+2. **Create Database** → choose **Blob** → name it anything → **Create**.
+3. Make sure it is **connected to the gammadesk project** (Vercel usually does
+   this automatically and adds a `BLOB_READ_WRITE_TOKEN` variable for you).
+
+This is on the free tier. The log is a single small JSON file.
+
+### Add a cron secret
+
+The two scheduled jobs write to storage, so they must not be callable by
+anyone who guesses the URL.
+
+1. **Settings** → **Environment Variables** → **Add New**.
+2. Key: `CRON_SECRET`. Value: a long random string — mash the keyboard, or use
+   a password generator. Nobody needs to remember it.
+3. Tick **Production**, **Preview** and **Development** → **Save**.
+
+Vercel sends this automatically as a bearer token when it runs the jobs.
+Without it the endpoints return a 503 and refuse to do anything, which is the
+safe default.
+
+### Redeploy
+
+**Deployments** → **…** on the newest one → **Redeploy**. Environment variables
+only take effect on a new build.
+
+### What happens next
+
+`vercel.json` already schedules both jobs:
+
+- **14:45 UTC, weekdays** — record that day's flip level and magnet strikes
+- **21:30 UTC, weekdays** — pull the session's high and low, and score it
+
+Both times were picked to sit inside the trading session in **both** summer and
+winter, since Vercel cron schedules are UTC and New York is not.
+
+You do not need to do anything else. The first row appears on the next weekday
+run, and the running percentages become meaningful after a couple of weeks.
+
+> On Vercel's free plan cron jobs can be delayed by up to an hour. That is fine
+> here — both jobs have an hour of slack before they would fall outside the
+> window they care about, and the settle job re-checks any day it missed.
+
+---
+
 ## Stage 4 — Pointing gammadesk.app at it
 
 Once you own the domain:

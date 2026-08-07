@@ -68,6 +68,7 @@ export interface DataMeta {
   asOfIso: string;
   /** Timestamp the underlying market data itself refers to. */
   quoteDateLabel: string;
+  quoteDateIso: string;
   cacheSeconds: number;
   upstreamRequests: number;
   contractsUsed: number;

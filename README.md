@@ -182,6 +182,74 @@ on screen stay complete. If that happens, the dashboard says so in its footer.
 
 ---
 
+## The Accuracy Log (`/log`)
+
+A running, self-scoring record of whether the dashboard's levels actually meant
+anything.
+
+Each weekday morning a cron job records that day's gamma regime, flip level,
+spot, net GEX and the two biggest magnet strikes. After the close a second job
+pulls the session's high and low and judges the call:
+
+- **Flip — HELD or BROKE.** The snapshot fixes which side of the flip level
+  price was on. HELD means the range never crossed to the other side; BROKE
+  means it did.
+- **Magnet — touched or not.** A magnet counts as touched if the session's
+  range reached that strike.
+
+Running totals sit on top: *Flip held X% of days · Magnet touched Y% of days ·
+N days tracked.*
+
+### Known bias, stated on the page
+
+A daily bar carries no intraday timing, so the high and low include the part of
+the session *before* the snapshot was taken. That slightly over-counts both
+breaks and touches. It is a real limitation of free daily data and is printed
+under the table rather than quietly assumed.
+
+### How it settles
+
+Settlement prefers Polygon's `/v1/open-close/{symbol}/{date}`, which works even
+on the free plan and is historical — so a cron run that is missed or delayed
+self-heals on the next pass rather than leaving a permanent hole. If no Polygon
+key is set it falls back to Cboe's own session OHLC, which can only settle the
+current day.
+
+The snapshot job refuses to record when the market is shut, when the feed is
+still showing the previous session (a holiday guard), or when the dashboard is
+on sample data — a snapshot taken against the wrong chain would quietly poison
+the very record the page exists to keep honest.
+
+### Setup
+
+Two things, both one-time:
+
+| What | Why |
+|------|-----|
+| A **Vercel Blob** store | Vercel's filesystem is ephemeral, so the log must live outside it to survive redeploys. Included in the free tier. Creating it auto-injects `BLOB_READ_WRITE_TOKEN`. |
+| A **`CRON_SECRET`** env var | The cron endpoints write to storage and spend API calls. Vercel Cron sends this as a bearer token. Without it the endpoints return 503 rather than defaulting to open. |
+
+Schedules live in `vercel.json` and are in **UTC**, chosen to land inside the
+session on both sides of daylight saving:
+
+| Job | UTC | EDT | EST |
+|-----|-----|-----|-----|
+| snapshot | 14:45 | 10:45 | 09:45 |
+| settle | 21:30 | 17:30 | 16:30 |
+
+Locally, with no Blob token, the log falls back to a git-ignored
+`.gammadesk/accuracy-log.json` so the whole cycle can be exercised offline:
+
+```bash
+curl "http://localhost:3000/api/log/snapshot?token=$CRON_SECRET&force=1"
+```
+
+```bash
+curl "http://localhost:3000/api/log/settle?token=$CRON_SECRET"
+```
+
+---
+
 ## Verifying the maths
 
 The greeks are checked numerically against finite differences of the
@@ -240,6 +308,8 @@ Every setting is optional except the API key. Full list in `.env.example`.
 | `GAMMADESK_DIVIDEND_YIELD` | `0.012` | Annualised, for Black-Scholes. |
 | `GAMMADESK_DEMO` | `auto` | `auto` / `1` (always sample) / `0` (never). |
 | `GAMMADESK_REFRESH_TOKEN` | unset | Enables forced refresh on the API route. |
+| `CRON_SECRET` | unset | **Required for `/log`.** Bearer token for the cron endpoints. |
+| `BLOB_READ_WRITE_TOKEN` | auto | Injected by Vercel when a Blob store is attached. Durable storage for `/log`. |
 
 ---
 
@@ -264,9 +334,12 @@ src/
   app/
     layout.tsx              root shell, metadata, fonts
     page.tsx                the dashboard (server component)
+    log/page.tsx            the accuracy log
     error.tsx               failure state
     loading.tsx             skeleton
     api/positioning/route.ts  read-only JSON of the same snapshot
+    api/log/snapshot/route.ts morning cron: record the day's levels
+    api/log/settle/route.ts   after-close cron: judge finished sessions
   components/
     Header.tsx              wordmark + "data as of"
     Dashboard.tsx           tab state, explain toggle, reload
@@ -277,6 +350,12 @@ src/
     DataQuality.tsx         provenance and IV-source breakdown
     Footer.tsx              disclaimer
   lib/
+    log/
+      types.ts              log entry shape, scoring rules, running stats
+      store.ts              Vercel Blob in production, JSON file locally
+      settlement.ts         daily OHLC (Polygon preferred, Cboe fallback)
+      record.ts             snapshot + settle orchestration
+      auth.ts               cron bearer-token guard
     blackScholes.ts         pricing, greeks, implied vol
     exposure.ts             dealer convention, aggregation, gamma flip
     chainSource.ts          adapter contract, IV surface, window trimming
