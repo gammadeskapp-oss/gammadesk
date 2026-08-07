@@ -14,7 +14,16 @@ import type { DriftBlend } from './types';
 /** Largest annualised drift the blend can produce, in either direction. */
 export const MAX_ANNUAL_TILT = 0.08;
 
-export function buildDrift(bars: Bar[]): DriftBlend {
+export interface BreadthInput {
+  /** -1 to +1, from the tracked universe on /groups. */
+  score: number;
+  universe: number;
+  above50Pct: number;
+  at4wHighPct: number;
+  at4wLowPct: number;
+}
+
+export function buildDrift(bars: Bar[], breadth?: BreadthInput | null): DriftBlend {
   const closes = bars.map((b) => b.close);
   const price = closes[closes.length - 1];
 
@@ -52,6 +61,25 @@ export function buildDrift(bars: Bar[]): DriftBlend {
     detail: `${roc >= 0 ? '+' : ''}${(roc * 100).toFixed(1)}% over ${lookback} sessions`,
   });
 
+  // --- 3. Market breadth ----------------------------------------------------
+  const unavailable: string[] = [];
+
+  if (breadth && breadth.universe >= 8) {
+    components.push({
+      name: 'Market breadth',
+      score: Math.max(-1, Math.min(1, breadth.score)),
+      detail:
+        `${breadth.above50Pct.toFixed(0)}% of ${breadth.universe} tracked names above their 50-day · ` +
+        `${breadth.at4wHighPct.toFixed(0)}% at 4-week highs vs ${breadth.at4wLowPct.toFixed(0)}% at lows`,
+    });
+  } else {
+    unavailable.push(
+      breadth
+        ? `Market breadth — only ${breadth.universe} symbols resolved, too few to be meaningful.`
+        : 'Market breadth — no group snapshot stored yet, so it is left out rather than approximated. It appears here once /groups has been computed.',
+    );
+  }
+
   const score =
     components.reduce((acc, c) => acc + c.score, 0) / Math.max(1, components.length);
   const clamped = Math.max(-1, Math.min(1, score));
@@ -60,8 +88,6 @@ export function buildDrift(bars: Bar[]): DriftBlend {
     score: clamped,
     annualDrift: clamped * MAX_ANNUAL_TILT,
     components,
-    unavailable: [
-      'Market breadth (advance/decline, % above 200 DMA) — no free source available, so it is left out rather than approximated.',
-    ],
+    unavailable,
   };
 }

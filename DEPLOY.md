@@ -178,7 +178,13 @@ Vercel wipes the filesystem on every deploy, so the log has to live outside it.
 3. Make sure it is **connected to the gammadesk project** (Vercel usually does
    this automatically and adds a `BLOB_READ_WRITE_TOKEN` variable for you).
 
-This is on the free tier. The log is a single small JSON file.
+This is on the free tier. Two small JSON files live here: the accuracy log and
+the `/groups` snapshot.
+
+> Vercel's Hobby plan allows a limited number of cron jobs. If it refuses the
+> third one, drop `/api/groups/refresh` from `vercel.json` — `/groups` still
+> works, it just recomputes itself on the first visit of the day instead of
+> being refreshed ahead of time.
 
 ### Add a cron secret
 
@@ -201,10 +207,11 @@ only take effect on a new build.
 
 ### What happens next
 
-`vercel.json` already schedules both jobs:
+`vercel.json` already schedules all three jobs:
 
 - **14:45 UTC, weekdays** — record that day's flip level and magnet strikes
 - **21:30 UTC, weekdays** — pull the session's high and low, and score it
+- **22:00 UTC, weekdays** — recompute the `/groups` scores and breadth
 
 Both times were picked to sit inside the trading session in **both** summer and
 winter, since Vercel cron schedules are UTC and New York is not.

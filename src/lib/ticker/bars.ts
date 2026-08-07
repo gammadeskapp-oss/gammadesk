@@ -169,13 +169,42 @@ export interface BarSeries {
   name?: string;
 }
 
+export interface FetchBarsOptions {
+  /**
+   * Which upstream to try first.
+   *
+   * Polygon is the better source — supported and split-adjusted — but its
+   * stocks quota is 5 requests per minute even on a paid options plan
+   * (measured: a burst of 14 returned nine 429s). So anything that fans out
+   * over many symbols must pass `prefer: 'yahoo'`, which absorbed 20
+   * concurrent requests in under a second with no failures.
+   */
+  prefer?: 'polygon' | 'yahoo';
+  /** Company name costs an extra request when Polygon served the bars. */
+  withName?: boolean;
+}
+
 /** Roughly a year of daily bars, oldest first. */
-export async function fetchBars(symbol: string): Promise<BarSeries> {
-  const polygon = await fromPolygon(symbol).catch(() => null);
+export async function fetchBars(
+  symbol: string,
+  options: FetchBarsOptions = {},
+): Promise<BarSeries> {
+  const { prefer = 'polygon', withName = true } = options;
+
+  if (prefer === 'yahoo') {
+    const first = await fromYahoo(symbol).catch(() => null);
+    if (first && first.bars.length >= 60) {
+      return { bars: first.bars, source: 'yahoo', name: first.name };
+    }
+  }
+
+  const polygon =
+    prefer === 'polygon' ? await fromPolygon(symbol).catch(() => null) : null;
+
   if (polygon && polygon.length >= 60) {
     // Yahoo is consulted only for the company name, and only cheaply — a
     // failure here must not break an otherwise good result.
-    const meta = await fromYahoo(symbol).catch(() => null);
+    const meta = withName ? await fromYahoo(symbol).catch(() => null) : null;
     return { bars: polygon, source: 'polygon', name: meta?.name };
   }
 

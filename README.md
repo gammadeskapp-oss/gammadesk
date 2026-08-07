@@ -182,6 +182,63 @@ on screen stay complete. If that happens, the dashboard says so in its footer.
 
 ---
 
+## Group Dashboards (`/groups`)
+
+Model consensus per ticker group, market breadth, and a downturn-risk card.
+
+Groups live in [`src/lib/groups/definitions.ts`](src/lib/groups/definitions.ts)
+— **that is the file to edit to add your own**. Add an entry, redeploy, and the
+next refresh picks it up. Shipped with MAG7, SEMI and INDEX.
+
+Each group runs every member through the same nine-signal engine as `/ticker`.
+The headline label comes from the **underlying signal votes**, not the count of
+tickers, so a group of narrow 5/9 leans does not read as strongly as one of
+genuine 8/9 calls. Clicking a group expands to each ticker's own score — native
+`<details>`, so it works without JavaScript.
+
+### Rate limiting is the whole design
+
+Polygon allows **five stock requests per minute** even on a paid options plan.
+Measured: a concurrent burst of 14 daily-aggregate requests returned nine 429s.
+Twenty-odd symbols would take four minutes to fetch politely, which is not
+something a page view can do.
+
+So:
+
+- The batch runs against **Yahoo**, which absorbed all 20 concurrently in 764ms
+  with no failures. Polygon stays preferred for single-symbol `/ticker`
+  lookups, where five a minute is ample.
+- Bars are fetched **once per distinct symbol** and shared — NVDA is in both
+  MAG7 and SEMI but is fetched once.
+- Results are computed **once a day by cron** and written to storage. Every
+  page view reads the stored copy.
+- If no snapshot exists yet, the first request computes one behind the
+  single-flight cache and persists it. That is a once-per-day cost at worst,
+  never per view.
+
+### Market internals
+
+Breadth across every tracked symbol: share above the 20- and 50-day moving
+averages, and share sitting at 4-week highs versus lows. "At a 4-week extreme"
+means today's close **is** the extreme of the trailing 20 sessions, not merely
+near it.
+
+This is also the breadth input the forecast's drift blend was missing in Phase
+3 — `/forecast` reads it read-only and never triggers a group computation.
+
+A caveat the page states outright: twenty large, correlated names is not the
+whole market. It says something about megacap and semiconductor participation
+and very little about small caps.
+
+### Downturn risk
+
+Reuses the forecast's downside tail — the share of simulated paths trading 8%
+or more below spot — labelled CALM / CAUTIOUS / DEFENSIVE. Thresholds are
+judgement, not calibration, and the card repeats that the figure is an
+**underestimate** because volatility is held fixed.
+
+---
+
 ## Blended Magnets Forecast (`/forecast`)
 
 A Monte Carlo simulation of SPY's next 20 sessions, with paths bent by dealer
@@ -482,6 +539,7 @@ src/
     layout.tsx              root shell, metadata, fonts
     page.tsx                the dashboard (server component)
     forecast/page.tsx       blended-magnets simulation
+    groups/page.tsx         group consensus, breadth, downturn risk
     ticker/page.tsx         ticker search + consensus
     log/page.tsx            the accuracy log
     error.tsx               failure state
@@ -489,6 +547,7 @@ src/
     api/positioning/route.ts  read-only JSON of the same snapshot
     api/log/snapshot/route.ts morning cron: record the day's levels
     api/log/settle/route.ts   after-close cron: judge finished sessions
+    api/groups/refresh/route.ts daily cron: recompute group scores
   components/
     Header.tsx              wordmark + "data as of"
     Dashboard.tsx           tab state, explain toggle, reload
@@ -499,6 +558,12 @@ src/
     DataQuality.tsx         provenance and IV-source breakdown
     Footer.tsx              disclaimer
   lib/
+    groups/
+      definitions.ts        EDIT THIS to add your own groups
+      types.ts              group/ticker score shapes, breadth
+      compute.ts            batched scoring + market internals
+      index.ts              stored snapshot, cron refresh, breadth peek
+    jsonStore.ts            Vercel Blob in production, JSON file locally
     forecast/
       types.ts              magnet field, bands, odds
       magnets.ts            positioning -> normalised attractor/repeller field

@@ -8,6 +8,10 @@
     {
       "path": "/api/log/settle",
       "schedule": "30 21 * * 1-5"
+    },
+    {
+      "path": "/api/groups/refresh",
+      "schedule": "0 22 * * 1-5"
     }
   ]
 }

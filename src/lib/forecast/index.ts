@@ -2,6 +2,7 @@ import 'server-only';
 
 import { cached } from '../cache';
 import { config } from '../config';
+import { peekBreadth } from '../groups';
 import { getForecastPositioning } from '../positioning';
 import { marketToday } from '../time';
 import { fetchBars } from '../ticker/bars';
@@ -17,9 +18,11 @@ const CRASH_THRESHOLD = 0.08;
 const HISTORY_DAYS = 90;
 
 async function build(): Promise<ForecastResult> {
-  const [positioning, series] = await Promise.all([
+  const [positioning, series, breadthSnapshot] = await Promise.all([
     getForecastPositioning(),
     fetchBars(config.symbol),
+    // Read-only: never triggers a group computation from here.
+    peekBreadth(),
   ]);
 
   const bars = series.bars;
@@ -28,7 +31,19 @@ async function build(): Promise<ForecastResult> {
   // Volatility from the last 20 sessions of realised moves.
   const volatility = realisedVol(logReturns(closes).slice(-20));
 
-  const drift = buildDrift(bars);
+  const internals = breadthSnapshot?.internals;
+  const drift = buildDrift(
+    bars,
+    internals
+      ? {
+          score: internals.score,
+          universe: internals.universe,
+          above50Pct: internals.above50Pct,
+          at4wHighPct: internals.at4wHighPct,
+          at4wLowPct: internals.at4wLowPct,
+        }
+      : null,
+  );
   const magnets = buildMagnetField(positioning);
 
   const spot = positioning.spot;
