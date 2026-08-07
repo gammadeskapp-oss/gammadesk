@@ -1,6 +1,7 @@
-﻿import 'server-only';
+import 'server-only';
 
 import { cached, invalidate, ttlRemaining } from './cache';
+import type { ChainSnapshot } from './chainSource';
 import { ChainError } from './chainSource';
 import { config } from './config';
 import { fetchCboeSnapshot } from './cboe';
@@ -10,69 +11,98 @@ import { fetchPolygonSnapshot } from './polygon';
 import { formatAsOf } from './time';
 import type { DataSource, PositioningData } from './types';
 
-const CACHE_KEY = 'positioning';
-
-function cacheKey(): string {
-  return [
-    CACHE_KEY,
-    config.dataSource,
-    config.symbol,
-    config.expirationCount,
-    config.strikesEachSide,
-  ].join(':');
-}
-
 const SOURCE_LABELS: Record<DataSource, string> = {
   cboe: 'Cboe (delayed)',
   polygon: 'Polygon.io',
   sample: 'generated sample',
 };
 
-function sampleData(notes: string[]): PositioningData {
-  const now = new Date();
-  const { spot, quoteDate, contracts } = buildDemoChain(
-    config.strikesEachSide,
-    config.expirationCount,
-  );
+/** What one refresh produces, before it is narrowed to a display window. */
+interface RawSnapshot {
+  snapshot: ChainSnapshot;
+  source: DataSource;
+  notes: string[];
+}
 
-  return buildPositioning(contracts, {
-    symbol: config.symbol,
-    spot,
-    riskFreeRate: config.riskFreeRate,
-    dividendYield: config.dividendYield,
-    expirationCount: config.expirationCount,
-    strikesEachSide: config.strikesEachSide,
-    meta: {
+function snapshotCacheKey(): string {
+  return `chain:${config.dataSource}:${config.symbol}:${config.maxExpirations}:${config.strikesEachSide}`;
+}
+
+function viewCacheKey(expirationCount: number): string {
+  return `positioning:${config.dataSource}:${config.symbol}:${expirationCount}:${config.strikesEachSide}`;
+}
+
+/**
+ * One upstream refresh, shared by every view.
+ *
+ * The dashboard wants five expirations and the forecast wants twenty. Both are
+ * built from this single cached snapshot, so widening the forecast horizon
+ * costs nothing upstream.
+ */
+async function loadSnapshot(): Promise<RawSnapshot> {
+  const mode = config.demoMode;
+
+  const sample = (notes: string[]): RawSnapshot => {
+    const { spot, quoteDate, contracts } = buildDemoChain(
+      config.strikesEachSide,
+      config.maxExpirations,
+    );
+    return {
+      snapshot: { spot, quoteDate, contracts, requests: 0, notes: [] },
       source: 'sample',
-      sourceLabel: SOURCE_LABELS.sample,
-      asOfLabel: formatAsOf(now),
-      asOfIso: now.toISOString(),
-      quoteDateLabel: formatAsOf(quoteDate),
-      quoteDateIso: quoteDate.toISOString(),
-      cacheSeconds: config.cacheSeconds,
-      upstreamRequests: 0,
-      riskFreeRate: config.riskFreeRate,
-      dividendYield: config.dividendYield,
       notes: [
         'Showing generated sample data, not market data. Do not trade off these numbers.',
         ...notes,
       ],
-    },
-  });
+    };
+  };
+
+  if (mode === 'always') return sample([]);
+
+  if (config.dataSource === 'polygon' && !config.apiKey) {
+    if (mode === 'never') {
+      throw new ChainError(
+        'POLYGON_API_KEY is not set.',
+        0,
+        'Add it to .env.local locally, and to Project Settings -> Environment Variables on Vercel.',
+      );
+    }
+    return sample(['POLYGON_API_KEY is not set, so no live data could be fetched.']);
+  }
+
+  try {
+    const source = config.dataSource;
+    const snapshot =
+      source === 'polygon' ? await fetchPolygonSnapshot() : await fetchCboeSnapshot();
+    return { snapshot, source, notes: snapshot.notes };
+  } catch (error) {
+    if (mode === 'never') throw error;
+
+    const reason =
+      error instanceof ChainError
+        ? [error.message, error.hint].filter(Boolean).join(' ')
+        : error instanceof Error
+          ? error.message
+          : 'Unknown error.';
+
+    return sample([`Live data unavailable — ${reason}`]);
+  }
 }
 
-async function liveData(): Promise<PositioningData> {
+function cachedSnapshot(): Promise<RawSnapshot> {
+  return cached(snapshotCacheKey(), config.cacheSeconds, loadSnapshot);
+}
+
+function toPositioning(raw: RawSnapshot, expirationCount: number): PositioningData {
   const now = new Date();
-  const source = config.dataSource;
-  const snapshot =
-    source === 'polygon' ? await fetchPolygonSnapshot() : await fetchCboeSnapshot();
+  const { snapshot, source, notes } = raw;
 
   return buildPositioning(snapshot.contracts, {
     symbol: config.symbol,
     spot: snapshot.spot,
     riskFreeRate: config.riskFreeRate,
     dividendYield: config.dividendYield,
-    expirationCount: config.expirationCount,
+    expirationCount,
     strikesEachSide: config.strikesEachSide,
     meta: {
       source,
@@ -85,46 +115,13 @@ async function liveData(): Promise<PositioningData> {
       upstreamRequests: snapshot.requests,
       riskFreeRate: config.riskFreeRate,
       dividendYield: config.dividendYield,
-      notes: snapshot.notes,
+      notes,
     },
   });
 }
 
-async function produce(): Promise<PositioningData> {
-  const mode = config.demoMode;
-
-  if (mode === 'always') return sampleData([]);
-
-  // Only the Polygon adapter needs a key; Cboe is keyless.
-  if (config.dataSource === 'polygon' && !config.apiKey) {
-    if (mode === 'never') {
-      throw new ChainError(
-        'POLYGON_API_KEY is not set.',
-        0,
-        'Add it to .env.local locally, and to Project Settings -> Environment Variables on Vercel.',
-      );
-    }
-    return sampleData(['POLYGON_API_KEY is not set, so no live data could be fetched.']);
-  }
-
-  try {
-    return await liveData();
-  } catch (error) {
-    if (mode === 'never') throw error;
-
-    const reason =
-      error instanceof ChainError
-        ? [error.message, error.hint].filter(Boolean).join(' ')
-        : error instanceof Error
-          ? error.message
-          : 'Unknown error.';
-
-    return sampleData([`Live data unavailable — ${reason}`]);
-  }
-}
-
 /**
- * The dashboard's single data entry point.
+ * The dashboard's data entry point.
  *
  * Every caller shares one cached result for `GAMMADESK_CACHE_SECONDS`
  * (5 minutes on Cboe, 30 on Polygon), and concurrent callers share one
@@ -133,12 +130,27 @@ async function produce(): Promise<PositioningData> {
 export async function getPositioning(
   options: { force?: boolean } = {},
 ): Promise<PositioningData> {
-  const key = cacheKey();
-  if (options.force) invalidate(key);
-  return cached(key, config.cacheSeconds, produce);
+  if (options.force) {
+    invalidate(snapshotCacheKey());
+    invalidate(viewCacheKey(config.expirationCount));
+  }
+  return cached(viewCacheKey(config.expirationCount), config.cacheSeconds, async () =>
+    toPositioning(await cachedSnapshot(), config.expirationCount),
+  );
+}
+
+/**
+ * The same book, widened to enough expirations to cover the forecast horizon.
+ * Reuses the cached snapshot, so this costs no extra upstream request.
+ */
+export async function getForecastPositioning(): Promise<PositioningData> {
+  const count = config.forecastExpirations;
+  return cached(viewCacheKey(count), config.cacheSeconds, async () =>
+    toPositioning(await cachedSnapshot(), count),
+  );
 }
 
 /** Seconds until the cached snapshot goes stale — shown next to "data as of". */
 export function secondsUntilRefresh(): number {
-  return Math.ceil(ttlRemaining(cacheKey()) / 1000);
+  return Math.ceil(ttlRemaining(viewCacheKey(config.expirationCount)) / 1000);
 }

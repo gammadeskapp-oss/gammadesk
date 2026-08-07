@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "verify:greeks": "node scripts/verify-greeks.js",
     "verify:indicators": "node scripts/verify-indicators.js",
-    "verify": "npm run verify:greeks && npm run verify:indicators"
+    "verify:simulation": "node scripts/verify-simulation.js",
+    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation"
   },
   "dependencies": {
     "@vercel/blob": "^2.7.0",

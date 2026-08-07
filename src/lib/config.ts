@@ -66,6 +66,32 @@ export const config = {
   get expirationCount(): number {
     return Math.min(12, Math.max(1, num(process.env.GAMMADESK_EXPIRATIONS, 5)));
   },
+  /**
+   * Expirations the forecast draws magnets from. The dashboard shows five,
+   * spanning about a week; a 20-session simulation needs enough expiries to
+   * cover the whole horizon or the paths run unshaped for most of it.
+   */
+  get forecastExpirations(): number {
+    return Math.min(40, Math.max(5, num(process.env.GAMMADESK_FORECAST_EXPIRATIONS, 20)));
+  },
+  /** Trading days simulated forward. */
+  get forecastHorizon(): number {
+    return Math.min(60, Math.max(5, num(process.env.GAMMADESK_FORECAST_DAYS, 20)));
+  },
+  /** Monte Carlo paths. */
+  get forecastPaths(): number {
+    return Math.min(20_000, Math.max(200, num(process.env.GAMMADESK_FORECAST_PATHS, 1000)));
+  },
+  get forecastCacheSeconds(): number {
+    return Math.max(300, num(process.env.GAMMADESK_FORECAST_CACHE_SECONDS, 1800));
+  },
+  /**
+   * Widest expiration set any consumer needs. The chain is trimmed to this
+   * once, so the dashboard and the forecast share a single upstream fetch.
+   */
+  get maxExpirations(): number {
+    return Math.max(this.expirationCount, this.forecastExpirations);
+  },
   get strikesEachSide(): number {
     return Math.min(80, Math.max(5, num(process.env.GAMMADESK_STRIKES_EACH_SIDE, 30)));
   },

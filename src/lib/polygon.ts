@@ -231,7 +231,7 @@ export async function fetchPolygonSnapshot(): Promise<ChainSnapshot> {
 
   const windowed = trimToWindow(quotes, {
     spot,
-    expirationCount: config.expirationCount,
+    expirationCount: config.maxExpirations,
     strikesEachSide: config.strikesEachSide,
     now,
   });

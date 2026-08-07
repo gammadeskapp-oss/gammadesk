@@ -221,7 +221,9 @@ export async function fetchCboeSnapshot(): Promise<ChainSnapshot> {
 
   const windowed = trimToWindow(quotes, {
     spot,
-    expirationCount: config.expirationCount,
+    // Trim to the widest expiration set any consumer needs, so the dashboard
+    // and the forecast can be built from one fetch.
+    expirationCount: config.maxExpirations,
     strikesEachSide: config.strikesEachSide,
     now,
   });

@@ -182,6 +182,67 @@ on screen stay complete. If that happens, the dashboard says so in its footer.
 
 ---
 
+## Blended Magnets Forecast (`/forecast`)
+
+A Monte Carlo simulation of SPY's next 20 sessions, with paths bent by dealer
+positioning.
+
+1. **Baseline.** Log-normal daily steps from spot, at the 20-session realised
+   volatility. Drift comes from a small signal blend — price against its 50-
+   and 200-day averages, plus 20-day momentum — capped at **±8% annualised**.
+   That cap is deliberate: a moving-average crossover is not a forecasting
+   edge, and the tilt should be a fraction of one day's noise over the horizon.
+2. **Magnet bending.** Each simulated day, the step is nudged toward attractor
+   strikes and away from repellers, using the blended exposure field of
+   whichever expiration is still live at that point. Blend is
+   **0.6 gamma / 0.3 vanna / 0.1 charm**, and the nudge is capped at
+   **0.3 sigma per day**.
+3. **Outputs.** Median path, 68% and 95% bands, odds of closing higher at
+   3/10/20 days, and the share of paths that trade 8% or more below spot at
+   any point.
+
+### How the bend works
+
+Each strike contributes `w · u · exp(-u²/2)`, where `u` is the distance in
+kernel widths and `w` is its normalised blended weight. That is the gradient of
+a Gaussian well: it pulls toward the strike when the weight is positive, pushes
+away when negative, peaks about one width out, and decays to nothing further
+away — so a distant strike cannot reach across the board and drag a path. The
+sum is normalised into ±1 and scaled to the 0.3-sigma cap.
+
+The three exposures are normalised **within each expiration** before blending.
+Gamma, vanna and charm are quoted in different units and differ by orders of
+magnitude, so without that step the 0.6/0.3/0.1 weights would be meaningless —
+whichever metric happened to be largest in raw dollars would swamp the others.
+
+### One fetch, two views
+
+The dashboard shows five expirations; the forecast needs about twenty to cover
+a 20-session horizon. Rather than fetching twice, the chain is trimmed once to
+the widest set any consumer needs, cached, and narrowed per view. Adding the
+forecast cost **zero** extra upstream requests.
+
+### Honesty
+
+The page carries a prominent box stating that these are modelled probabilities
+from backward-looking signals, not calibrated predictions, and that real closes
+will land outside the bands regularly — more often than the nominal 5%, because
+volatility is held constant and returns are assumed log-normal. It says
+explicitly that the crash figure is therefore an **underestimate**, that
+positioning is frozen at the snapshot while real dealers re-hedge continuously,
+that the magnet weights are a reasonable guess rather than a fitted result, and
+that the model knows nothing about earnings, data or news.
+
+That is not boilerplate. A cone drawn this confidently invites more trust than
+it has earned, and the [Accuracy Log](#the-accuracy-log-log) exists precisely
+because claims like these should be scored rather than believed.
+
+The simulation is seeded from the quote timestamp, so the same snapshot always
+produces the same cone — a forecast that reshuffled on every refresh would look
+like new information when nothing had happened.
+
+---
+
 ## Ticker Consensus (`/ticker`)
 
 Search any US ticker and get nine technical signals, each voting bullish or
@@ -340,6 +401,15 @@ against a hand-worked calculation and an equivalent alpha=1/n EMA formulation,
 the MACD and histogram identities plus signal-line alignment, and regression
 slope and R² on perfect, flat, falling and noisy series.
 
+The simulation harness (`npm run verify:simulation`) checks the Gaussian
+generator's mean, standard deviation, skew, kurtosis and tail masses; that the
+magnet bend points the right way, vanishes at the strike and at distance, and
+never breaches its 0.3-sigma cap; that a zero-magnet run reproduces log-normal
+theory to within a fraction of a percent (median, and the p16/p50/p84/p97.5
+ratios); that percentiles stay ordered and the cone only widens; and that an
+attractor at spot compresses the 68% band while a repeller widens it — without
+ever collapsing the distribution, which is the property the cap protects.
+
 > Two real findings from these harnesses:
 >
 > The usual Abramowitz & Stegun 26.2.17 normal CDF (absolute error ~7.5e-8) is
@@ -375,6 +445,10 @@ Every setting is optional except the API key. Full list in `.env.example`.
 | `GAMMADESK_SYMBOL` | `SPY` | Underlying to analyse. |
 | `GAMMADESK_CACHE_SECONDS` | `300` cboe / `1800` polygon | Chain refresh interval. |
 | `GAMMADESK_TICKER_CACHE_SECONDS` | `3600` | How long a `/ticker` consensus is reused. |
+| `GAMMADESK_FORECAST_EXPIRATIONS` | `20` | Expirations the forecast draws magnets from. |
+| `GAMMADESK_FORECAST_DAYS` | `20` | Trading days simulated forward. |
+| `GAMMADESK_FORECAST_PATHS` | `1000` | Monte Carlo paths. |
+| `GAMMADESK_FORECAST_CACHE_SECONDS` | `1800` | How long a forecast is reused. |
 | `GAMMADESK_EXPIRATIONS` | `5` | Expiration columns. |
 | `GAMMADESK_STRIKES_EACH_SIDE` | `30` | Strike rows above and below spot. |
 | `GAMMADESK_RISK_FREE_RATE` | `0.043` | Annualised, for Black-Scholes. |
@@ -407,6 +481,7 @@ src/
   app/
     layout.tsx              root shell, metadata, fonts
     page.tsx                the dashboard (server component)
+    forecast/page.tsx       blended-magnets simulation
     ticker/page.tsx         ticker search + consensus
     log/page.tsx            the accuracy log
     error.tsx               failure state
@@ -424,6 +499,12 @@ src/
     DataQuality.tsx         provenance and IV-source breakdown
     Footer.tsx              disclaimer
   lib/
+    forecast/
+      types.ts              magnet field, bands, odds
+      magnets.ts            positioning -> normalised attractor/repeller field
+      drift.ts              signal blend -> small annualised tilt
+      simulate.ts           seeded Monte Carlo with capped magnet bending
+      index.ts              orchestration + cache
     ticker/
       types.ts              signal/vote shapes, consensus thresholds
       indicators.ts         SMA, EMA, RSI, MACD, regression, realised vol
@@ -454,6 +535,7 @@ src/
 scripts/
   verify-greeks.js          numerical validation of the option greeks
   verify-indicators.js      numerical validation of the technical indicators
+  verify-simulation.js      statistical validation of the Monte Carlo
 ```
 
 ---
