@@ -1,0 +1,123 @@
+import type { Metadata } from 'next';
+import { ConsensusCard } from '@/components/ConsensusCard';
+import { Footer } from '@/components/Footer';
+import { Header } from '@/components/Header';
+import { LiquidityCard } from '@/components/LiquidityCard';
+import { SignalTable } from '@/components/SignalTable';
+import { TickerSearch } from '@/components/TickerSearch';
+import { config } from '@/lib/config';
+import { analyzeTicker, TickerError } from '@/lib/ticker/analyze';
+import type { TickerAnalysis } from '@/lib/ticker/types';
+
+export const metadata: Metadata = {
+  title: 'Ticker Consensus',
+  description:
+    'Nine technical signals vote bullish or bearish on any US ticker, with a liquidity rating.',
+};
+
+interface PageProps {
+  searchParams: Promise<{ symbol?: string }>;
+}
+
+function Panel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="panel px-4 py-8 text-center text-xs text-term-dim">
+      {children}
+    </div>
+  );
+}
+
+export default async function TickerPage({ searchParams }: PageProps) {
+  const { symbol } = await searchParams;
+  const query = symbol?.trim() ?? '';
+
+  let data: TickerAnalysis | null = null;
+  let error: { message: string; hint?: string } | null = null;
+
+  if (query) {
+    try {
+      data = await analyzeTicker(query);
+    } catch (e) {
+      error =
+        e instanceof TickerError
+          ? { message: e.message, hint: e.hint }
+          : { message: 'Could not analyse that ticker.' };
+    }
+  }
+
+  return (
+    <>
+      <Header symbol={data?.symbol ?? config.symbol} active="ticker" />
+
+      <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+            Ticker Consensus
+          </h1>
+          {data && (
+            <p className="text-2xs text-term-faint">
+              {data.barsUsed} daily bars · {data.source} · close {data.asOfDate}
+            </p>
+          )}
+        </div>
+
+        <TickerSearch initial={data?.symbol ?? query} />
+
+        {error && (
+          <div className="panel border-l-2 border-l-bear/60 px-4 py-4">
+            <p className="text-xs font-bold text-bear">{error.message}</p>
+            {error.hint && (
+              <p className="mt-1.5 text-2xs text-term-dim">{error.hint}</p>
+            )}
+          </div>
+        )}
+
+        {!query && !error && (
+          <Panel>
+            <p className="text-term-text">Enter a US ticker to see the consensus.</p>
+            <p className="mx-auto mt-2 max-w-xl leading-relaxed">
+              Nine independent technical signals each vote bullish or bearish on
+              about a year of daily price history, alongside a rating of how
+              easily the name can actually be traded.
+            </p>
+          </Panel>
+        )}
+
+        {data && (
+          <>
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+              <ConsensusCard data={data} />
+              <LiquidityCard liquidity={data.liquidity} />
+            </div>
+
+            <SignalTable signals={data.signals} />
+
+            <div className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
+              <p>
+                <span className="text-term-dim">How to read this. </span>
+                These are nine ways of describing the same price history, so
+                they are not independent opinions — in a strong trend most of
+                them will agree almost by construction. The count is a summary
+                of what the chart already looks like, not a forecast, and none
+                of it accounts for earnings, news or valuation.
+              </p>
+              <p className="mt-2">
+                <span className="text-term-dim">On the volume signal. </span>
+                Rising volume is counted as bullish, per the standard reading,
+                but volume confirms conviction rather than direction — heavy
+                volume into a decline is not a positive.
+              </p>
+              <p className="mt-2">
+                Prices are end-of-day and delayed. Cached for{' '}
+                {Math.round(data.cachedForSeconds / 60)} minutes, so a repeat
+                search costs nothing upstream.
+              </p>
+            </div>
+          </>
+        )}
+      </main>
+
+      <Footer />
+    </>
+  );
+}

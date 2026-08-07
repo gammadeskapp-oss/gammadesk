@@ -24,6 +24,20 @@ const config: Config = {
           soft: '#9d1e6b',
         },
         flip: '#facc15',
+        /**
+         * Directional votes use their own green/red family, deliberately kept
+         * apart from the cyan/magenta used for dealer exposure. The two mean
+         * different things — bullish/bearish versus positive/negative gamma —
+         * and sharing a palette would invite conflating them.
+         */
+        bull: {
+          DEFAULT: '#34d399',
+          dim: '#065f46',
+        },
+        bear: {
+          DEFAULT: '#f43f5e',
+          dim: '#7f1d3a',
+        },
       },
       fontFamily: {
         mono: [

@@ -12,7 +12,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "verify:greeks": "node scripts/verify-greeks.js"
+    "verify:greeks": "node scripts/verify-greeks.js",
+    "verify:indicators": "node scripts/verify-indicators.js",
+    "verify": "npm run verify:greeks && npm run verify:indicators"
   },
   "dependencies": {
     "@vercel/blob": "^2.7.0",

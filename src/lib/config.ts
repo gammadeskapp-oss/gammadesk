@@ -56,6 +56,13 @@ export const config = {
     const fallback = sourceChoice() === 'polygon' ? 1800 : 300;
     return Math.max(floor, num(process.env.GAMMADESK_CACHE_SECONDS, fallback));
   },
+  /**
+   * How long a ticker consensus is reused. Daily bars only change once a
+   * session, so an hour is generous and keeps repeated searches free.
+   */
+  get tickerCacheSeconds(): number {
+    return Math.max(60, num(process.env.GAMMADESK_TICKER_CACHE_SECONDS, 3600));
+  },
   get expirationCount(): number {
     return Math.min(12, Math.max(1, num(process.env.GAMMADESK_EXPIRATIONS, 5)));
   },

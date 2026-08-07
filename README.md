@@ -182,6 +182,58 @@ on screen stay complete. If that happens, the dashboard says so in its footer.
 
 ---
 
+## Ticker Consensus (`/ticker`)
+
+Search any US ticker and get nine technical signals, each voting bullish or
+bearish on roughly a year of daily bars, plus a tradability rating.
+
+| # | Signal | Votes bullish when |
+|---|--------|--------------------|
+| 1 | Price trend | Price is above its 50- and 200-day averages (the 200-day breaks ties) |
+| 2 | Momentum | 20-session rate of change is positive |
+| 3 | Trend quality | 60-session log-price regression slopes up; R² reports how orderly |
+| 4 | Volatility envelope | 20-day realised vol sits in the calmer half of its 6-month range |
+| 5 | RSI regime | 14-day Wilder RSI is above 50 |
+| 6 | MACD | MACD line is above its signal line (12/26/9) |
+| 7 | Higher highs / lows | Last 10 sessions beat the prior 10 on both high and low |
+| 8 | Volume trend | 20-session average volume exceeds the prior 20 |
+| 9 | 52-week range | Price sits in the upper half of its 52-week range |
+
+**There is no neutral vote.** A signal on the fence still has to pick a side, so
+a 5/4 split means *no real edge*, not "slightly bullish". The consensus label
+says LEAN rather than making a call whenever the split is near even, and the
+card spells that out.
+
+These are nine descriptions of the same price history, not nine independent
+opinions — in a strong trend most will agree almost by construction. The page
+says so, along with the caveat that rising volume is counted bullish per the
+standard reading even though volume confirms conviction rather than direction.
+
+### Data
+
+Daily bars come from Polygon's aggregates endpoint, with Yahoo's chart endpoint
+as a fallback for rate limits or uncovered symbols. Stooq was evaluated and
+rejected: it now answers with a JavaScript bot challenge rather than CSV.
+
+Symbols arrive from a user-controlled search box and are interpolated into
+upstream URLs, so they are validated against a strict allow-list
+(`^[A-Z][A-Z0-9]{0,6}([.-][A-Z]{1,2})?$`) rather than escaped. Anything else is
+rejected before a request is made.
+
+Results are cached per symbol for `GAMMADESK_TICKER_CACHE_SECONDS` (an hour by
+default) — daily bars only change once a session.
+
+### Liquidity
+
+A separate card rates tradability from 20-session average dollar volume, with
+listed options activity from the Cboe feed as secondary confirmation. An active
+chain can lift a borderline name; thin options never drag down a genuinely
+liquid stock, because the shares are what you trade.
+
+Thresholds: HIGH at $250M+ average daily dollar volume, MEDIUM at $25M+.
+
+---
+
 ## The Accuracy Log (`/log`)
 
 A running, self-scoring record of whether the dashboard's levels actually meant
@@ -259,8 +311,16 @@ Black-Scholes price function:
 npm run verify:greeks
 ```
 
-This runs 2,600+ assertions over 216 combinations of strike, expiry and
-volatility, covering:
+The technical indicators have their own harness:
+
+```bash
+npm run verify:indicators
+```
+
+Both together: `npm run verify`.
+
+The greeks harness runs 2,600+ assertions over 216 combinations of strike,
+expiry and volatility, covering:
 
 - delta, gamma, vega, vanna and charm against 4th-order finite-difference
   stencils of the price
@@ -275,10 +335,22 @@ zero dependencies — it re-implements the formulas rather than importing them, 
 that it acts as an independent check rather than testing a function against
 itself. If you change `src/lib/blackScholes.ts`, change the script to match.
 
-> One real finding from this harness: the usual Abramowitz & Stegun 26.2.17
-> normal CDF (absolute error ~7.5e-8) is fine at the money but destroys the
-> greeks 30 strikes out, where option values are far smaller than that error.
-> `src/lib/blackScholes.ts` uses Hart's rational approximation instead.
+The indicator harness checks SMA/EMA against independent recursions, RSI
+against a hand-worked calculation and an equivalent alpha=1/n EMA formulation,
+the MACD and histogram identities plus signal-line alignment, and regression
+slope and R² on perfect, flat, falling and noisy series.
+
+> Two real findings from these harnesses:
+>
+> The usual Abramowitz & Stegun 26.2.17 normal CDF (absolute error ~7.5e-8) is
+> fine at the money but destroys the greeks 30 strikes out, where option values
+> are far smaller than that error. `src/lib/blackScholes.ts` uses Hart's
+> rational approximation instead.
+>
+> The RSI value widely quoted for Wilder's canonical dataset (70.53) comes from
+> rounding the intermediate averages before dividing. Worked through unrounded,
+> the correct first value is 70.4641350…, which is what this implementation
+> produces.
 
 ---
 
@@ -301,7 +373,8 @@ Every setting is optional except the API key. Full list in `.env.example`.
 | `GAMMADESK_DATA_SOURCE` | `cboe` | `cboe` (free, keyless) or `polygon` (paid plan). |
 | `POLYGON_API_KEY` | — | Only needed when the source is `polygon`. Server-side only. |
 | `GAMMADESK_SYMBOL` | `SPY` | Underlying to analyse. |
-| `GAMMADESK_CACHE_SECONDS` | `1800` | Refresh interval. Floored at 300. |
+| `GAMMADESK_CACHE_SECONDS` | `300` cboe / `1800` polygon | Chain refresh interval. |
+| `GAMMADESK_TICKER_CACHE_SECONDS` | `3600` | How long a `/ticker` consensus is reused. |
 | `GAMMADESK_EXPIRATIONS` | `5` | Expiration columns. |
 | `GAMMADESK_STRIKES_EACH_SIDE` | `30` | Strike rows above and below spot. |
 | `GAMMADESK_RISK_FREE_RATE` | `0.043` | Annualised, for Black-Scholes. |
@@ -334,6 +407,7 @@ src/
   app/
     layout.tsx              root shell, metadata, fonts
     page.tsx                the dashboard (server component)
+    ticker/page.tsx         ticker search + consensus
     log/page.tsx            the accuracy log
     error.tsx               failure state
     loading.tsx             skeleton
@@ -350,6 +424,13 @@ src/
     DataQuality.tsx         provenance and IV-source breakdown
     Footer.tsx              disclaimer
   lib/
+    ticker/
+      types.ts              signal/vote shapes, consensus thresholds
+      indicators.ts         SMA, EMA, RSI, MACD, regression, realised vol
+      signals.ts            the nine votes and their plain-English reasons
+      bars.ts               daily bars (Polygon preferred, Yahoo fallback)
+      liquidity.ts          dollar-volume and options-activity rating
+      analyze.ts            orchestration + per-symbol cache
     log/
       types.ts              log entry shape, scoring rules, running stats
       store.ts              Vercel Blob in production, JSON file locally
@@ -371,7 +452,8 @@ src/
     format.ts               display formatting
     config.ts               environment configuration
 scripts/
-  verify-greeks.js          numerical validation harness
+  verify-greeks.js          numerical validation of the option greeks
+  verify-indicators.js      numerical validation of the technical indicators
 ```
 
 ---

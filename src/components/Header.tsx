@@ -6,11 +6,12 @@ interface HeaderProps {
   /** Omitted on pages that have no upstream snapshot of their own. */
   asOfLabel?: string;
   source?: DataSource;
-  active: 'dashboard' | 'log';
+  active: 'dashboard' | 'ticker' | 'log';
 }
 
 const NAV = [
   { key: 'dashboard', href: '/', label: 'Positioning' },
+  { key: 'ticker', href: '/ticker', label: 'Ticker' },
   { key: 'log', href: '/log', label: 'Accuracy Log' },
 ] as const;
 
