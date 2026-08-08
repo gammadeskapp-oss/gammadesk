@@ -12,6 +12,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "icons": "node scripts/generate-icons.mjs",
     "verify:greeks": "node scripts/verify-greeks.js",
     "verify:indicators": "node scripts/verify-indicators.js",
     "verify:simulation": "node scripts/verify-simulation.js",

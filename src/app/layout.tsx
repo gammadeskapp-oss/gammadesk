@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Metadata, Viewport } from 'next';
+import { ServiceWorker } from '@/components/ServiceWorker';
 import { Sidebar } from '@/components/Sidebar';
 import './globals.css';
 
@@ -26,6 +27,34 @@ export const metadata: Metadata = {
     type: 'website',
   },
   robots: { index: true, follow: true },
+  /**
+   * iOS does not read the web app manifest for home-screen installs. These
+   * meta tags and the apple-touch-icon below are what make "Add to Home
+   * Screen" open standalone on iPhone Safari.
+   */
+  appleWebApp: {
+    capable: true,
+    title: 'GammaDesk',
+    statusBarStyle: 'black-translucent',
+  },
+  other: {
+    /*
+     * Next 16 renders `appleWebApp.capable` as the modern
+     * `mobile-web-app-capable` only. iOS Safari has not adopted that name and
+     * still reads the apple-prefixed tag to decide whether a home-screen
+     * launch opens standalone — without it, "Add to Home Screen" on iPhone
+     * opens in a browser chrome view instead of full screen. Verified missing
+     * from the rendered head before adding this.
+     */
+    'apple-mobile-web-app-capable': 'yes',
+  },
+  icons: {
+    icon: [
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
 };
 
 export const viewport: Viewport = {
@@ -44,6 +73,7 @@ export default function RootLayout({
           <Sidebar />
           <div className="flex min-w-0 flex-1 flex-col">{children}</div>
         </div>
+        <ServiceWorker />
       </body>
     </html>
   );

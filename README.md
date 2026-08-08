@@ -182,6 +182,36 @@ on screen stay complete. If that happens, the dashboard says so in its footer.
 
 ---
 
+## Installable app (PWA)
+
+GammaDesk installs to a home screen and opens standalone on Android Chrome and
+iPhone Safari. Icons are generated from the gamma mark by `npm run icons`.
+
+### The service worker caches the shell, never the data
+
+Every page here is server-rendered with live market data baked into the HTML,
+so caching a page response would mean showing yesterday's gamma regime under
+today's timestamp — worse than showing nothing. The worker therefore:
+
+- **never touches `/api/*`** — those requests pass straight through
+- **never caches HTML** — navigations are always network, with an offline page
+  as the only fallback
+- **caches `/_next/static/*` only**, which is content-hashed and immutable
+
+Verified against a production build: after the worker takes control, 9 static
+chunks are cached while `API_CACHED` and `HTML_PAGE_CACHED` are both false.
+
+### iOS needs a tag Next does not emit
+
+Next 16 renders `appleWebApp.capable` as the modern `mobile-web-app-capable`
+only. iOS Safari has not adopted that name and still reads
+`apple-mobile-web-app-capable` to decide whether a home-screen launch opens
+standalone. Without it, "Add to Home Screen" on iPhone opens in a browser
+chrome view rather than full screen — so it is added explicitly via
+`metadata.other`.
+
+---
+
 ## Daily Digest (`/digest` + Discord)
 
 A fifteen-second plain-English summary, generated once a day after the close:

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#05070b" />
+    <title>Offline · GammaDesk</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: #05070b;
+        color: #c8d6e5;
+        font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      main {
+        display: flex;
+        min-height: 100vh;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+      }
+      .card {
+        max-width: 30rem;
+        border: 1px solid #1a2230;
+        border-left: 2px solid rgba(34, 211, 238, 0.5);
+        background: rgba(10, 14, 21, 0.8);
+        padding: 1.75rem;
+      }
+      .mark { color: #22d3ee; font-size: 1.75rem; line-height: 1; }
+      h1 {
+        margin: 0.75rem 0 0;
+        font-size: 0.875rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+      p { margin: 0.75rem 0 0; font-size: 0.8125rem; line-height: 1.65; color: #7b8b9f; }
+      button {
+        margin-top: 1.25rem;
+        border: 1px solid #26303f;
+        background: #0f141d;
+        color: #c8d6e5;
+        font: inherit;
+        font-size: 0.75rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        padding: 0.6rem 1.1rem;
+        cursor: pointer;
+      }
+      button:hover { border-color: #3a4759; }
+      .fine { margin-top: 1.25rem; font-size: 0.6875rem; color: #4d5a6b; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="card">
+        <div class="mark">γ</div>
+        <h1>No connection</h1>
+        <p>
+          GammaDesk needs the network. Every figure it shows — dealer
+          positioning, the forecast, the strength ranking — is generated from
+          live market data on the server, so there is nothing meaningful to
+          show from a cache.
+        </p>
+        <p>
+          Showing you a stale gamma regime under today's date would be worse
+          than showing you nothing, so the app does not keep one.
+        </p>
+        <button type="button" onclick="location.reload()">Try again</button>
+        <p class="fine">
+          For informational and educational purposes only. Not investment advice.
+        </p>
+      </div>
+    </main>
+  </body>
+</html>
