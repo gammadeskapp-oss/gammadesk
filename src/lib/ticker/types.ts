@@ -52,6 +52,27 @@ export interface Liquidity {
   notes: string[];
 }
 
+/** Chart-ready series, shaped for lightweight-charts. */
+export interface ChartPoint {
+  /** `YYYY-MM-DD`, which lightweight-charts accepts as a business day. */
+  time: string;
+  value: number;
+}
+
+export interface ChartCandle {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+export interface TickerChartData {
+  candles: ChartCandle[];
+  ma50: ChartPoint[];
+  ma200: ChartPoint[];
+}
+
 export interface TickerAnalysis {
   symbol: string;
   name?: string;
@@ -66,6 +87,7 @@ export interface TickerAnalysis {
   signals: Signal[];
   consensus: Consensus;
   liquidity: Liquidity;
+  chart: TickerChartData;
   /** 52-week extremes, shown alongside the price. */
   high52: number;
   low52: number;

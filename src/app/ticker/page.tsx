@@ -4,6 +4,7 @@ import { Footer } from '@/components/Footer';
 import { Header } from '@/components/Header';
 import { LiquidityCard } from '@/components/LiquidityCard';
 import { SignalTable } from '@/components/SignalTable';
+import { TickerChart } from '@/components/TickerChart';
 import { TickerSearch } from '@/components/TickerSearch';
 import { config } from '@/lib/config';
 import { analyzeTicker, TickerError } from '@/lib/ticker/analyze';
@@ -85,6 +86,14 @@ export default async function TickerPage({ searchParams }: PageProps) {
 
         {data && (
           <>
+            {/* Price first, score second — the chart is the context the
+                consensus is meant to be read against. */}
+            <TickerChart
+              symbol={data.symbol}
+              data={data.chart}
+              currentPrice={data.price}
+            />
+
             <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
               <ConsensusCard data={data} />
               <LiquidityCard liquidity={data.liquidity} />
