@@ -224,12 +224,35 @@ only take effect on a new build.
 
 ### What happens next
 
-`vercel.json` already schedules all three jobs:
+`vercel.json` schedules the jobs:
 
-- **14:45 UTC, weekdays** — record that day's flip level and magnet strikes
-- **21:30 UTC, weekdays** — pull the session's high and low, and score it
-- **22:00 UTC, weekdays** — recompute the `/groups` scores and breadth
-- **22:20 UTC, weekdays** — build the daily digest and post it to Discord
+| Job | UTC | EDT (summer) | EST (winter) |
+|-----|-----|--------------|--------------|
+| `/api/log/snapshot` — record the day's flip level and magnets | 14:45 | 10:45 | 09:45 |
+| `/api/log/settle` — score it against the session's high and low | 21:15 | 17:15 | **16:15** |
+| `/api/flow/refresh` — rescan chains for unusual activity | 21:40 | 17:40 | 16:40 |
+| `/api/groups/refresh` — recompute group scores and breadth | 22:00 | 18:00 | 17:00 |
+| `/api/digest` — build the digest and post it to Discord | 22:20 | 18:20 | 17:20 |
+
+### Why the log needs two jobs, not one
+
+It is tempting to do the whole thing once after the close. That would break it.
+
+The **snapshot** records a prediction — where the gamma flip and the magnet
+strikes are — and it has to be taken *while the session is still running*.
+Recording it after the close and then scoring it against the day that just
+finished would be scoring a forecast made with knowledge of the answer. The
+number would look excellent and mean nothing.
+
+So: snapshot in the morning, settle after the close.
+
+### Why the times are UTC and drift
+
+Vercel cron schedules are UTC, and New York is not. A single fixed UTC time
+cannot be "4:15pm ET" all year — it lands an hour earlier in summer. The settle
+job is set to **21:15 UTC**, which is 4:15pm ET in winter and 5:15pm ET in
+summer. Both are safely after the 4pm close, which is the part that actually
+matters. Anything earlier would fire *before* the close during winter.
 
 Both times were picked to sit inside the trading session in **both** summer and
 winter, since Vercel cron schedules are UTC and New York is not.
