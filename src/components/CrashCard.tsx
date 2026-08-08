@@ -1,20 +1,6 @@
 import { formatPrice } from '@/lib/format';
+import { riskLabel, type RiskLabel } from '@/lib/forecast/risk';
 import type { ForecastResult } from '@/lib/forecast/types';
-
-export type RiskLabel = 'CALM' | 'CAUTIOUS' | 'DEFENSIVE';
-
-/**
- * Turn the simulation's downside tail into a plain-English posture.
- *
- * The thresholds are judgement, not calibration. They are set where the
- * simulated odds of an 8% drawdown stop looking like ordinary noise and start
- * looking like a market with a fat left tail.
- */
-export function riskLabel(crashPct: number): RiskLabel {
-  if (crashPct >= 10) return 'DEFENSIVE';
-  if (crashPct >= 4) return 'CAUTIOUS';
-  return 'CALM';
-}
 
 const TONE: Record<RiskLabel, { text: string; edge: string; blurb: string }> = {
   CALM: {

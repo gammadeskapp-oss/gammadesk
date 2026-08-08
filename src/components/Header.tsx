@@ -6,7 +6,8 @@ interface HeaderProps {
   /** Omitted on pages that have no upstream snapshot of their own. */
   asOfLabel?: string;
   source?: DataSource;
-  active: 'dashboard' | 'forecast' | 'groups' | 'strength' | 'ticker' | 'log';
+  active:
+    | 'dashboard' | 'forecast' | 'groups' | 'strength' | 'ticker' | 'digest' | 'log';
 }
 
 const NAV = [
@@ -15,6 +16,7 @@ const NAV = [
   { key: 'groups', href: '/groups', label: 'Groups' },
   { key: 'strength', href: '/strength', label: 'Strength' },
   { key: 'ticker', href: '/ticker', label: 'Ticker' },
+  { key: 'digest', href: '/digest', label: 'Digest' },
   { key: 'log', href: '/log', label: 'Accuracy Log' },
 ] as const;
 

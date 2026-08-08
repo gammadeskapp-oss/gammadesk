@@ -200,6 +200,23 @@ Vercel sends this automatically as a bearer token when it runs the jobs.
 Without it the endpoints return a 503 and refuse to do anything, which is the
 safe default.
 
+### Optional — Discord digest
+
+To have the daily summary posted to a Discord channel, add one more variable:
+
+| Key | Value |
+|-----|-------|
+| `DISCORD_WEBHOOK_URL` | your channel's webhook URL |
+
+In Discord: **Server Settings → Integrations → Webhooks → New Webhook**, pick
+the channel, then **Copy Webhook URL**.
+
+> Treat that URL as a password. Anyone who has it can post to that channel. It
+> is only ever read on the server and is never sent to the browser.
+
+Leave it unset and the digest is still generated and shown at `/digest` — it
+just is not delivered anywhere.
+
 ### Redeploy
 
 **Deployments** → **…** on the newest one → **Redeploy**. Environment variables
@@ -212,6 +229,7 @@ only take effect on a new build.
 - **14:45 UTC, weekdays** — record that day's flip level and magnet strikes
 - **21:30 UTC, weekdays** — pull the session's high and low, and score it
 - **22:00 UTC, weekdays** — recompute the `/groups` scores and breadth
+- **22:20 UTC, weekdays** — build the daily digest and post it to Discord
 
 Both times were picked to sit inside the trading session in **both** summer and
 winter, since Vercel cron schedules are UTC and New York is not.

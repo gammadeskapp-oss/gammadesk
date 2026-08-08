@@ -182,6 +182,51 @@ on screen stay complete. If that happens, the dashboard says so in its footer.
 
 ---
 
+## Daily Digest (`/digest` + Discord)
+
+A fifteen-second plain-English summary, generated once a day after the close:
+SPY's gamma regime and flip level, the forecast's 3-day and 10-day lean and
+downturn label, and the top three leaders and bottom three laggards.
+
+It runs entirely off already-cached data — positioning, forecast and the group
+snapshot — so generating it costs nothing upstream. It adds no new information
+and no judgement of its own; it is a restatement of what the other pages show,
+and says so.
+
+### Discord delivery
+
+Set `DISCORD_WEBHOOK_URL` and the daily cron posts there. The message is plain
+markdown rather than an embed: it renders identically on mobile and degrades
+gracefully. Around 350 characters, well inside Discord's 2000-character cap.
+
+```
+**GammaDesk — Fri, 7 Aug 2026**
+SPY 773.26 · gamma **POSITIVE** ($3.51B) · flip 764.26
+Forecast: **58%** higher in 3d, **59%** in 10d · downturn **CALM** (2.7%)
+Leaders: SPY 89 · IWM 89 · MSFT 78
+Laggards: META 0 · TSLA 11 · QCOM 22
+_Modelled from backward-looking signals. Informational and educational purposes only, not investment advice._
+```
+
+Two safeguards worth knowing about:
+
+- `allowed_mentions: { parse: [] }` is sent with every post, so a ticker that
+  happens to collide with a role name can never ping a channel.
+- The URL is validated against Discord's webhook pattern before use, and is
+  read server-side only — it is a credential, and anyone holding it can post
+  to that channel.
+
+`GET /api/digest?dry=1` builds and stores the digest **without** posting, and
+returns the exact message it would have sent, so wording can be reviewed before
+it reaches a channel.
+
+The page prefers the stored copy for today, so it matches what Discord
+received. If the scheduled run has not happened yet it builds one live from the
+cached sources and labels it as such, rather than showing an empty page for
+most of the day.
+
+---
+
 ## Relative Strength (`/strength`)
 
 Every tracked ticker ranked by a 0–100 composite score: LEADERS and LAGGARDS as
@@ -543,7 +588,8 @@ Every setting is optional except the API key. Full list in `.env.example`.
 | `GAMMADESK_DIVIDEND_YIELD` | `0.012` | Annualised, for Black-Scholes. |
 | `GAMMADESK_DEMO` | `auto` | `auto` / `1` (always sample) / `0` (never). |
 | `GAMMADESK_REFRESH_TOKEN` | unset | Enables forced refresh on the API route. |
-| `CRON_SECRET` | unset | **Required for `/log`.** Bearer token for the cron endpoints. |
+| `CRON_SECRET` | unset | **Required for the cron jobs.** Bearer token for `/api/log/*`, `/api/groups/refresh` and `/api/digest`. |
+| `DISCORD_WEBHOOK_URL` | unset | Where the daily digest is posted. Leave unset to generate it without delivering. |
 | `BLOB_READ_WRITE_TOKEN` | auto | Injected by Vercel when a Blob store is attached. Durable storage for `/log`. |
 
 ---
@@ -572,6 +618,7 @@ src/
     forecast/page.tsx       blended-magnets simulation
     groups/page.tsx         group consensus, breadth, downturn risk
     strength/page.tsx       relative-strength leaders, laggards, full ranking
+    digest/page.tsx         the day's plain-English summary
     ticker/page.tsx         ticker search + consensus
     log/page.tsx            the accuracy log
     error.tsx               failure state
@@ -580,6 +627,7 @@ src/
     api/log/snapshot/route.ts morning cron: record the day's levels
     api/log/settle/route.ts   after-close cron: judge finished sessions
     api/groups/refresh/route.ts daily cron: recompute group scores
+    api/digest/route.ts       daily cron: build, store and post the digest
   components/
     Header.tsx              wordmark + "data as of"
     Dashboard.tsx           tab state, explain toggle, reload
@@ -590,6 +638,10 @@ src/
     DataQuality.tsx         provenance and IV-source breakdown
     Footer.tsx              disclaimer
   lib/
+    digest/
+      types.ts              the day's summary shape
+      build.ts              composes the summary + the Discord message
+      index.ts              stored digests, generation, Discord delivery
     groups/
       definitions.ts        EDIT THIS to add your own groups
       types.ts              group/ticker score shapes, breadth
