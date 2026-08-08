@@ -182,6 +182,37 @@ on screen stay complete. If that happens, the dashboard says so in its footer.
 
 ---
 
+## Relative Strength (`/strength`)
+
+Every tracked ticker ranked by a 0–100 composite score: LEADERS and LAGGARDS as
+tiles with a three-dot strength indicator, then the full ranked table with
+copy-list, copy-CSV and CSV download.
+
+**Costs nothing upstream.** The ranking is derived from the same daily group
+snapshot that powers `/groups` — the nine-signal engine has already run on
+every one of these symbols, so this page is a pure transform of stored data.
+
+### The score is coarse, and the page says so
+
+The score is the share of signals voting bullish, scaled to 0–100. Nine signals
+give only **ten possible values**, so scores cluster heavily and a 78 sits one
+signal above a 67 — not eleven points above it in any meaningful sense. It is
+deliberately not smoothed into something that looks more precise than it is.
+
+Ties are broken on 20-day momentum, so the ordering is stable rather than
+alphabetical, but two names a rank apart are usually indistinguishable.
+
+Symbols in several groups are de-duplicated — NVDA is in both MAG7 and SEMI but
+appears once, tagged with both. `splitLeadersLaggards` also guards against a
+short universe: with fewer than twice the tile count it shrinks both lists
+rather than showing the same ticker as both a leader and a laggard.
+
+The page also states that strength here is relative to a small tracked list,
+not to the market — a leader in a weak universe is still weak in absolute
+terms.
+
+---
+
 ## Group Dashboards (`/groups`)
 
 Model consensus per ticker group, market breadth, and a downturn-risk card.
@@ -540,6 +571,7 @@ src/
     page.tsx                the dashboard (server component)
     forecast/page.tsx       blended-magnets simulation
     groups/page.tsx         group consensus, breadth, downturn risk
+    strength/page.tsx       relative-strength leaders, laggards, full ranking
     ticker/page.tsx         ticker search + consensus
     log/page.tsx            the accuracy log
     error.tsx               failure state
@@ -562,6 +594,7 @@ src/
       definitions.ts        EDIT THIS to add your own groups
       types.ts              group/ticker score shapes, breadth
       compute.ts            batched scoring + market internals
+      ranking.ts            relative-strength ranking, CSV/list export
       index.ts              stored snapshot, cron refresh, breadth peek
     jsonStore.ts            Vercel Blob in production, JSON file locally
     forecast/

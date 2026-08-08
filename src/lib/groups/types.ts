@@ -9,6 +9,13 @@ export interface TickerScore {
   bullish: number;
   total: number;
   vote: Vote;
+  /**
+   * 20-session rate of change. Carried purely to break ties in the strength
+   * ranking — nine signals yield only ten distinct scores, so without a
+   * continuous secondary key the ordering inside a tie would be arbitrary.
+   * Optional so snapshots stored before this field existed still parse.
+   */
+  momentum20?: number;
   /** The individual signal votes, for the expanded view. */
   signals: Array<{ name: string; vote: Vote }>;
 }

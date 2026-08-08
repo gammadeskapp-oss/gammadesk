@@ -51,6 +51,9 @@ function scoreTicker(symbol: string, bars: Bar[]): TickerScore {
   const last = bars[bars.length - 1];
   const prev = bars[bars.length - 2] ?? last;
 
+  const lookback = Math.min(20, bars.length - 1);
+  const then = bars[bars.length - 1 - lookback]?.close ?? last.close;
+
   return {
     symbol,
     ok: true,
@@ -59,6 +62,7 @@ function scoreTicker(symbol: string, bars: Bar[]): TickerScore {
     bullish,
     total: signals.length,
     vote: bullish * 2 >= signals.length ? 'bullish' : 'bearish',
+    momentum20: then > 0 ? last.close / then - 1 : 0,
     signals: signals.map((s) => ({ name: s.name, vote: s.vote })),
   };
 }
