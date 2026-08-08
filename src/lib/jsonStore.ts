@@ -47,12 +47,26 @@ export interface JsonStore<T> {
  * @param fallback  Value returned when nothing has been stored yet.
  * @param parse     Narrows the parsed JSON, and rejects anything unexpected.
  */
+/**
+ * Where the file fallback writes.
+ *
+ * On Vercel the deployment directory is read-only — only /tmp is writable — so
+ * writing next to the source would throw rather than merely being ephemeral.
+ * That turned "storage is not durable yet" into a 500, which reads like a
+ * broken feature instead of a missing setting.
+ */
+function fallbackDir(): string {
+  return process.env.VERCEL
+    ? path.join('/tmp', 'gammadesk')
+    : path.join(process.cwd(), '.gammadesk');
+}
+
 export function createJsonStore<T>(
   blobPath: string,
   fallback: () => T,
   parse: (raw: unknown) => T | null,
 ): JsonStore<T> {
-  const localPath = path.join(process.cwd(), '.gammadesk', blobPath.replace(/^.*\//, ''));
+  const localPath = path.join(fallbackDir(), blobPath.replace(/^.*\//, ''));
 
   const decode = (text: string): T => {
     try {
