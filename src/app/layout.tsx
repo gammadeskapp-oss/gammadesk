@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Metadata, Viewport } from 'next';
+import { Sidebar } from '@/components/Sidebar';
 import './globals.css';
 
 const siteUrl = 'https://gammadesk.app';
@@ -39,7 +40,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="terminal-grid min-h-screen bg-term-bg font-mono text-term-text antialiased">
-        <div className="relative z-10 flex min-h-screen flex-col">{children}</div>
+        <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
+          <Sidebar />
+          <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        </div>
       </body>
     </html>
   );

@@ -1,10 +1,8 @@
 import type { Metadata } from 'next';
 import { AccuracyLogTable } from '@/components/AccuracyLogTable';
 import { Footer } from '@/components/Footer';
-import { Header } from '@/components/Header';
 import { readLog, storeStatus } from '@/lib/log/store';
 import { summarise } from '@/lib/log/types';
-import { config } from '@/lib/config';
 
 export const metadata: Metadata = {
   title: 'Accuracy Log',
@@ -23,7 +21,6 @@ export default async function LogPage() {
 
   return (
     <>
-      <Header symbol={config.symbol} active="log" />
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

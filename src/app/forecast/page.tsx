@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
 import { ForecastChart } from '@/components/ForecastChart';
 import { ForecastStats } from '@/components/ForecastStats';
-import { Header } from '@/components/Header';
+import { PageBar } from '@/components/PageBar';
 import { getForecast } from '@/lib/forecast';
 import { BLEND } from '@/lib/forecast/magnets';
 import { MAX_BEND_SIGMA } from '@/lib/forecast/simulate';
@@ -22,22 +22,12 @@ export default async function ForecastPage() {
 
   return (
     <>
-      <Header
-        symbol={data.symbol}
-        asOfLabel={data.asOfLabel}
-        active="forecast"
-      />
-
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-            Blended Magnets Forecast
-          </h1>
-          <p className="text-2xs text-term-faint">
-            {data.paths.toLocaleString('en-US')} paths · {data.horizon} trading days ·
-            spot {formatPrice(data.spot)} · {data.source}
-          </p>
-        </div>
+        <PageBar
+          title="Blended Magnets Forecast"
+          meta={`${data.paths.toLocaleString('en-US')} paths · ${data.horizon} trading days · spot ${formatPrice(data.spot)} · ${data.source}`}
+          asOfLabel={data.asOfLabel}
+        />
 
         <ForecastStats data={data} />
 

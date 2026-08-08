@@ -1,9 +1,7 @@
 import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
-import { Header } from '@/components/Header';
 import { StrengthTable } from '@/components/StrengthTable';
 import { StrengthTiles } from '@/components/StrengthTiles';
-import { config } from '@/lib/config';
 import { getGroupsSnapshot, storeStatus } from '@/lib/groups';
 import {
   rankTickers,
@@ -30,7 +28,6 @@ export default async function StrengthPage() {
 
   return (
     <>
-      <Header symbol={config.symbol} active="strength" />
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-5 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

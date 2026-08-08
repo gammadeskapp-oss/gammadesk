@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
-import { Header } from '@/components/Header';
 import { getDigest, storeStatus } from '@/lib/digest';
 import { formatPrice, formatUsd } from '@/lib/format';
 import { formatAsOf } from '@/lib/time';
@@ -46,7 +45,6 @@ export default async function DigestPage() {
 
   return (
     <>
-      <Header symbol={digest.symbol} active="digest" />
 
       <main className="mx-auto w-full max-w-[900px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

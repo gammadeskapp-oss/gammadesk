@@ -1,6 +1,5 @@
 import { Dashboard } from '@/components/Dashboard';
 import { Footer } from '@/components/Footer';
-import { Header } from '@/components/Header';
 import { getPositioning } from '@/lib/positioning';
 
 /**
@@ -16,12 +15,6 @@ export default async function HomePage() {
 
   return (
     <>
-      <Header
-        symbol={data.symbol}
-        asOfLabel={data.meta.asOfLabel}
-        source={data.meta.source}
-        active="dashboard"
-      />
       <Dashboard data={data} />
       <Footer />
     </>

@@ -1,3 +1,4 @@
+import { StarButton } from './StarButton';
 import { formatPrice } from '@/lib/format';
 import { strengthDots, type RankedTicker } from '@/lib/groups/ranking';
 
@@ -37,7 +38,8 @@ function Tile({ item, tone }: { item: RankedTicker; tone: 'bull' | 'bear' }) {
   return (
     <div className={`panel border-l-2 ${edge} px-3 py-2.5`}>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-sm font-bold tracking-[0.1em] text-term-text">
+        <span className="flex items-center gap-1 text-sm font-bold tracking-[0.1em] text-term-text">
+          <StarButton symbol={item.symbol} size="sm" />
           {item.symbol}
         </span>
         <span className={`text-lg font-bold tabular-nums leading-none ${accent}`}>

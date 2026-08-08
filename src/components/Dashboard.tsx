@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { DataQuality } from './DataQuality';
 import { ExplainPanel } from './ExplainPanel';
+import { PageBar } from './PageBar';
 import { PositioningTable } from './PositioningTable';
 import { SummaryStrip } from './SummaryStrip';
 import { TabBar } from './TabBar';
@@ -53,6 +54,12 @@ export function Dashboard({ data }: DashboardProps) {
 
   return (
     <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+      <PageBar
+        title={`${data.symbol} Dealer Positioning`}
+        asOfLabel={data.meta.asOfLabel}
+        source={data.meta.source}
+      />
+
       <SummaryStrip summary={data.summary} symbol={data.symbol} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">

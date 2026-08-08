@@ -1,3 +1,4 @@
+import { StarButton } from './StarButton';
 import { formatPrice } from '@/lib/format';
 import type { TickerAnalysis } from '@/lib/ticker/types';
 
@@ -34,8 +35,9 @@ export function ConsensusCard({ data }: { data: TickerAnalysis }) {
       <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
         <div>
           <div className="flex flex-wrap items-baseline gap-3">
-            <h1 className="text-2xl font-bold tracking-[0.14em] text-term-text">
+            <h1 className="flex items-center gap-2 text-2xl font-bold tracking-[0.14em] text-term-text">
               {data.symbol}
+              <StarButton symbol={data.symbol} />
             </h1>
             <span className="text-lg tabular-nums text-term-dim">
               {formatPrice(price)}

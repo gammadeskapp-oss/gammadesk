@@ -33,6 +33,27 @@ body {
   -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 78%);
 }
 
+/*
+ * Sidebar width.
+ *
+ * Deliberately not two competing Tailwind width utilities. `w-56` and
+ * `lg:w-16` carry identical specificity — a media query adds none — so which
+ * one wins depends entirely on their order in the emitted stylesheet, and in
+ * development that order is not stable. The result was a sidebar that applied
+ * the collapsed class and then ignored it.
+ *
+ * The attribute selector below is specificity (0,2,0) and always wins, so the
+ * behaviour no longer depends on build order.
+ */
+.gd-sidebar {
+  width: 14rem;
+}
+@media (min-width: 1024px) {
+  .gd-sidebar[data-collapsed='true'] {
+    width: 4rem;
+  }
+}
+
 @layer components {
   .panel {
     @apply border border-term-line bg-term-panel/80 backdrop-blur-[2px];

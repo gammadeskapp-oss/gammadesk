@@ -1,12 +1,10 @@
 import type { Metadata } from 'next';
 import { ConsensusCard } from '@/components/ConsensusCard';
 import { Footer } from '@/components/Footer';
-import { Header } from '@/components/Header';
 import { LiquidityCard } from '@/components/LiquidityCard';
 import { SignalTable } from '@/components/SignalTable';
 import { TickerChart } from '@/components/TickerChart';
 import { TickerSearch } from '@/components/TickerSearch';
-import { config } from '@/lib/config';
 import { analyzeTicker, TickerError } from '@/lib/ticker/analyze';
 import type { TickerAnalysis } from '@/lib/ticker/types';
 
@@ -48,7 +46,6 @@ export default async function TickerPage({ searchParams }: PageProps) {
 
   return (
     <>
-      <Header symbol={data?.symbol ?? config.symbol} active="ticker" />
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

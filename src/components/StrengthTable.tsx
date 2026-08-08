@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { StarButton } from './StarButton';
 import { formatPrice } from '@/lib/format';
 import { strengthDots, type RankedTicker } from '@/lib/groups/ranking';
 
@@ -119,7 +120,10 @@ export function StrengthTable({ ranked, csv, list, asOfDate }: Props) {
                     scope="row"
                     className="border-b border-term-line/60 px-2.5 py-1.5 text-left font-bold text-term-text"
                   >
-                    {r.symbol}
+                    <span className="flex items-center gap-1">
+                      <StarButton symbol={r.symbol} size="sm" />
+                      {r.symbol}
+                    </span>
                   </th>
                   <td
                     className={`border-b border-term-line/60 px-2.5 py-1.5 font-bold ${

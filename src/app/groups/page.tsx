@@ -2,9 +2,7 @@ import type { Metadata } from 'next';
 import { CrashCard } from '@/components/CrashCard';
 import { Footer } from '@/components/Footer';
 import { GroupCard } from '@/components/GroupCard';
-import { Header } from '@/components/Header';
 import { MarketInternalsStrip } from '@/components/MarketInternals';
-import { config } from '@/lib/config';
 import { getForecast } from '@/lib/forecast';
 import { getGroupsSnapshot, storeStatus } from '@/lib/groups';
 import { formatAsOf } from '@/lib/time';
@@ -27,7 +25,6 @@ export default async function GroupsPage() {
 
   return (
     <>
-      <Header symbol={config.symbol} active="groups" />
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-5 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
