@@ -73,6 +73,14 @@ export function getGroupsSnapshot(): Promise<GroupsSnapshot | null> {
 }
 
 /**
+ * The stored snapshot exactly as written, with no age filter and no
+ * computation. Used by the health check to answer "did the job actually run?".
+ */
+export function peekStoredGroups(): Promise<GroupsSnapshot | null> {
+  return store.read().catch(() => null);
+}
+
+/**
  * Read-only peek used by the forecast for its breadth input.
  *
  * Deliberately never triggers a computation — the forecast should not be able

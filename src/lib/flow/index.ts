@@ -32,6 +32,14 @@ function ageMs(snapshot: FlowSnapshot): number {
   return Number.isFinite(at) ? Date.now() - at : Infinity;
 }
 
+/**
+ * The stored snapshot exactly as written, with no age filter and no rescan.
+ * Used by the health check to answer "did the job actually run?".
+ */
+export function peekStoredFlow(): Promise<FlowSnapshot | null> {
+  return store.read().catch(() => null);
+}
+
 export async function refreshFlowSnapshot(): Promise<FlowSnapshot> {
   const snapshot = await computeFlowSnapshot();
   try {
