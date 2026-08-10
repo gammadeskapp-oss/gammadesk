@@ -96,8 +96,17 @@ export async function GET() {
   const problems: string[] = [];
 
   if (!present('BLOB_READ_WRITE_TOKEN')) {
+    /*
+     * Connecting a store and receiving a read/write token are separate things.
+     * Vercel can attach BLOB_STORE_ID while never provisioning
+     * BLOB_READ_WRITE_TOKEN, which looks like "Connected" in the dashboard and
+     * like "not connected at all" from here. Distinguish the two, because the
+     * fix is completely different.
+     */
     problems.push(
-      'No Blob store is connected, so anything the scheduled jobs write is lost on the next deploy. Vercel dashboard -> project -> Storage -> connect a Blob store, then redeploy.',
+      present('BLOB_STORE_ID')
+        ? 'A Blob store IS connected (BLOB_STORE_ID is present) but BLOB_READ_WRITE_TOKEN was never provisioned, and that is the one the client needs. Open the store in the Vercel dashboard, copy its BLOB_READ_WRITE_TOKEN, add it under Settings -> Environment Variables for all environments, then redeploy.'
+        : 'No Blob store is connected, so anything the scheduled jobs write is lost on the next deploy. Vercel dashboard -> project -> Storage -> connect a Blob store, then redeploy.',
     );
   } else if (blobReachable === false) {
     problems.push(
