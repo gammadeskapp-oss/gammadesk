@@ -122,6 +122,25 @@ export async function GET() {
           : `${problems.length} thing${problems.length === 1 ? '' : 's'} still to fix — see "problems".`,
       problems,
       jobs,
+      /*
+       * Which deployment is answering. Without this it is impossible to tell
+       * "the setting is wrong" from "you are looking at an older build".
+       */
+      deployment: {
+        env: process.env.VERCEL_ENV ?? null,
+        commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
+      },
+      /*
+       * NAMES ONLY, never values.
+       *
+       * Vercel lets a Blob store be connected under a custom variable prefix,
+       * so the token can arrive as something other than BLOB_READ_WRITE_TOKEN.
+       * Listing the names that look blob-related turns "it says not connected
+       * but the dashboard says connected" into an answer.
+       */
+      blobVariableNamesPresent: Object.keys(process.env)
+        .filter((name) => /blob|read_write_token/i.test(name))
+        .sort(),
       environment: {
         vercel: present('VERCEL'),
         // Values are never included — presence only.
