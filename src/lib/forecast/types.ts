@@ -50,7 +50,16 @@ export interface HorizonOdds {
 
 export interface ForecastResult {
   symbol: string;
+  name?: string;
   spot: number;
+  /**
+   * False when the symbol has no usable listed chain. The cone is then driven
+   * by price and volatility alone, with no positioning shaping it — which the
+   * UI must say plainly rather than presenting an identical-looking chart.
+   */
+  hasOptions: boolean;
+  /** Why options are missing, when they are. */
+  optionsNote: string | null;
   /** Annualised realised volatility used for the steps. */
   volatility: number;
   drift: DriftBlend;
@@ -64,8 +73,9 @@ export interface ForecastResult {
   magnets: MagnetExpiry[];
   /** Last 90 sessions of real closes, for the left half of the chart. */
   history: Array<{ date: string; close: number }>;
-  regime: 'positive' | 'negative';
-  netGex: number;
+  /** Null without options data — there is no dealer gamma to have a regime. */
+  regime: 'positive' | 'negative' | null;
+  netGex: number | null;
   gammaFlip: number | null;
   asOfLabel: string;
   quoteDateLabel: string;

@@ -1,37 +1,90 @@
 import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
 import { ForecastChart } from '@/components/ForecastChart';
+import { ForecastSearch } from '@/components/ForecastSearch';
 import { ForecastStats } from '@/components/ForecastStats';
 import { PageBar } from '@/components/PageBar';
-import { getForecast } from '@/lib/forecast';
+import { config } from '@/lib/config';
+import { getForecast, TickerError } from '@/lib/forecast';
 import { BLEND } from '@/lib/forecast/magnets';
 import { MAX_BEND_SIGMA } from '@/lib/forecast/simulate';
+import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice } from '@/lib/format';
 
 export const metadata: Metadata = {
   title: 'Blended Magnets Forecast',
   description:
-    'Monte Carlo simulation of SPY forward paths, bent toward dealer positioning magnets.',
+    'Monte Carlo simulation of forward price paths for any ticker, bent toward dealer positioning magnets.',
 };
 
-export const revalidate = 1800;
+export const dynamic = 'force-dynamic';
 
-export default async function ForecastPage() {
-  const data = await getForecast();
-  const last = data.bands[data.bands.length - 1];
+interface PageProps {
+  searchParams: Promise<{ symbol?: string }>;
+}
+
+export default async function ForecastPage({ searchParams }: PageProps) {
+  const { symbol } = await searchParams;
+  const requested = symbol?.trim() || config.symbol;
+
+  let data: ForecastResult | null = null;
+  let error: { message: string; hint?: string } | null = null;
+
+  try {
+    data = await getForecast(requested);
+  } catch (e) {
+    error =
+      e instanceof TickerError
+        ? { message: e.message, hint: e.hint }
+        : { message: `Could not simulate ${requested}.` };
+  }
+
+  const last = data?.bands[data.bands.length - 1];
 
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <PageBar
           title="Blended Magnets Forecast"
-          meta={`${data.paths.toLocaleString('en-US')} paths · ${data.horizon} trading days · spot ${formatPrice(data.spot)} · ${data.source}`}
-          asOfLabel={data.asOfLabel}
+          meta={
+            data
+              ? `${data.symbol} · ${data.paths.toLocaleString('en-US')} paths · ${data.horizon} trading days · spot ${formatPrice(data.spot)} · ${data.source}`
+              : undefined
+          }
+          asOfLabel={data?.asOfLabel}
         />
 
-        <ForecastStats data={data} />
+        <ForecastSearch initial={data?.symbol ?? requested} />
 
-        <ForecastChart data={data} />
+        {error && (
+          <div className="panel border-l-2 border-l-bear/60 px-4 py-4">
+            <p className="text-xs font-bold text-bear">{error.message}</p>
+            {error.hint && <p className="mt-1.5 text-2xs text-term-dim">{error.hint}</p>}
+          </div>
+        )}
+
+        {data && !data.hasOptions && (
+          <div className="panel border-l-2 border-l-flip/60 px-3.5 py-3 text-xs leading-relaxed">
+            <p className="text-flip">
+              <span className="font-bold">Stats-only — no options magnets. </span>
+              {data.symbol} has no usable listed option chain, so this cone is
+              shaped by price and volatility alone.
+            </p>
+            <p className="mt-2 text-term-dim">
+              Everything specific to dealer positioning is absent: no magnet
+              strikes bend the paths, and there is no gamma regime or flip level
+              to report. What remains is an ordinary log-normal simulation —
+              still useful for a sense of range, but it is not the blended-magnets
+              model the page is named after.
+            </p>
+          </div>
+        )}
+
+        {data && (
+          <>
+            <ForecastStats data={data} />
+
+            <ForecastChart data={data} />
 
         {/* ---- honesty box ---- */}
         <section
@@ -65,25 +118,36 @@ export default async function ForecastPage() {
               {data.crashThresholdPct.toFixed(0)}% drawdown figure is
               consequently an <em>underestimate</em>.
             </li>
-            <li>
-              <span className="text-term-text">Positioning is frozen. </span>
-              Open interest is a snapshot from {data.quoteDateLabel}. The
-              simulation carries it forward as if dealers never re-hedge, roll,
-              or take the other side — which they do, all day.
-            </li>
+            {data.hasOptions && (
+              <li>
+                <span className="text-term-text">Positioning is frozen. </span>
+                Open interest is a snapshot from {data.quoteDateLabel}. The
+                simulation carries it forward as if dealers never re-hedge, roll,
+                or take the other side — which they do, all day.
+              </li>
+            )}
             <li>
               <span className="text-term-text">The drift tilt is deliberately tiny. </span>
               A moving-average crossover and a 20-day rate of change are not a
               forecasting edge, so they are capped at ±8% annualised — a
               fraction of one day&rsquo;s noise over the whole horizon.
             </li>
-            <li>
-              <span className="text-term-text">Magnet bending is a heuristic. </span>
-              Blended {BLEND.gamma}/{BLEND.vanna}/{BLEND.charm} across gamma,
-              vanna and charm, and capped at {MAX_BEND_SIGMA} sigma per day so
-              positioning shapes the paths without driving them. The weights are
-              a reasonable guess, not a fitted or backtested result.
-            </li>
+            {data.hasOptions ? (
+              <li>
+                <span className="text-term-text">Magnet bending is a heuristic. </span>
+                Blended {BLEND.gamma}/{BLEND.vanna}/{BLEND.charm} across gamma,
+                vanna and charm, and capped at {MAX_BEND_SIGMA} sigma per day so
+                positioning shapes the paths without driving them. The weights are
+                a reasonable guess, not a fitted or backtested result.
+              </li>
+            ) : (
+              <li>
+                <span className="text-term-text">There are no magnets in this run. </span>
+                {data.symbol} has no usable listed chain, so nothing here reflects
+                dealer positioning at all — despite the page&rsquo;s name. It is a
+                plain log-normal cone.
+              </li>
+            )}
             <li>
               <span className="text-term-text">Nothing here knows about the world. </span>
               No earnings, no data releases, no policy, no news. A single
@@ -104,9 +168,10 @@ export default async function ForecastPage() {
           <p className="mt-1.5">
             Log-normal daily steps from spot {formatPrice(data.spot)} at{' '}
             {(data.volatility * 100).toFixed(1)}% annualised realised volatility.
-            Each day the step is nudged toward attractor strikes and away from
-            repellers, using the blended exposure field of whichever expiration
-            is still live at that point. The median path ends near{' '}
+            {data.hasOptions
+              ? ' Each day the step is nudged toward attractor strikes and away from repellers, using the blended exposure field of whichever expiration is still live at that point.'
+              : ' No positioning field is applied, because this symbol has no usable listed chain.'}{' '}
+            The median path ends near{' '}
             {formatPrice(last?.p50 ?? data.spot)}, with a 68% band of{' '}
             {formatPrice(last?.p16 ?? data.spot)} to {formatPrice(last?.p84 ?? data.spot)}.
           </p>
@@ -138,12 +203,14 @@ export default async function ForecastPage() {
           )}
 
           <p className="mt-3 border-t border-term-line pt-2">
-            Chain as of {data.quoteDateLabel} · cached{' '}
+            {data.hasOptions ? 'Chain' : 'Prices'} as of {data.quoteDateLabel} · cached{' '}
             {Math.round(data.cacheSeconds / 60)} minutes · simulation is seeded
             from the quote timestamp, so the same snapshot always produces the
             same cone.
           </p>
         </section>
+          </>
+        )}
       </main>
 
       <Footer />

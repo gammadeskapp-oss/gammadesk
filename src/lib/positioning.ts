@@ -93,12 +93,16 @@ function cachedSnapshot(): Promise<RawSnapshot> {
   return cached(snapshotCacheKey(), config.cacheSeconds, loadSnapshot);
 }
 
-function toPositioning(raw: RawSnapshot, expirationCount: number): PositioningData {
+function toPositioning(
+  raw: RawSnapshot,
+  expirationCount: number,
+  symbol = config.symbol,
+): PositioningData {
   const now = new Date();
   const { snapshot, source, notes } = raw;
 
   return buildPositioning(snapshot.contracts, {
-    symbol: config.symbol,
+    symbol,
     spot: snapshot.spot,
     riskFreeRate: config.riskFreeRate,
     dividendYield: config.dividendYield,
@@ -147,6 +151,35 @@ export async function getForecastPositioning(): Promise<PositioningData> {
   const count = config.forecastExpirations;
   return cached(viewCacheKey(count), config.cacheSeconds, async () =>
     toPositioning(await cachedSnapshot(), count),
+  );
+}
+
+/**
+ * Positioning for an arbitrary symbol, for the forecast's ticker mode.
+ *
+ * Separate from the cached SPY path on purpose: that one shares a single chain
+ * snapshot between the dashboard and the forecast, which only makes sense for
+ * the configured symbol. This fetches one chain for one symbol and caches it
+ * under its own key.
+ *
+ * Throws when the symbol has no usable listed chain — callers decide whether
+ * that is fatal or simply means "no magnets".
+ */
+export async function getPositioningForSymbol(
+  symbol: string,
+  expirationCount = config.forecastExpirations,
+): Promise<PositioningData> {
+  return cached(
+    `positioning-symbol:${symbol}:${expirationCount}:${config.strikesEachSide}`,
+    config.cacheSeconds,
+    async () => {
+      const snapshot = await fetchCboeSnapshot(symbol);
+      return toPositioning(
+        { snapshot, source: 'cboe', notes: snapshot.notes },
+        expirationCount,
+        symbol,
+      );
+    },
   );
 }
 

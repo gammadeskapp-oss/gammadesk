@@ -54,16 +54,18 @@ function isoFromMs(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-async function fromPolygon(symbol: string): Promise<Bar[] | null> {
+async function fromPolygon(symbol: string, years: number): Promise<Bar[] | null> {
   const key = config.apiKey;
   if (!key) return null;
 
   const to = marketToday();
-  const from = addDays(to, -400);
+  // A little past the requested window, so a 200-day average is already
+  // defined at the first bar the caller intends to use.
+  const from = addDays(to, -Math.ceil(years * 365) - 40);
 
   const url =
     `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${from}/${to}` +
-    `?adjusted=true&sort=asc&limit=500&apiKey=${encodeURIComponent(key)}`;
+    `?adjusted=true&sort=asc&limit=50000&apiKey=${encodeURIComponent(key)}`;
 
   const res = await fetch(url, {
     headers: { Accept: 'application/json' },
@@ -117,11 +119,21 @@ interface YahooChartResponse {
   };
 }
 
+/** Yahoo accepts only a fixed set of range tokens, so snap to the nearest. */
+function yahooRange(years: number): string {
+  if (years <= 1) return '1y';
+  if (years <= 2) return '2y';
+  if (years <= 5) return '5y';
+  if (years <= 10) return '10y';
+  return 'max';
+}
+
 async function fromYahoo(
   symbol: string,
+  years: number,
 ): Promise<{ bars: Bar[]; name?: string } | null> {
   const res = await fetch(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=1d`,
+    `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${yahooRange(years)}&interval=1d`,
     {
       headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' },
       next: { revalidate: config.tickerCacheSeconds },
@@ -182,6 +194,11 @@ export interface FetchBarsOptions {
   prefer?: 'polygon' | 'yahoo';
   /** Company name costs an extra request when Polygon served the bars. */
   withName?: boolean;
+  /**
+   * How far back to reach, in years. Whatever history the symbol actually has
+   * is returned — a two-year-old listing asked for ten years yields two.
+   */
+  years?: number;
 }
 
 /** Roughly a year of daily bars, oldest first. */
@@ -189,26 +206,26 @@ export async function fetchBars(
   symbol: string,
   options: FetchBarsOptions = {},
 ): Promise<BarSeries> {
-  const { prefer = 'polygon', withName = true } = options;
+  const { prefer = 'polygon', withName = true, years = 1 } = options;
 
   if (prefer === 'yahoo') {
-    const first = await fromYahoo(symbol).catch(() => null);
+    const first = await fromYahoo(symbol, years).catch(() => null);
     if (first && first.bars.length >= 60) {
       return { bars: first.bars, source: 'yahoo', name: first.name };
     }
   }
 
   const polygon =
-    prefer === 'polygon' ? await fromPolygon(symbol).catch(() => null) : null;
+    prefer === 'polygon' ? await fromPolygon(symbol, years).catch(() => null) : null;
 
   if (polygon && polygon.length >= 60) {
     // Yahoo is consulted only for the company name, and only cheaply — a
     // failure here must not break an otherwise good result.
-    const meta = withName ? await fromYahoo(symbol).catch(() => null) : null;
+    const meta = withName ? await fromYahoo(symbol, years).catch(() => null) : null;
     return { bars: polygon, source: 'polygon', name: meta?.name };
   }
 
-  const yahoo = await fromYahoo(symbol).catch(() => null);
+  const yahoo = await fromYahoo(symbol, years).catch(() => null);
   if (yahoo && yahoo.bars.length >= 60) {
     return { bars: yahoo.bars, source: 'yahoo', name: yahoo.name };
   }

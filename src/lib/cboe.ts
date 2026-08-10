@@ -125,8 +125,10 @@ function parseTimestamp(raw: string | undefined): Date {
   return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] ?? 0)));
 }
 
-export async function fetchCboeSnapshot(): Promise<ChainSnapshot> {
-  const symbol = config.symbol;
+export async function fetchCboeSnapshot(
+  symbolOverride?: string,
+): Promise<ChainSnapshot> {
+  const symbol = symbolOverride ?? config.symbol;
   const notes: string[] = [];
 
   let response: Response;

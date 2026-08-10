@@ -63,9 +63,15 @@ export function ForecastStats({ data }: { data: ForecastResult }) {
 
       <Tile
         label="Gamma regime"
-        value={data.regime === 'positive' ? 'POSITIVE' : 'NEGATIVE'}
-        sub={formatUsd(data.netGex)}
-        tone={data.regime === 'positive' ? 'pos' : 'neg'}
+        value={
+          data.regime === null ? '—' : data.regime === 'positive' ? 'POSITIVE' : 'NEGATIVE'
+        }
+        sub={
+          data.regime === null
+            ? 'no listed options'
+            : formatUsd(data.netGex ?? 0)
+        }
+        tone={data.regime === null ? 'neutral' : data.regime === 'positive' ? 'pos' : 'neg'}
       />
 
       <Tile

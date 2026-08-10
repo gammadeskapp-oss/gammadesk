@@ -65,8 +65,20 @@ export function CrashCard({ forecast }: { forecast: ForecastResult }) {
         </div>
         <div>
           <span className="text-term-faint">regime </span>
-          <span className={forecast.regime === 'positive' ? 'text-pos' : 'text-neg'}>
-            {forecast.regime === 'positive' ? 'POSITIVE' : 'NEGATIVE'}
+          <span
+            className={
+              forecast.regime === null
+                ? 'text-term-faint'
+                : forecast.regime === 'positive'
+                  ? 'text-pos'
+                  : 'text-neg'
+            }
+          >
+            {forecast.regime === null
+              ? 'n/a'
+              : forecast.regime === 'positive'
+                ? 'POSITIVE'
+                : 'NEGATIVE'}
           </span>
         </div>
         <div>
