@@ -15,8 +15,8 @@ import sharp from 'sharp';
 
 const OUT = path.join(process.cwd(), 'public');
 
-const BG = '#05070b'; // matches the site background and the manifest theme
-const FG = '#22d3ee'; // the cyan used for the mark throughout
+const BG = '#0a0e17'; // matches the site background and the manifest theme
+const FG = '#f0a500'; // the brand amber used for the mark throughout
 
 /**
  * The gamma mark on a 512 canvas.

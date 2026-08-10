@@ -11,15 +11,17 @@ import type { TickerChartData } from '@/lib/ticker/types';
  * server bundle entirely.
  */
 
+/* Mirrors the CSS variables in globals.css; the chart library needs literals. */
 const COLOR = {
-  up: '#34d399',
-  down: '#f43f5e',
-  ma50: '#facc15',
-  ma200: '#22d3ee',
-  grid: '#141b26',
-  border: '#1a2230',
-  text: '#7b8b9f',
-  crosshair: '#4d5a6b',
+  // Direction stays green/red regardless of theme.
+  up: '#3ddc84',
+  down: '#ff5c7a',
+  ma50: '#f0a500', // brand amber
+  ma200: '#4c8dff', // cool, so the two averages never blur together
+  grid: '#161d2c',
+  border: '#232c3f',
+  text: '#8494a8',
+  crosshair: '#5a687d',
 };
 
 interface Props {
@@ -64,8 +66,8 @@ export function TickerChart({ symbol, data, currentPrice }: Props) {
           rightPriceScale: { borderColor: COLOR.border },
           timeScale: { borderColor: COLOR.border, rightOffset: 4 },
           crosshair: {
-            vertLine: { color: COLOR.crosshair, labelBackgroundColor: '#0f141d' },
-            horzLine: { color: COLOR.crosshair, labelBackgroundColor: '#0f141d' },
+            vertLine: { color: COLOR.crosshair, labelBackgroundColor: '#1a2133' },
+            horzLine: { color: COLOR.crosshair, labelBackgroundColor: '#1a2133' },
           },
         });
 

@@ -30,7 +30,7 @@ export function TabBar({ active, onChange }: TabBarProps) {
             title={def.name}
             className={`border px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] transition-colors ${
               selected
-                ? 'border-pos/60 bg-pos/12 text-pos shadow-[inset_0_-2px_0_0_rgba(34,211,238,0.85)]'
+                ? 'border-pos/60 bg-pos/12 text-pos shadow-[inset_0_-2px_0_0_rgba(240,165,0,0.85)]'
                 : 'border-term-line bg-term-panel/60 text-term-faint hover:border-term-edge hover:text-term-dim'
             }`}
           >

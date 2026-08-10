@@ -12,16 +12,17 @@ const W = 1000;
 const H = 430;
 const M = { top: 16, right: 58, bottom: 30, left: 12 };
 
+/* Mirrors the CSS variables in globals.css; SVG attributes cannot read them. */
 const COLOR = {
-  history: '#22d3ee',
-  band95: 'rgba(52, 211, 153, 0.10)',
-  band68: 'rgba(52, 211, 153, 0.24)',
-  median: '#34d399',
-  attractor: '#34d399',
-  repeller: '#f43f5e',
-  grid: '#1a2230',
-  axis: '#4d5a6b',
-  spot: '#facc15',
+  history: '#f0a500', // brand amber — the realised path
+  band95: 'rgba(61, 220, 132, 0.10)',
+  band68: 'rgba(61, 220, 132, 0.22)',
+  median: '#3ddc84',
+  attractor: '#3ddc84',
+  repeller: '#ff5c7a',
+  grid: '#1a2133',
+  axis: '#5a687d',
+  spot: '#8494a8', // neutral, so it does not compete with the amber history
 };
 
 export function ForecastChart({ data }: { data: ForecastResult }) {
@@ -126,11 +127,11 @@ export function ForecastChart({ data }: { data: ForecastResult }) {
             median
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-4" style={{ background: 'rgba(52,211,153,0.34)' }} />
+            <span className="h-2.5 w-4" style={{ background: 'rgba(61,220,132,0.34)' }} />
             68%
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-4" style={{ background: 'rgba(52,211,153,0.14)' }} />
+            <span className="h-2.5 w-4" style={{ background: 'rgba(61,220,132,0.14)' }} />
             95%
           </span>
           <span className="flex items-center gap-1.5">
@@ -246,7 +247,7 @@ export function ForecastChart({ data }: { data: ForecastResult }) {
               r={d.r}
               fill={d.attract ? COLOR.attractor : COLOR.repeller}
               fillOpacity={0.85}
-              stroke="#05070b"
+              stroke="#0a0e17"
               strokeWidth={0.75}
             >
               <title>

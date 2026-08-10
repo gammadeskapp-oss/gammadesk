@@ -5,8 +5,13 @@ import { formatContracts, formatPrice, formatStrike } from '@/lib/format';
 import { METRICS } from '@/lib/metrics';
 import type { MetricKey, PositioningData } from '@/lib/types';
 
-const POSITIVE_RGB = '34, 211, 238'; // cyan
-const NEGATIVE_RGB = '255, 63, 180'; // magenta
+/*
+ * The heatmap's diverging scale, warm to cool. These are read at module scope
+ * rather than from the CSS variables because the values are composed into
+ * rgba() strings for inline styles; they mirror --c-brand and --c-cool.
+ */
+const POSITIVE_RGB = '240, 165, 0'; // amber — dealers dampen
+const NEGATIVE_RGB = '76, 141, 255'; // cool blue — dealers amplify
 
 /**
  * Map a value to a heatmap cell style.
@@ -127,28 +132,34 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
             {rows.map((row) => {
               const isSpot = row.strike === spotStrike;
               const isFlipRow = row.strike === flipStrike;
-              // When spot sits on the flip, one row carries both. Keep the cyan
-              // spot styling and fold the flip into its label rather than
-              // silently dropping the marker — that overlap is precisely the
-              // moment the flip level matters most.
+              // When spot sits on the flip, one row carries both. Keep the spot
+              // styling and fold the flip into its label rather than silently
+              // dropping the marker — that overlap is precisely the moment the
+              // flip level matters most.
               const isFlip = isFlipRow && !isSpot;
 
               const rowClass = isSpot
-                ? 'bg-pos/[0.07]'
+                ? 'bg-term-text/[0.06]'
                 : isFlip
-                  ? 'bg-flip/[0.07]'
+                  ? 'bg-flip/[0.08]'
                   : '';
 
+              /*
+               * The spot row is deliberately NOT amber. The flip row owns the
+               * brand accent, and two amber rows a few lines apart would be
+               * indistinguishable — so "you are here" reads as a bright
+               * neutral instead.
+               */
               const strikeBg = isSpot
-                ? 'bg-[#0b2027] text-pos'
+                ? 'bg-term-edge text-term-text'
                 : isFlip
-                  ? 'bg-[#1e1a08] text-flip'
+                  ? 'bg-[#2a1f05] text-flip'
                   : 'bg-term-panel text-term-dim';
 
               const edge = isSpot
-                ? 'border-y border-pos/45'
+                ? 'border-y border-term-text/50'
                 : isFlip
-                  ? 'border-y border-flip/40'
+                  ? 'border-y border-flip/50'
                   : 'border-b border-term-line/60';
 
               return (
@@ -160,7 +171,7 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
                     <span className="flex items-center gap-1.5">
                       {formatStrike(row.strike)}
                       {isSpot && (
-                        <span className="text-2xs font-normal text-pos/80">
+                        <span className="text-2xs font-normal text-term-dim">
                           ← {formatPrice(spot)}
                           {isFlipRow && (
                             <span className="text-flip"> · flip</span>

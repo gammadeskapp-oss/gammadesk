@@ -37,8 +37,8 @@ export function ExplainPanel({ metric }: ExplainPanelProps) {
       <p className="mt-2.5 text-term-text">{def.plain.what}</p>
 
       <ul className="mt-3 space-y-2">
-        <Line swatch="#22d3ee">{def.plain.positive}</Line>
-        <Line swatch="#ff3fb4">{def.plain.negative}</Line>
+        <Line swatch="#f0a500">{def.plain.positive}</Line>
+        <Line swatch="#4c8dff">{def.plain.negative}</Line>
         <Line>{def.plain.why}</Line>
       </ul>
 
@@ -52,14 +52,14 @@ export function ExplainPanel({ metric }: ExplainPanelProps) {
             up every expiration for that strike.
           </li>
           <li>
-            <span className="text-pos">Brighter cyan</span> or{' '}
-            <span className="text-neg">brighter magenta</span> just means a bigger
+            <span className="text-pos">Brighter amber</span> or{' '}
+            <span className="text-neg">brighter blue</span> just means a bigger
             number. Faint cells barely matter.
           </li>
           <li>
-            The <span className="text-pos">cyan row</span> is the strike closest to
-            the current price. The{' '}
-            <span className="text-flip">yellow row</span> is the gamma flip level,
+            The <span className="text-term-text">highlighted white row</span> is the
+            strike closest to the current price. The{' '}
+            <span className="text-flip">amber row</span> is the gamma flip level,
             where dealer behaviour switches from dampening moves to amplifying them.
           </li>
           <li>

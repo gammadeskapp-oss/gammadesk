@@ -34,11 +34,11 @@ export const METRICS: Record<MetricKey, MetricDef> = {
       what:
         'Gamma measures how fast a dealer’s hedge has to change when the price moves. GEX adds that up across every contract at a strike, assuming dealers are long calls and short puts.',
       positive:
-        'Cyan (positive) means dealers get longer as price falls and shorter as it rises — so their hedging pushes back against the move. Expect price to stick, chop, and mean-revert around these strikes.',
+        'Amber (positive) means dealers get longer as price falls and shorter as it rises — so their hedging pushes back against the move. Expect price to stick, chop, and mean-revert around these strikes.',
       negative:
-        'Magenta (negative) means dealers sell as price falls and buy as it rises — their hedging adds fuel to the move. Expect faster, trendier, more volatile price action here.',
+        'Blue (negative) means dealers sell as price falls and buy as it rises — their hedging adds fuel to the move. Expect faster, trendier, more volatile price action here.',
       why:
-        'Big cyan strikes act like magnets that pin price. Big magenta strikes act like accelerators once price gets there.',
+        'Big amber strikes act like magnets that pin price. Big blue strikes act like accelerators once price gets there.',
     },
   },
   vex: {
@@ -52,9 +52,9 @@ export const METRICS: Record<MetricKey, MetricDef> = {
       what:
         'Vanna measures how a dealer’s hedge changes when implied volatility changes, even if the price does not move at all. VEX totals that across the strikes.',
       positive:
-        'Cyan means that if volatility rises, dealers end up needing to buy. Falling volatility makes them sell.',
+        'Amber means that if volatility rises, dealers end up needing to buy. Falling volatility makes them sell.',
       negative:
-        'Magenta means the opposite: rising volatility forces dealers to sell, and falling volatility forces them to buy.',
+        'Blue means the opposite: rising volatility forces dealers to sell, and falling volatility forces them to buy.',
       why:
         'This is why markets often drift upward as the VIX bleeds lower on quiet days — dealers are mechanically buying because volatility fell, not because anyone is bullish.',
     },
@@ -70,9 +70,9 @@ export const METRICS: Record<MetricKey, MetricDef> = {
       what:
         'Charm measures how a dealer’s hedge changes purely because time passes and options get closer to expiry. CEX totals that per day.',
       positive:
-        'Cyan means the simple passage of time pushes dealers to buy the underlying.',
+        'Amber means the simple passage of time pushes dealers to buy the underlying.',
       negative:
-        'Magenta means time passing pushes dealers to sell.',
+        'Blue means time passing pushes dealers to sell.',
       why:
         'Charm is the reason for the classic drift into a big expiration, and the reason positioning can unwind sharply in the days right after one. It builds up quietly and shows up as flows nobody announced.',
     },
@@ -88,9 +88,9 @@ export const METRICS: Record<MetricKey, MetricDef> = {
       what:
         'Open interest is simply how many contracts are currently open at that strike. This tab shows the net: call open interest minus put open interest.',
       positive:
-        'Cyan means more calls than puts are open at that strike — the crowd is positioned for upside there, often a target or a place people sell covered calls.',
+        'Amber means more calls than puts are open at that strike — the crowd is positioned for upside there, often a target or a place people sell covered calls.',
       negative:
-        'Magenta means more puts than calls are open — usually hedges and downside protection clustered at that level.',
+        'Blue means more puts than calls are open — usually hedges and downside protection clustered at that level.',
       why:
         'This is the raw, no-maths view of where the crowd actually is. The other three tabs are all built on top of these same numbers.',
     },

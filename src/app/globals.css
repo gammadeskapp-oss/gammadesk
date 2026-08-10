@@ -2,14 +2,51 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Theme.
+ *
+ * Every colour in the app resolves to one of these, so a palette change is
+ * this block and nothing else. Values are space-separated RGB channels rather
+ * than hex because Tailwind composes them as `rgb(var(--x) / <alpha-value>)`,
+ * which is what keeps the hundreds of `bg-pos/10`-style opacity modifiers
+ * working.
+ */
 :root {
   color-scheme: dark;
+
+  /* surfaces */
+  --c-bg: 10 14 23; /* #0a0e17 */
+  --c-panel: 18 24 38; /* #121826 */
+  --c-raised: 26 33 51; /* #1a2133 */
+  --c-line: 35 44 63; /* #232c3f */
+  --c-edge: 47 58 82; /* #2f3a52 */
+
+  /* type */
+  --c-text: 200 214 229; /* #c8d6e5 */
+  --c-dim: 132 148 168; /* #8494a8 */
+  --c-faint: 90 104 125; /* #5a687d */
+
+  /*
+   * Brand amber. Also the warm end of the gamma scale and the flip level —
+   * positive gamma is the house state, so sharing the accent reads coherently.
+   */
+  --c-brand: 240 165 0; /* #f0a500 */
+  /* Cool end of the gamma scale. Diverges from amber without touching the
+     green/red that direction is encoded in. */
+  --c-cool: 76 141 255; /* #4c8dff */
+
+  /*
+   * Direction. Deliberately untouched by theming — traders read these by
+   * reflex and a palette change must never repaint them.
+   */
+  --c-bull: 61 220 132; /* #3ddc84 */
+  --c-bear: 255 92 122; /* #ff5c7a */
 }
 
 html,
 body {
-  background-color: #05070b;
-  color: #c8d6e5;
+  background-color: rgb(var(--c-bg));
+  color: rgb(var(--c-text));
 }
 
 body {
@@ -26,8 +63,8 @@ body {
   pointer-events: none;
   z-index: 0;
   background-image:
-    linear-gradient(rgba(34, 211, 238, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(34, 211, 238, 0.035) 1px, transparent 1px);
+    linear-gradient(rgb(var(--c-brand) / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--c-brand) / 0.04) 1px, transparent 1px);
   background-size: 44px 44px;
   mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 78%);
   -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 78%);
@@ -67,21 +104,21 @@ body {
 /* Scrollbars styled to match the terminal chrome instead of the OS default. */
 .scroll-term {
   scrollbar-width: thin;
-  scrollbar-color: #26303f transparent;
+  scrollbar-color: rgb(var(--c-edge)) transparent;
 }
 .scroll-term::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 .scroll-term::-webkit-scrollbar-track {
-  background: #0a0e15;
+  background: rgb(var(--c-panel));
 }
 .scroll-term::-webkit-scrollbar-thumb {
-  background: #26303f;
+  background: rgb(var(--c-edge));
   border-radius: 2px;
 }
 .scroll-term::-webkit-scrollbar-thumb:hover {
-  background: #3a4759;
+  background: rgb(var(--c-brand) / 0.7);
 }
 
 @media (prefers-reduced-motion: reduce) {

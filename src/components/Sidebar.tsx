@@ -126,7 +126,7 @@ export function Sidebar() {
     >
       <span
         aria-hidden
-        className="text-2xl leading-none text-pos drop-shadow-[0_0_10px_rgba(34,211,238,0.55)]"
+        className="text-2xl leading-none text-pos drop-shadow-[0_0_10px_rgba(240,165,0,0.55)]"
       >
         γ
       </span>

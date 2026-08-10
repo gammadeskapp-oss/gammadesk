@@ -4,40 +4,36 @@ const config: Config = {
   content: ['./src/**/*.{ts,tsx}'],
   theme: {
     extend: {
+      /*
+       * Every colour points at a CSS variable defined in globals.css, in the
+       * `rgb(... / <alpha-value>)` form so opacity modifiers keep working.
+       * Change the palette there, not here.
+       */
       colors: {
         term: {
-          bg: '#05070b',
-          panel: '#0a0e15',
-          raised: '#0f141d',
-          line: '#1a2230',
-          edge: '#26303f',
-          text: '#c8d6e5',
-          dim: '#7b8b9f',
-          faint: '#4d5a6b',
+          bg: 'rgb(var(--c-bg) / <alpha-value>)',
+          panel: 'rgb(var(--c-panel) / <alpha-value>)',
+          raised: 'rgb(var(--c-raised) / <alpha-value>)',
+          line: 'rgb(var(--c-line) / <alpha-value>)',
+          edge: 'rgb(var(--c-edge) / <alpha-value>)',
+          text: 'rgb(var(--c-text) / <alpha-value>)',
+          dim: 'rgb(var(--c-dim) / <alpha-value>)',
+          faint: 'rgb(var(--c-faint) / <alpha-value>)',
         },
-        pos: {
-          DEFAULT: '#22d3ee',
-          soft: '#0e7490',
-        },
-        neg: {
-          DEFAULT: '#ff3fb4',
-          soft: '#9d1e6b',
-        },
-        flip: '#facc15',
+        /** Brand amber: chrome, and the warm end of the gamma scale. */
+        pos: 'rgb(var(--c-brand) / <alpha-value>)',
+        /** Cool end of the gamma scale. */
+        neg: 'rgb(var(--c-cool) / <alpha-value>)',
+        /** Flip level, and caveat/warning text. Same amber as the brand. */
+        flip: 'rgb(var(--c-brand) / <alpha-value>)',
         /**
          * Directional votes use their own green/red family, deliberately kept
          * apart from the cyan/magenta used for dealer exposure. The two mean
          * different things — bullish/bearish versus positive/negative gamma —
          * and sharing a palette would invite conflating them.
          */
-        bull: {
-          DEFAULT: '#34d399',
-          dim: '#065f46',
-        },
-        bear: {
-          DEFAULT: '#f43f5e',
-          dim: '#7f1d3a',
-        },
+        bull: 'rgb(var(--c-bull) / <alpha-value>)',
+        bear: 'rgb(var(--c-bear) / <alpha-value>)',
       },
       fontFamily: {
         mono: [
