@@ -34,6 +34,7 @@ const NAV: NavItem[] = [
   { href: '/strength', label: 'Strength', icon: '⇅' },
   { href: '/watchlist', label: 'Watchlist', icon: '★' },
   { href: '/flow', label: 'Flow', icon: '⇄' },
+  { href: '/velocity', label: 'Velocity', icon: 'Δ' },
   { href: '/log', label: 'Accuracy Log', icon: '✓' },
   { href: '/ticker', label: 'Ticker', icon: '⌕' },
   { href: '/digest', label: 'Digest', icon: '≡' },

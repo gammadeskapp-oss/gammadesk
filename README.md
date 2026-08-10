@@ -212,6 +212,47 @@ chrome view rather than full screen — so it is added explicitly via
 
 ---
 
+## Gamma Velocity (`/velocity`)
+
+Day-over-day change in per-strike dollar gamma across the tracked symbols:
+ticker, strike, expiry, gamma was, gamma now, signed change, % change, and a
+GREW / SHRANK / NEW tag, sorted by largest absolute move.
+
+Once a trading day the gamma at every strike in the nearest five expirations
+is stored for each symbol — around 1,500 rows, roughly 180KB. The page diffs
+the newest stored day against the one before it.
+
+### Snapshots are keyed to the chain's date, not the calendar
+
+Cboe keeps serving the last session's book all weekend. Capturing by wall
+clock would store Saturday and Sunday as fresh days and then report a day of
+zero change, so the snapshot takes its date from the chain itself and a repeat
+capture of a day already stored is a no-op.
+
+### It needs two days before it shows anything
+
+Velocity is a difference. On the first day it stores a book and says so
+plainly rather than rendering an empty table that looks broken. That is the
+feature working.
+
+### Two honest details on the page
+
+**GREW and SHRANK compare magnitude, not sign.** A strike going from +$50M to
+−$50M has not grown, it has flipped; the signed "was" and "now" columns show
+that directly.
+
+**Strikes under $250k of gamma are not stored**, so one dropping below that
+floor reads as shrinking to zero rather than to its true small value. The
+floor sits far below anything near the top of the table.
+
+And the label the page leads with, above the data rather than below it:
+positioning growing at a strike tells you the book got bigger there. It does
+not tell you who built it or what happens next — a strike can grow because
+someone is defending it or because someone is trapped at it, and this data
+cannot tell those apart.
+
+---
+
 ## Daily Digest (`/digest` + Discord)
 
 A fifteen-second plain-English summary, generated once a day after the close:
