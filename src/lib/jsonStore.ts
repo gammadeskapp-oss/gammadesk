@@ -36,6 +36,17 @@ export function storeStatus(): StoreStatus {
   };
 }
 
+/**
+ * Whichever access mode this store turned out to accept, remembered after the
+ * first successful write so later writes do not retry the wrong one.
+ */
+let blobAccessMode: 'private' | 'public' | null = null;
+
+/** Exposed for the health check, which reports what the store actually is. */
+export function detectedBlobAccess(): 'private' | 'public' | null {
+  return blobAccessMode;
+}
+
 export interface JsonStore<T> {
   read(): Promise<T>;
   write(value: T): Promise<void>;
@@ -76,28 +87,68 @@ export function createJsonStore<T>(
     }
   };
 
+  /**
+   * Reads go through the authenticated `get`, not a fetch of the public URL.
+   *
+   * A private store's blob URL is not publicly fetchable at all, and `get`
+   * works for both store types — so this one path is correct either way, and
+   * sidesteps the CDN staleness that plagued reading a public URL right after
+   * writing it.
+   */
   async function readBlob(): Promise<T> {
-    const { list } = await import('@vercel/blob');
-    const { blobs } = await list({ prefix: blobPath, limit: 1 });
-    const blob = blobs.find((b) => b.pathname === blobPath) ?? blobs[0];
-    if (!blob) return fallback();
+    const { get } = await import('@vercel/blob');
 
-    // Blob URLs sit behind a CDN; without no-store a fresh write can read back
-    // as the previous version.
-    const res = await fetch(blob.url, { cache: 'no-store' });
-    if (!res.ok) return fallback();
-    return decode(await res.text());
+    // `get` also needs to be told the store's access mode, and rejects the
+    // wrong one — so it takes the same try-both-and-remember approach as write.
+    const modes: Array<'private' | 'public'> = blobAccessMode
+      ? [blobAccessMode]
+      : ['private', 'public'];
+
+    for (const access of modes) {
+      try {
+        const result = await get(blobPath, { access });
+        blobAccessMode = access;
+        if (!result) return fallback();
+        return decode(await new Response(result.stream).text());
+      } catch {
+        // Wrong mode, or nothing stored yet. Try the other, then give up
+        // quietly — an empty store is the normal state before the first write.
+      }
+    }
+    return fallback();
   }
 
   async function writeBlob(value: T): Promise<void> {
     const { put } = await import('@vercel/blob');
-    await put(blobPath, JSON.stringify(value, null, 2), {
-      access: 'public',
+    const body = JSON.stringify(value, null, 2);
+
+    const base = {
       addRandomSuffix: false,
       allowOverwrite: true,
       contentType: 'application/json',
-      cacheControlMaxAge: 0,
-    });
+    } as const;
+
+    /*
+     * A store is configured as either public or private, and `put` rejects the
+     * wrong one outright — "Cannot use public access on a private store". The
+     * mode is not discoverable up front, so try private first (the safer
+     * default for this data), fall back to public, and remember which worked.
+     */
+    const modes: Array<'private' | 'public'> = blobAccessMode
+      ? [blobAccessMode]
+      : ['private', 'public'];
+
+    let lastError: unknown;
+    for (const access of modes) {
+      try {
+        await put(blobPath, body, { ...base, access });
+        blobAccessMode = access;
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
   }
 
   async function readFile(): Promise<T> {

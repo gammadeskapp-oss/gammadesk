@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { readDigests } from '@/lib/digest';
 import { peekStoredFlow } from '@/lib/flow';
 import { peekStoredGroups } from '@/lib/groups';
-import { storeStatus } from '@/lib/jsonStore';
+import { detectedBlobAccess, storeStatus } from '@/lib/jsonStore';
 import { readLog } from '@/lib/log/store';
 
 export const dynamic = 'force-dynamic';
@@ -53,18 +53,19 @@ async function probeWrites(): Promise<ProbeAttempt[]> {
     }
   };
 
-  await run('app options (addRandomSuffix false, allowOverwrite, cacheControlMaxAge 0)', () =>
+  // A store accepts exactly one of these and rejects the other outright, so
+  // trying both identifies how the store is configured.
+  await run('access: private', () =>
     put('gammadesk/_probe.json', body, {
-      access: 'public',
+      access: 'private',
       addRandomSuffix: false,
       allowOverwrite: true,
       contentType: 'application/json',
-      cacheControlMaxAge: 0,
     }),
   );
 
-  await run('minimal options (access public only)', () =>
-    put('gammadesk/_probe-minimal.json', body, { access: 'public' }),
+  await run('access: public', () =>
+    put('gammadesk/_probe-public.json', body, { access: 'public' }),
   );
 
   return attempts;
@@ -239,6 +240,7 @@ export async function GET(request: Request) {
         kind: status.kind,
         durable: status.durable,
         reachable: blobReachable,
+        access: detectedBlobAccess(),
         error: blobError,
         note: status.note ?? null,
       },
