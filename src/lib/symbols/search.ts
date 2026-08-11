@@ -29,6 +29,31 @@ const POPULAR = [
 ];
 const POPULAR_RANK = new Map(POPULAR.map((s, i) => [s, i]));
 
+/**
+ * Leveraged, inverse and structured products.
+ *
+ * Typing "airl" should reach American Airlines before "MAX Airlines 3X
+ * Leveraged ETNs", and "apple" should reach Apple before "T-Rex 2X Long Apple
+ * Daily Target ETF". These are real listings and stay searchable — they are
+ * simply not what someone typing a company name means, and they are numerous
+ * enough to bury the answer without this.
+ */
+const DERIVATIVE =
+  /\b(?:[0-9](?:\.[0-9])?x|inverse|leveraged|etn|etns|daily target|ultrashort|ultrapro)\b/i;
+
+/** Pushes a match down its tier without removing it. */
+const DERIVATIVE_PENALTY = 40;
+
+/** Long enough for any real company name; the rest is listing boilerplate. */
+const MAX_NAME = 60;
+
+function trimName(name: string): string {
+  if (name.length <= MAX_NAME) return name;
+  const cut = name.slice(0, MAX_NAME);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > 30 ? cut.slice(0, lastSpace) : cut).replace(/[\s,(-]+$/, '')}…`;
+}
+
 /*
  * Tiers, best first. The gaps are wide enough that no popularity bonus can
  * lift a name match above a symbol match.
@@ -56,24 +81,35 @@ function score(entry: SymbolEntry, q: string): number {
   const symbol = entry.s;
   const name = entry.n.toLowerCase();
 
-  // Popularity only ever breaks a tie inside a tier.
-  const boost = (POPULAR_RANK.get(symbol) ?? 99) / 100;
+  const popularity = POPULAR_RANK.get(symbol);
+  const penalty = DERIVATIVE.test(entry.n) ? DERIVATIVE_PENALTY : 0;
 
-  if (symbol === q) return EXACT_SYMBOL + boost;
+  if (symbol === q) return EXACT_SYMBOL + (popularity ?? 99) / 100;
+
   if (symbol.startsWith(q)) {
-    // Shorter symbols first: for `A`, A beats AA beats AAPL.
-    return SYMBOL_PREFIX + symbol.length + boost;
+    /*
+     * Popularity outranks symbol length here, and the ordering is wrong
+     * without it: for `S`, plain length would put SA and SB above SPY. A
+     * beginner typing one letter wants the household name, not the
+     * alphabetically lucky one.
+     */
+    return (
+      SYMBOL_PREFIX +
+      (popularity === undefined ? 10 + symbol.length + penalty : popularity / 100)
+    );
   }
 
   const lower = q.toLowerCase();
+  const boost = (popularity ?? 99) / 100;
+
   const wordAt = wordPrefixIndex(name, lower);
   // Matching the first word beats matching the fourth.
-  if (wordAt >= 0) return NAME_WORD_PREFIX + Math.min(wordAt, 60) + boost;
+  if (wordAt >= 0) return NAME_WORD_PREFIX + penalty + Math.min(wordAt, 30) + boost;
 
-  if (symbol.includes(q)) return SYMBOL_CONTAINS + symbol.length + boost;
+  if (symbol.includes(q)) return SYMBOL_CONTAINS + penalty + symbol.length + boost;
 
   const at = name.indexOf(lower);
-  if (at >= 0) return NAME_CONTAINS + Math.min(at, 60) + boost;
+  if (at >= 0) return NAME_CONTAINS + penalty + Math.min(at, 30) + boost;
 
   return NO_MATCH;
 }
@@ -99,7 +135,7 @@ export function searchSymbols(
 
   return scored.slice(0, limit).map(({ entry }) => ({
     symbol: entry.s,
-    name: entry.n,
+    name: trimName(entry.n),
     isEtf: entry.e === 1,
   }));
 }
