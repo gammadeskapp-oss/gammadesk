@@ -39,6 +39,7 @@ const NAV: NavItem[] = [
   { href: '/log', label: 'Accuracy Log', icon: '✓' },
   { href: '/ticker', label: 'Ticker', icon: '⌕' },
   { href: '/digest', label: 'Digest', icon: '≡' },
+  { href: '/post', label: 'Morning Post', icon: '✎' },
   { href: '/guide', label: 'Guide', icon: '?' },
 ];
 

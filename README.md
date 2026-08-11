@@ -306,6 +306,50 @@ cannot tell those apart.
 
 ---
 
+## Morning Post (`/post` + X + Discord)
+
+Today's positioning written as a six-line post, ready to publish:
+
+```
+$SPY this morning 🟡
+Mood: calm
+Wall above: 775 · Floor below: 773
+Gets wild only under: 767.50
+Plain English: Boxed between 773 and 775 — expect chop until one gives way.
+15-min delayed · not advice · gammadesk.app
+```
+
+The page shows a live character count against X's 280, a **Copy** button, and
+a **Post to X** button that opens the compose window with the text already
+filled in. The same text goes to Discord each weekday morning through the
+existing `DISCORD_WEBHOOK_URL`.
+
+Only the plain-English line is generated; the rest is a fixed template. It is
+chosen from the setup — price sitting on the flip is called out ahead of
+anything else, because it is the condition most likely to change during the
+session — then negative gamma, then being boxed between two magnets.
+
+**The page cannot post anything.** Opening `/post` builds the text and nothing
+else; the Discord send lives in `/api/post`, behind `CRON_SECRET`. A page view
+must never be able to write to a channel.
+
+### The 9am schedule and daylight saving
+
+Vercel schedules crons in UTC only, so `0 13 * * 1-5` is 09:00 New York from
+March to November and 08:00 for the rest of the year. Rather than spend a
+second cron slot, the handler refuses to run before 9am local and is
+idempotent per date — so adding a `0 14 * * 1-5` entry makes it correct
+year-round with no chance of two posts landing in one morning.
+
+Trigger it by hand with `?dry=1` to see the wording without sending, or
+`?force=1` to re-send a day that already went out:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" "https://gammadesk.app/api/post?dry=1"
+```
+
+---
+
 ## Daily Digest (`/digest` + Discord)
 
 A fifteen-second plain-English summary, generated once a day after the close:
