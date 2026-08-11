@@ -130,6 +130,85 @@ const ENTRIES = {
     detail:
       'Today’s volume divided by the open interest carried into the session. It says something traded, not who traded it or why.',
   },
+
+  // --- flow column headers ---------------------------------------------------
+  //
+  // Kept out of TOOLTIP_ORDER below: the glossary on /guide is for concepts,
+  // and a reader there does not need a definition of a column called "Ticker".
+
+  flowTicker: {
+    label: 'Ticker',
+    plain: 'Which stock or ETF the option is on.',
+  },
+
+  flowExpiry: {
+    label: 'Expiry',
+    plain:
+      'The date the option runs out. After that day it stops existing, worth something or nothing.',
+  },
+
+  flowStrike: {
+    label: 'Strike',
+    plain:
+      'The price the option is pinned to. It only pays off if the stock ends up past this price.',
+  },
+
+  flowType: {
+    label: 'Type',
+    plain:
+      'CALL pays off if price goes up, PUT if it goes down — but either can also be someone protecting what they already own.',
+  },
+
+  flowVolume: {
+    label: 'Volume',
+    plain: 'How many of these contracts changed hands today.',
+  },
+
+  flowOpenInterest: {
+    label: 'Open interest',
+    plain:
+      'How many were already sitting open before today started. Today’s trading is compared against this.',
+    detail: 'Settled overnight, so it does not include any of today’s activity.',
+  },
+
+  flowFlag: {
+    label: 'Flag',
+    plain:
+      'How unusual it is, at a glance. NOTABLE is busy, HIGH is very busy, EXTREME is the rare stuff.',
+  },
+
+  flowWhat: {
+    label: 'What happened',
+    plain: 'The row written out in one plain sentence, so you do not have to read the numbers.',
+  },
+
+  flowSpot: {
+    label: 'Spot',
+    plain: 'What the stock itself costs right now.',
+  },
+
+  flowChainVolume: {
+    label: 'Chain volume',
+    plain: 'Every option contract traded on this stock today, added together.',
+  },
+
+  flowChainOi: {
+    label: 'Open interest (chain)',
+    plain: 'Every option contract currently open on this stock, added together.',
+  },
+
+  flowPutCallVolume: {
+    label: 'Put/call volume',
+    plain:
+      'Puts traded divided by calls traded. Above 1 means more puts than calls changed hands today.',
+    detail:
+      'A common nervousness gauge, and a crude one — puts are bought as insurance at least as often as they are bets.',
+  },
+
+  flowFlagged: {
+    label: 'Flagged',
+    plain: 'How many strikes on this stock were unusual enough to make the list above.',
+  },
 };
 
 export type TooltipKey = keyof typeof ENTRIES;

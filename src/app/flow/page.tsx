@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { Footer } from '@/components/Footer';
 import { InfoTip } from '@/components/InfoTip';
 import { getFlowSnapshot, storeStatus } from '@/lib/flow';
 import type { UnusualLevel } from '@/lib/flow/types';
 import { formatContracts, formatPrice, formatStrike } from '@/lib/format';
+import type { TooltipKey } from '@/lib/tooltips';
 
 export const metadata: Metadata = {
   title: 'Unusual Options Activity',
@@ -19,12 +21,42 @@ const LEVEL: Record<UnusualLevel, { text: string; label: string }> = {
   notable: { text: 'text-term-dim', label: 'NOTABLE' },
 };
 
+const head =
+  'sticky top-0 z-10 whitespace-nowrap border-b border-term-edge bg-term-raised px-2.5 py-2 text-2xs font-bold uppercase tracking-[0.1em] text-term-dim';
+
+/**
+ * Column header with its own explanation.
+ *
+ * The `?` sits inside the cell next to the label; `justify-end` keeps it on
+ * the correct side of a right-aligned numeric column so the heading still
+ * lines up over its numbers.
+ */
+function Th({
+  label,
+  tip,
+  align = 'right',
+}: {
+  label: string;
+  tip: TooltipKey;
+  align?: 'left' | 'right';
+}) {
+  return (
+    <th scope="col" className={`${head} ${align === 'left' ? 'text-left' : ''}`}>
+      <span
+        className={`inline-flex items-center gap-1 ${
+          align === 'left' ? '' : 'justify-end'
+        }`}
+      >
+        {label}
+        <InfoTip for={tip} />
+      </span>
+    </th>
+  );
+}
+
 export default async function FlowPage() {
   const snapshot = await getFlowSnapshot();
   const store = storeStatus();
-
-  const head =
-    'sticky top-0 z-10 whitespace-nowrap border-b border-term-edge bg-term-raised px-2.5 py-2 text-2xs font-bold uppercase tracking-[0.1em] text-term-dim';
 
   return (
     <>
@@ -42,22 +74,54 @@ export default async function FlowPage() {
           )}
         </div>
 
-        {/* The label the brief asked for, placed above the data rather than
-            under it, because it changes how every row should be read. */}
-        <div className="panel border-l-2 border-l-flip/60 px-3.5 py-3 text-xs leading-relaxed">
-          <p className="text-term-text">
-            <span className="font-bold text-flip">This is activity, not a signal. </span>
-            A large print says something was traded — it does not say by whom, in
-            which direction, or why.
-          </p>
-          <p className="mt-2 text-term-dim">
-            Every one of these could be an opening buy, an opening sell, one leg
-            of a spread, a roll of an existing position, or a hedge against
-            stock. The feed reports volume, not intent, and there is no way to
-            tell them apart from this data. Treat it as a list of places where
-            something happened, and nothing more.
-          </p>
-        </div>
+        {/* Above the data, not under it, because it changes how every row
+            should be read. Three parts rather than one paragraph: the middle
+            one is the part people skip, and it is the one that matters. */}
+        <section
+          aria-label="How to read this page"
+          className="panel border-2 border-pos/50 bg-pos/[0.04]"
+        >
+          <div className="border-b border-pos/25 px-4 py-2.5">
+            <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-pos">
+              Read this first
+            </h2>
+          </div>
+
+          <dl className="divide-y divide-term-line/70 text-sm leading-relaxed">
+            <div className="px-4 py-3">
+              <dt className="font-bold text-pos">What this is</dt>
+              <dd className="mt-1 text-term-text">
+                Options that traded way more than usual today — spots where lots
+                of option money moved.
+              </dd>
+            </div>
+
+            <div className="px-4 py-3">
+              <dt className="font-bold text-bear">What it does NOT mean</dt>
+              <dd className="mt-1 text-term-text">
+                Not a buy or sell signal. The data cannot see{' '}
+                <span className="text-bear">why</span> someone traded — it could
+                be a bet, or just someone protecting stock they already own.
+                Heavy activity does not mean price goes that way.
+              </dd>
+            </div>
+
+            <div className="px-4 py-3">
+              <dt className="font-bold text-pos">How to use it</dt>
+              <dd className="mt-1 text-term-text">
+                As a &ldquo;where are the eyes today&rdquo; map. Most useful when
+                a busy name lines up with your wall and magnet levels on the{' '}
+                <Link
+                  href="/"
+                  className="text-pos underline decoration-dotted underline-offset-2"
+                >
+                  Positioning
+                </Link>{' '}
+                page. Never trade off this page alone.
+              </dd>
+            </div>
+          </dl>
+        </section>
 
         {!snapshot ? (
           <div className="panel px-4 py-10 text-center text-xs text-term-dim">
@@ -86,20 +150,15 @@ export default async function FlowPage() {
                 </caption>
                 <thead>
                   <tr>
-                    <th scope="col" className={`${head} text-left`}>Ticker</th>
-                    <th scope="col" className={head}>Expiry</th>
-                    <th scope="col" className={head}>Strike</th>
-                    <th scope="col" className={head}>Type</th>
-                    <th scope="col" className={head}>Volume</th>
-                    <th scope="col" className={head}>Open int.</th>
-                    <th scope="col" className={head}>
-                      <span className="inline-flex items-center gap-1">
-                        Vol/OI
-                        <InfoTip for="volOi" />
-                      </span>
-                    </th>
-                    <th scope="col" className={`${head} text-left`}>Flag</th>
-                    <th scope="col" className={`${head} text-left`}>What happened</th>
+                    <Th label="Ticker" tip="flowTicker" align="left" />
+                    <Th label="Expiry" tip="flowExpiry" />
+                    <Th label="Strike" tip="flowStrike" />
+                    <Th label="Type" tip="flowType" />
+                    <Th label="Volume" tip="flowVolume" />
+                    <Th label="Open int." tip="flowOpenInterest" />
+                    <Th label="Vol/OI" tip="volOi" />
+                    <Th label="Flag" tip="flowFlag" align="left" />
+                    <Th label="What happened" tip="flowWhat" align="left" />
                   </tr>
                 </thead>
                 <tbody>
@@ -200,12 +259,12 @@ export default async function FlowPage() {
                 </caption>
                 <thead>
                   <tr>
-                    <th scope="col" className={`${head} text-left`}>Ticker</th>
-                    <th scope="col" className={head}>Spot</th>
-                    <th scope="col" className={head}>Chain volume</th>
-                    <th scope="col" className={head}>Open interest</th>
-                    <th scope="col" className={head}>Put/call vol</th>
-                    <th scope="col" className={head}>Flagged</th>
+                    <Th label="Ticker" tip="flowTicker" align="left" />
+                    <Th label="Spot" tip="flowSpot" />
+                    <Th label="Chain volume" tip="flowChainVolume" />
+                    <Th label="Open interest" tip="flowChainOi" />
+                    <Th label="Put/call vol" tip="flowPutCallVolume" />
+                    <Th label="Flagged" tip="flowFlagged" />
                   </tr>
                 </thead>
                 <tbody>
