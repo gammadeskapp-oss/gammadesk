@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { SymbolSearch } from './SymbolSearch';
 import { formatPrice } from '@/lib/format';
 import { strengthDots } from '@/lib/groups/ranking';
 import type { QuickScoreResult } from '@/lib/ticker/quickScore';
@@ -21,7 +22,6 @@ function Dots({ bullish, total }: { bullish: number; total: number }) {
 
 export function WatchlistView() {
   const { symbols, ready, remove, clear, toggle, full } = useWatchlist();
-  const [draft, setDraft] = useState('');
 
   /*
    * One piece of state, tagged with the symbol list it belongs to. Loading and
@@ -80,38 +80,17 @@ export function WatchlistView() {
   return (
     <div className="space-y-4">
       <div className="panel flex flex-wrap items-end justify-between gap-3 px-3.5 py-3">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const s = draft.trim().toUpperCase();
-            if (isValidSymbol(s)) {
-              toggle(s);
-              setDraft('');
-            }
-          }}
-          className="flex flex-wrap gap-2"
-        >
-          <label htmlFor="watch-add" className="sr-only">
-            Add a ticker
-          </label>
-          <input
-            id="watch-add"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value.toUpperCase())}
-            placeholder="ADD TICKER"
-            maxLength={10}
-            autoComplete="off"
-            spellCheck={false}
-            className="w-44 border border-term-edge bg-term-panel px-3 py-1.5 text-xs tracking-[0.12em] text-term-text placeholder:text-term-faint focus:border-pos/60 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={!isValidSymbol(draft) || full}
-            className={button}
-          >
-            Add
-          </button>
-        </form>
+        <SymbolSearch
+          inputId="watch-add"
+          label="Add a ticker"
+          placeholder="ADD TICKER"
+          submitLabel="Add"
+          size="sm"
+          validate={isValidSymbol}
+          clearOnSubmit
+          disabled={full}
+          onSubmit={toggle}
+        />
 
         <div className="flex items-center gap-3">
           {scored.length > 0 && (
