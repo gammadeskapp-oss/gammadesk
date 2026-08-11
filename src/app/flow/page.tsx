@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { Footer } from '@/components/Footer';
 import { InfoTip } from '@/components/InfoTip';
 import { getFlowSnapshot, storeStatus } from '@/lib/flow';
+import { filterFlow } from '@/lib/flow/filter';
 import type { UnusualLevel } from '@/lib/flow/types';
 import { formatContracts, formatPrice, formatStrike } from '@/lib/format';
 import type { TooltipKey } from '@/lib/tooltips';
@@ -54,9 +55,20 @@ function Th({
   );
 }
 
-export default async function FlowPage() {
-  const snapshot = await getFlowSnapshot();
+interface PageProps {
+  searchParams: Promise<{ from?: string; to?: string }>;
+}
+
+export default async function FlowPage({ searchParams }: PageProps) {
+  const [snapshot, params] = await Promise.all([getFlowSnapshot(), searchParams]);
   const store = storeStatus();
+
+  const filtered = snapshot
+    ? filterFlow(snapshot, { from: params.from, to: params.to })
+    : null;
+
+  const field =
+    'border border-term-edge bg-term-panel px-2.5 py-1.5 text-xs tabular-nums text-term-text focus:border-pos/60 focus:outline-none focus:ring-1 focus:ring-pos/40';
 
   return (
     <>
@@ -66,9 +78,9 @@ export default async function FlowPage() {
           <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
             Unusual Options Activity
           </h1>
-          {snapshot && (
+          {snapshot && filtered && (
             <p className="text-2xs text-term-faint">
-              {snapshot.rows.length} flagged across {snapshot.scanned} symbols ·{' '}
+              {filtered.rows.length} flagged across {snapshot.scanned} symbols ·{' '}
               {snapshot.asOfLabel}
             </p>
           )}
@@ -123,7 +135,83 @@ export default async function FlowPage() {
           </dl>
         </section>
 
-        {!snapshot ? (
+        {/* Expiry range. A plain GET form, so the range lives in the URL and
+            can be linked or reloaded, and it works with JavaScript off. */}
+        {snapshot && filtered && (
+          <form
+            method="get"
+            aria-label="Filter by expiry date"
+            className="panel flex flex-wrap items-end gap-x-3 gap-y-2 px-3.5 py-3"
+          >
+            <div>
+              <label htmlFor="flow-from" className="label-xs block">
+                Expiry from
+              </label>
+              <input
+                type="date"
+                id="flow-from"
+                name="from"
+                defaultValue={filtered.from ?? ''}
+                className={`mt-1 ${field}`}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="flow-to" className="label-xs block">
+                Expiry to
+              </label>
+              <input
+                type="date"
+                id="flow-to"
+                name="to"
+                defaultValue={filtered.to ?? ''}
+                className={`mt-1 ${field}`}
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="border border-pos/50 bg-pos/10 px-4 py-1.5 text-2xs font-bold uppercase tracking-[0.16em] text-pos transition-colors hover:bg-pos/20"
+            >
+              Apply
+            </button>
+
+            {!filtered.usingDefault && (
+              <Link
+                href="/flow"
+                className="border border-term-line bg-term-panel/60 px-4 py-1.5 text-2xs uppercase tracking-[0.14em] text-term-dim transition-colors hover:border-term-edge hover:text-term-text"
+              >
+                Reset to live only
+              </Link>
+            )}
+
+            <p className="ml-auto max-w-md text-2xs leading-relaxed text-term-faint">
+              {filtered.usingDefault ? (
+                <>
+                  Showing contracts expiring{' '}
+                  <span className="text-term-dim">{filtered.today}</span> or
+                  later.
+                  {filtered.expiredHidden > 0 && (
+                    <>
+                      {' '}
+                      {filtered.expiredHidden} expired row
+                      {filtered.expiredHidden === 1 ? '' : 's'} hidden — those
+                      contracts no longer trade.
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className="text-flip">Custom range. </span>
+                  Your dates are being honoured, so expired contracts can appear
+                  here.
+                </>
+              )}
+            </p>
+          </form>
+        )}
+
+        {!snapshot || !filtered ? (
           <div className="panel px-4 py-10 text-center text-xs text-term-dim">
             <p className="text-term-text">No flow snapshot yet.</p>
             <p className="mx-auto mt-2 max-w-xl leading-relaxed">
@@ -132,14 +220,38 @@ export default async function FlowPage() {
               to this page.
             </p>
           </div>
-        ) : snapshot.rows.length === 0 ? (
+        ) : filtered.rows.length === 0 ? (
           <div className="panel px-4 py-10 text-center text-xs text-term-dim">
-            <p className="text-term-text">Nothing unusual today.</p>
-            <p className="mx-auto mt-2 max-w-xl leading-relaxed">
-              No contract in the tracked symbols traded more than its existing
-              open interest on meaningful size. A quiet tape is a perfectly
-              ordinary result.
-            </p>
+            {snapshot.rows.length === 0 ? (
+              <>
+                <p className="text-term-text">Nothing unusual today.</p>
+                <p className="mx-auto mt-2 max-w-xl leading-relaxed">
+                  No contract in the tracked symbols traded more than its
+                  existing open interest on meaningful size. A quiet tape is a
+                  perfectly ordinary result.
+                </p>
+              </>
+            ) : filtered.usingDefault ? (
+              <>
+                <p className="text-term-text">
+                  Nothing unusual at a live expiry.
+                </p>
+                <p className="mx-auto mt-2 max-w-xl leading-relaxed">
+                  All {snapshot.rows.length} flagged contracts in this scan have
+                  since expired, so none of them can trade again. That happens
+                  when the scan is older than the contracts it caught — the next
+                  run will refill this.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-term-text">Nothing in that date range.</p>
+                <p className="mx-auto mt-2 max-w-xl leading-relaxed">
+                  No flagged contract expires between the dates you chose. Widen
+                  the range, or reset to the live-only view.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <section className="panel">
@@ -162,7 +274,7 @@ export default async function FlowPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {snapshot.rows.map((r) => {
+                  {filtered.rows.map((r) => {
                     const tone = LEVEL[r.level];
                     const cell = 'border-b border-term-line/60 px-2.5 py-1.5';
                     return (
@@ -236,6 +348,15 @@ export default async function FlowPage() {
               scan runs once a day, so this describes a session that has largely
               finished. It is not a live tape.
             </p>
+            <p className="mt-2">
+              <span className="text-term-dim">Expired contracts are hidden by default. </span>
+              A scan is read for as long as it stands, so by the next session
+              its front-week contracts have expired — whatever traded there
+              cannot trade again, and listing it as unusual activity points at
+              something that no longer exists. Setting an expiry range overrides
+              this and shows exactly what you asked for. The filter measures
+              against the New York date, since that is when options expire.
+            </p>
             {snapshot.notes.map((n) => (
               <p key={n} className="mt-2 text-flip/80">! {n}</p>
             ))}
@@ -245,7 +366,7 @@ export default async function FlowPage() {
           </section>
         )}
 
-        {snapshot && snapshot.symbols.length > 0 && (
+        {filtered && filtered.symbols.length > 0 && (
           <section className="panel">
             <div className="border-b border-term-line px-3.5 py-2">
               <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-text">
@@ -268,7 +389,7 @@ export default async function FlowPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {snapshot.symbols.map((s) => {
+                  {filtered.symbols.map((s) => {
                     const cell = 'border-b border-term-line/60 px-2.5 py-1.5';
                     return (
                       <tr key={s.symbol}>
