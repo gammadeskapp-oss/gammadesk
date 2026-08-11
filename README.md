@@ -185,7 +185,9 @@ on screen stay complete. If that happens, the dashboard says so in its footer.
 ## Installable app (PWA)
 
 GammaDesk installs to a home screen and opens standalone on Android Chrome and
-iPhone Safari. Icons are generated from the gamma mark by `npm run icons`.
+iPhone Safari. Icons are generated from the gamma mark by `npm run brand`,
+which also produces the favicon, the social banner and the header logo — see
+[Brand assets](#brand-assets).
 
 ### The service worker caches the shell, never the data
 
@@ -209,6 +211,57 @@ only. iOS Safari has not adopted that name and still reads
 standalone. Without it, "Add to Home Screen" on iPhone opens in a browser
 chrome view rather than full screen — so it is added explicitly via
 `metadata.other`.
+
+---
+
+## Brand assets
+
+`npm run brand` regenerates everything from one script, `scripts/generate-brand.mjs`:
+
+| File | Size | Use |
+| --- | --- | --- |
+| `icon-512.png`, `icon-192.png` | 512, 192 | Round profile picture, and the PWA icons |
+| `icon-maskable-512.png` | 512 | PWA `maskable`, disc inset into the safe zone |
+| `apple-touch-icon.png` | 180 | iOS home screen |
+| `favicon.ico` | 16, 32, 48 | Browser tab |
+| `banner-x.png` | 1500x500 | X / social header |
+| `logo-header.png`, `@2x` | 580x180 | Header logo, transparent |
+| `brand/*.svg` | — | Editable sources |
+
+Amber `#f0a500` on `#0a0e17`, matching the CSS variables in `globals.css`.
+
+### The mark is the real letter, and the font is asserted
+
+An earlier version drew the gamma as two hand-authored strokes so the icons
+would not depend on a font. It read as a lowercase `y` — in a gamma the *left*
+stroke carries the descender, in a `y` the right one does, and that is the
+whole difference between the two letters.
+
+So the mark is set in Consolas like everything else, and the font dependency
+is handled rather than avoided. librsvg does not report an unresolved family;
+it silently substitutes the default sans, which for the letter that *is* the
+logo would mean shipping the wrong mark with no error. The script therefore
+renders the wordmark twice — once in Consolas, once in a family that cannot
+exist — and refuses to write anything if the two come out identical. For the
+same reason `font-family` is a single name: librsvg resolves a comma-separated
+list straight to the generic fallback, which is how `"Consolas, monospace"`
+quietly renders as a sans.
+
+The glyph's position is measured rather than guessed. A gamma has a descender,
+so its ink sits well below the baseline and nowhere near the middle of its em
+box. The script rasterises the letter alone, walks the alpha channel for the
+ink bounds, and centres against those — which is why it lands correctly in the
+disc at every size.
+
+The banner keeps its whole bottom strip empty. X overlays the profile picture
+on the bottom-left of a header, and the brief asked for the bottom-centre to
+stay clear; leaving the entire strip alone covers both, and every other
+platform's crop as well.
+
+The site header is still live text, not `logo-header.png`. It stays crisp at
+any zoom, recolours with the theme, and is selectable — a raster image would
+lose all three. The PNG is for places that cannot render the page: social
+cards, READMEs, slides.
 
 ---
 

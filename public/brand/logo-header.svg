@@ -1,0 +1,7 @@
+<!-- GammaDesk brand source. Text is set in Consolas; convert to
+     outlines before handing this to anything that may not have it.
+     Regenerate with: npm run brand -->
+<svg xmlns="http://www.w3.org/2000/svg" width="580" height="180" viewBox="0 0 580 180">
+  <text x="16.81" y="114.91" font-family="Consolas" font-size="159.43" font-weight="bold" fill="#f0a500">&#947;</text>
+  <text x="123.72" y="118" font-family="Consolas" font-size="76" font-weight="bold" fill="#ffffff">Gamma<tspan fill="#f0a500">Desk</tspan></text>
+</svg>
