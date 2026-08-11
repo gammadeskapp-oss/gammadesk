@@ -138,7 +138,12 @@ export default async function VelocityPage() {
               {data.previousDate
                 ? `${data.previousDate} → ${data.currentDate}`
                 : `${data.currentDate} captured`}{' '}
-              · {data.symbols} symbols · {data.snapshotsStored} snapshot
+              ·{' '}
+              <span className={data.symbols < data.universe ? 'text-flip' : undefined}>
+                {data.symbols}
+                {data.symbols < data.universe && ` of ${data.universe}`} symbols
+              </span>{' '}
+              · {data.snapshotsStored} snapshot
               {data.snapshotsStored === 1 ? '' : 's'} stored
               {data.capturedAt && ` · ${formatAsOf(new Date(data.capturedAt))}`}
             </p>

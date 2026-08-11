@@ -1,7 +1,7 @@
 import 'server-only';
 
-import { allTrackedSymbols } from '../groups/definitions';
 import { getPositioningForSymbol } from '../positioning';
+import { runScan, scanSymbols } from '../scanUniverse';
 import { marketNow } from '../time';
 import type { StrikeGamma, VelocitySnapshot } from './types';
 
@@ -13,9 +13,6 @@ import type { StrikeGamma, VelocitySnapshot } from './types';
  * never per page view.
  */
 
-/** Symbols fetched at once. Chains are large. */
-const WAVE = 3;
-
 /** Strikes below this absolute gamma are noise and not worth storing. */
 const MIN_ABS_GEX = 250_000;
 
@@ -23,44 +20,40 @@ const MIN_ABS_GEX = 250_000;
 const EXPIRATIONS = 5;
 
 export async function captureSnapshot(): Promise<VelocitySnapshot> {
-  const symbols = allTrackedSymbols();
+  const symbols = scanSymbols();
 
   const strikes: StrikeGamma[] = [];
   const spots: Record<string, number> = {};
   const failures: string[] = [];
   const quoteDates: string[] = [];
 
-  for (let i = 0; i < symbols.length; i += WAVE) {
-    const wave = symbols.slice(i, i + WAVE);
-    const results = await Promise.all(
-      wave.map(async (symbol) => {
-        try {
-          const data = await getPositioningForSymbol(symbol, EXPIRATIONS);
-          return { symbol, data };
-        } catch {
-          return { symbol, data: null };
-        }
-      }),
-    );
-
-    for (const { symbol, data } of results) {
-      if (!data) {
-        failures.push(symbol);
-        continue;
-      }
-
-      spots[symbol] = data.spot;
-      quoteDates.push(marketNow(new Date(data.meta.quoteDateIso)).date);
-
-      data.expirationMeta.forEach((expiry, column) => {
-        for (const row of data.rows) {
-          const cell = row.cells[column];
-          if (!cell) continue;
-          if (Math.abs(cell.gex) < MIN_ABS_GEX) continue;
-          strikes.push({ t: symbol, e: expiry.date, k: row.strike, g: cell.gex });
-        }
-      });
+  // Waves, pacing and the time budget are shared with /flow — see
+  // `scanUniverse`, which is also the file to edit to change the list.
+  const { results, covered, skipped } = await runScan(symbols, async (symbol) => {
+    try {
+      return { symbol, data: await getPositioningForSymbol(symbol, EXPIRATIONS) };
+    } catch {
+      return { symbol, data: null };
     }
+  });
+
+  for (const { symbol, data } of results) {
+    if (!data) {
+      failures.push(symbol);
+      continue;
+    }
+
+    spots[symbol] = data.spot;
+    quoteDates.push(marketNow(new Date(data.meta.quoteDateIso)).date);
+
+    data.expirationMeta.forEach((expiry, column) => {
+      for (const row of data.rows) {
+        const cell = row.cells[column];
+        if (!cell) continue;
+        if (Math.abs(cell.gex) < MIN_ABS_GEX) continue;
+        strikes.push({ t: symbol, e: expiry.date, k: row.strike, g: cell.gex });
+      }
+    });
   }
 
   /*
@@ -77,7 +70,12 @@ export async function captureSnapshot(): Promise<VelocitySnapshot> {
     capturedAt: new Date().toISOString(),
     spots,
     strikes,
-    symbols: symbols.filter((s) => !failures.includes(s)),
+    // Only what this run actually read. The diff intersects these across two
+    // days, so a symbol the budget never reached must not appear here — it
+    // would otherwise read as every one of its strikes going to zero.
+    symbols: covered.filter((s) => !failures.includes(s)),
     failures,
+    universe: symbols.length,
+    skipped,
   };
 }

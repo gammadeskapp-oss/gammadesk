@@ -265,6 +265,52 @@ cards, READMEs, slides.
 
 ---
 
+## The scan universe (`lib/scanUniverse.ts`)
+
+One editable list of **60 symbols** drives both `/flow` and `/velocity`. Add or
+remove a line, redeploy, and the next daily run picks it up — the symbol counts
+in both page headers come from the same list.
+
+### Why sixty, and not eighty
+
+Cboe's delayed-quote CDN allows roughly **sixty chain requests per window**,
+then answers HTTP 429 until it refills. Measured rather than assumed: a run at
+8 requests/second and a run at 3.6 requests/second both returned exactly sixty
+chains followed by twenty consecutive 429s. Slowing down does not help — it is
+a quota, not a rate. The only thing that helps is asking for fewer.
+
+So sixty is the ceiling for one job, and the list sits on it. A longer list does
+not scan more names; it scans the same sixty and gets refused for the rest.
+`SCAN_MAX_REQUESTS` stops the run at the quota so the failure stays legible —
+the pages report "reached N of M" instead of listing twenty broken symbols.
+
+A full run measures **6.3 seconds and 84MB** at concurrency 6, comfortably
+inside the 40s budget and the platform's 60s function cap. `/flow` and
+`/velocity` are scheduled ten minutes apart so they never spend the same window.
+
+### It is not the groups list
+
+`groups/definitions.ts` drives the consensus scoring, breadth strip and forecast
+drift, each of which spends a rate-limited *price* API call per symbol. The scan
+list only reads option chains, which is why it can be three times longer. All
+twenty group symbols are included in it; removing one stops `/velocity`
+covering a name `/groups` still talks about.
+
+### Partial runs are reported, not hidden
+
+If a run is cut short, the tail of the list is dropped — which is why the
+most-watched names come first. Both pages then show the shortfall in amber
+(`44 of 60 symbols`) rather than looking like a quiet tape. `/velocity` goes
+further and excludes any symbol not read on *both* days from its comparison: a
+missing symbol would otherwise show every one of its strikes collapsing to
+zero, the same false reading as an expired contract but across a whole ticker.
+
+The order is fixed rather than rotated for the same reason — `/velocity` diffs
+consecutive days, and shuffling which symbols get scanned would leave nothing
+comparable between them.
+
+---
+
 ## Gamma Velocity (`/velocity`)
 
 Day-over-day change in per-strike dollar gamma across the tracked symbols:

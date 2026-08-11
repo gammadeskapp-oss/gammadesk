@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { parseOccSymbol } from '../cboe';
-import { allTrackedSymbols } from '../groups/definitions';
+import { runScan, scanSymbols } from '../scanUniverse';
 import { formatExpiryLabel, formatAsOf, marketToday } from '../time';
 import type { FlowRow, FlowSnapshot, FlowSymbolSummary, UnusualLevel } from './types';
 
@@ -105,7 +105,14 @@ async function scanSymbol(
       },
     );
     if (!res.ok) {
-      return { rows: [], summary: { ...empty, failed: `Cboe returned HTTP ${res.status}.` } };
+      // 429 is named explicitly because it means something actionable — the
+      // list is longer than the CDN's per-window quota — rather than "the
+      // chain is broken".
+      const failed =
+        res.status === 429
+          ? 'Rate limited by Cboe — the scan list is longer than one window allows.'
+          : `Cboe returned HTTP ${res.status}.`;
+      return { rows: [], summary: { ...empty, failed } };
     }
     payload = (await res.json()) as CboePayload;
   } catch (error) {
@@ -196,29 +203,30 @@ async function scanSymbol(
   };
 }
 
-/** Symbols scanned at once. Chains are megabytes each, so this stays small. */
-const WAVE = 3;
-
 export async function computeFlowSnapshot(): Promise<FlowSnapshot> {
-  const symbols = allTrackedSymbols();
-  const rows: FlowRow[] = [];
-  const summaries: FlowSymbolSummary[] = [];
+  const symbols = scanSymbols();
 
-  for (let i = 0; i < symbols.length; i += WAVE) {
-    const wave = await Promise.all(symbols.slice(i, i + WAVE).map(scanSymbol));
-    for (const result of wave) {
-      rows.push(...result.rows);
-      summaries.push(result.summary);
-    }
-  }
+  // Waves, pacing and the time budget all live in `scanUniverse`, so /flow and
+  // /velocity cannot drift into scanning at different rates.
+  const { results, covered, skipped } = await runScan(symbols, scanSymbol);
+
+  const rows = results.flatMap((r) => r.rows);
+  const summaries = results.map((r) => r.summary);
 
   const failed = summaries.filter((s) => s.failed);
   const notes: string[] = [];
   if (failed.length > 0) {
     notes.push(
-      `${failed.length} of ${symbols.length} chains could not be read: ${failed
+      `${failed.length} of ${covered.length} chains could not be read: ${failed
         .map((f) => f.symbol)
         .join(', ')}.`,
+    );
+  }
+  if (skipped.length > 0) {
+    notes.push(
+      `${skipped.length} of ${symbols.length} symbols were not reached: ${skipped.join(', ')}. ` +
+        'Cboe allows about sixty chains per window, so a longer list scans the same sixty. ' +
+        'Edit lib/scanUniverse.ts to drop names, or move the ones you care about nearer the top.',
     );
   }
 
@@ -231,7 +239,8 @@ export async function computeFlowSnapshot(): Promise<FlowSnapshot> {
     symbols: summaries.sort((a, b) => b.totalVolume - a.totalVolume),
     asOfLabel: formatAsOf(now),
     computedAt: now.toISOString(),
-    scanned: symbols.length,
+    scanned: covered.length,
+    universe: symbols.length,
     notes,
   };
 }

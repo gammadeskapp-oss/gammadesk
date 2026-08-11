@@ -23,8 +23,13 @@ export interface VelocitySnapshot {
   capturedAt: string;
   spots: Record<string, number>;
   strikes: StrikeGamma[];
+  /** Symbols this run actually read a chain for. */
   symbols: string[];
   failures: string[];
+  /** Size of the configured list. Optional: older snapshots predate it. */
+  universe?: number;
+  /** Symbols the time budget never reached. Optional for the same reason. */
+  skipped?: string[];
 }
 
 export interface StoredVelocity {
@@ -82,7 +87,10 @@ export interface VelocityResult {
   /** The day it is compared against. */
   previousDate: string | null;
   capturedAt: string;
+  /** Symbols the newest snapshot actually read. */
   symbols: number;
+  /** Symbols on the configured scan list. */
+  universe: number;
   snapshotsStored: number;
   totalCompared: number;
   notes: string[];

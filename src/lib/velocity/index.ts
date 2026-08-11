@@ -2,6 +2,7 @@ import 'server-only';
 
 import { cached } from '../cache';
 import { createJsonStore } from '../jsonStore';
+import { scanSymbolCount } from '../scanUniverse';
 import { formatExpiryLabel } from '../time';
 import { captureSnapshot } from './compute';
 import type {
@@ -70,12 +71,26 @@ function expirations(snapshot: VelocitySnapshot): Set<string> {
 function diff(
   current: VelocitySnapshot,
   previous: VelocitySnapshot,
-): { rows: VelocityRow[]; rolledOff: VelocityRow[] } {
+): { rows: VelocityRow[]; rolledOff: VelocityRow[]; uncomparableSymbols: string[] } {
   const before = new Map(previous.strikes.map((s) => [key(s), s.g]));
   const after = new Map(current.strikes.map((s) => [key(s), s.g]));
 
   const currentExpiries = expirations(current);
   const previousExpiries = expirations(previous);
+
+  /*
+   * Only symbols read on both days can be compared at all.
+   *
+   * A run has a fixed time budget, so a long list can end a day short of its
+   * tail. A symbol missing from one side would otherwise show every one of its
+   * strikes collapsing to zero — the same false reading as an expired contract,
+   * but across a whole ticker at once. These are dropped rather than labelled:
+   * "we did not look" is not a fact about the market, and there could be
+   * hundreds of such rows.
+   */
+  const currentSymbols = new Set(current.symbols);
+  const comparable = new Set(previous.symbols.filter((s) => currentSymbols.has(s)));
+  const uncomparable = new Set<string>();
 
   const allKeys = new Set([...before.keys(), ...after.keys()]);
   const rows: VelocityRow[] = [];
@@ -84,6 +99,11 @@ function diff(
   for (const k of allKeys) {
     const [symbol, expiration, strikeText] = k.split('|');
     const strike = Number(strikeText);
+
+    if (!comparable.has(symbol)) {
+      uncomparable.add(symbol);
+      continue;
+    }
     const was = before.get(k) ?? 0;
     const now = after.get(k) ?? 0;
     const change = now - was;
@@ -132,6 +152,7 @@ function diff(
   return {
     rows: rows.sort(biggestFirst),
     rolledOff: rolledOff.sort(biggestFirst),
+    uncomparableSymbols: [...uncomparable].sort(),
   };
 }
 
@@ -147,8 +168,24 @@ function toResult(stored: StoredVelocity): VelocityResult {
     );
   }
 
-  const { rows, rolledOff } =
-    current && previous ? diff(current, previous) : { rows: [], rolledOff: [] };
+  if (current?.skipped?.length) {
+    notes.push(
+      `${current.skipped.length} symbols were not reached on the last run: ${current.skipped.join(', ')}. ` +
+        'Cboe allows about sixty chains per window; edit lib/scanUniverse.ts to change the list.',
+    );
+  }
+
+  const { rows, rolledOff, uncomparableSymbols } =
+    current && previous
+      ? diff(current, previous)
+      : { rows: [], rolledOff: [], uncomparableSymbols: [] };
+
+  if (uncomparableSymbols.length > 0) {
+    notes.push(
+      `${uncomparableSymbols.length} symbols were not read on both days, so they are ` +
+        `left out of the comparison rather than shown as vanishing: ${uncomparableSymbols.join(', ')}.`,
+    );
+  }
 
   return {
     rows: rows.slice(0, MAX_ROWS),
@@ -159,6 +196,7 @@ function toResult(stored: StoredVelocity): VelocityResult {
     previousDate: previous?.date ?? null,
     capturedAt: current?.capturedAt ?? '',
     symbols: current?.symbols.length ?? 0,
+    universe: current?.universe ?? scanSymbolCount(),
     snapshotsStored: snapshots.length,
     totalCompared: current?.strikes.length ?? 0,
     notes,

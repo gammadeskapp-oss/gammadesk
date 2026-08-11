@@ -10,9 +10,10 @@ export { storeStatus } from '../jsonStore';
 /**
  * Flow is computed once a day and served to everyone from the stored copy.
  *
- * Each scan reads roughly twenty full option chains, several megabytes apiece,
- * so this must never run on a page view. The lazy fallback exists only so a
- * fresh deploy is not blank until the first cron fires.
+ * Each scan reads every chain in `lib/scanUniverse.ts` — eighty of them,
+ * several megabytes apiece — so this must never run on a page view. The lazy
+ * fallback exists only so a fresh deploy is not blank until the first cron
+ * fires, and it inherits the same time budget as the job.
  */
 
 const store = createJsonStore<FlowSnapshot | null>(

@@ -80,8 +80,21 @@ export default async function FlowPage({ searchParams }: PageProps) {
           </h1>
           {snapshot && filtered && (
             <p className="text-2xs text-term-faint">
-              {filtered.rows.length} flagged across {snapshot.scanned} symbols ·{' '}
-              {snapshot.asOfLabel}
+              {filtered.rows.length} flagged across{' '}
+              <span
+                className={
+                  snapshot.universe && snapshot.scanned < snapshot.universe
+                    ? 'text-flip'
+                    : undefined
+                }
+              >
+                {snapshot.scanned}
+                {snapshot.universe && snapshot.scanned < snapshot.universe
+                  ? ` of ${snapshot.universe}`
+                  : ''}{' '}
+                symbols
+              </span>{' '}
+              · {snapshot.asOfLabel}
             </p>
           )}
         </div>

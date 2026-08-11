@@ -39,6 +39,13 @@ export interface FlowSnapshot {
   symbols: FlowSymbolSummary[];
   asOfLabel: string;
   computedAt: string;
+  /** Symbols the run actually reached. */
   scanned: number;
+  /**
+   * Symbols on the configured list. Differs from `scanned` only when a run hit
+   * its time budget. Optional so snapshots stored before this existed still
+   * parse.
+   */
+  universe?: number;
   notes: string[];
 }
