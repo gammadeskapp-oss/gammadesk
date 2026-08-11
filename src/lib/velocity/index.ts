@@ -5,6 +5,7 @@ import { createJsonStore } from '../jsonStore';
 import { formatExpiryLabel } from '../time';
 import { captureSnapshot } from './compute';
 import type {
+  RollOffReason,
   StoredVelocity,
   VelocityResult,
   VelocityRow,
@@ -40,6 +41,11 @@ function key(row: { t: string; e: string; k: number }): string {
   return `${row.t}|${row.e}|${row.k}`;
 }
 
+/** The distinct expirations a snapshot actually captured. */
+function expirations(snapshot: VelocitySnapshot): Set<string> {
+  return new Set(snapshot.strikes.map((s) => s.e));
+}
+
 /**
  * Diff the two most recent snapshots.
  *
@@ -48,13 +54,32 @@ function key(row: { t: string; e: string; k: number }): string {
  * overstates shrinkage for a strike that merely dropped under the storage
  * floor — the floor is small enough that the difference does not change any
  * ranking near the top of the table.
+ *
+ * It is *not* honest when the whole expiration is missing on one side, which
+ * is the common case rather than a corner one: every Friday the front expiry
+ * expires, and the next morning its entire strike ladder reads as collapsing
+ * to zero. Those were the largest "SHRANK" rows on the page and none of them
+ * were repositioning — the contracts simply stopped existing.
+ *
+ * So the test is per expiration, not per strike: compare only expirations
+ * captured on both days. The rest are separated out with a reason. The same
+ * rule catches the mirror image, an expiration entering the captured window
+ * with open interest already built up, which was showing as a block of
+ * enormous "NEW" rows that nobody had opened either.
  */
-function diff(current: VelocitySnapshot, previous: VelocitySnapshot): VelocityRow[] {
+function diff(
+  current: VelocitySnapshot,
+  previous: VelocitySnapshot,
+): { rows: VelocityRow[]; rolledOff: VelocityRow[] } {
   const before = new Map(previous.strikes.map((s) => [key(s), s.g]));
   const after = new Map(current.strikes.map((s) => [key(s), s.g]));
 
+  const currentExpiries = expirations(current);
+  const previousExpiries = expirations(previous);
+
   const allKeys = new Set([...before.keys(), ...after.keys()]);
   const rows: VelocityRow[] = [];
+  const rolledOff: VelocityRow[] = [];
 
   for (const k of allKeys) {
     const [symbol, expiration, strikeText] = k.split('|');
@@ -65,13 +90,25 @@ function diff(current: VelocitySnapshot, previous: VelocitySnapshot): VelocityRo
 
     if (Math.abs(change) < MIN_ABS_CHANGE) continue;
 
+    const inCurrent = currentExpiries.has(expiration);
+    const inPrevious = previousExpiries.has(expiration);
+
+    let rollOff: RollOffReason | undefined;
+    if (!inCurrent || !inPrevious) {
+      // Dated against the chain's trading day rather than the wall clock, for
+      // the same reason snapshots are — the newest book can be days old.
+      if (expiration < current.date) rollOff = 'expired';
+      else if (inPrevious) rollOff = 'left-window';
+      else rollOff = 'entered-window';
+    }
+
     // Magnitude, not sign — a strike going from +50M to -50M has not "grown".
     const tag: VelocityTag =
       was === 0 ? 'NEW' : Math.abs(now) > Math.abs(was) ? 'GREW' : 'SHRANK';
 
     const spot = current.spots[symbol] ?? previous.spots[symbol] ?? 0;
 
-    rows.push({
+    const row: VelocityRow = {
       symbol,
       expiration,
       expiryLabel: formatExpiryLabel(expiration),
@@ -83,10 +120,19 @@ function diff(current: VelocitySnapshot, previous: VelocitySnapshot): VelocityRo
       tag,
       spot,
       distancePct: spot > 0 ? ((strike - spot) / spot) * 100 : 0,
-    });
+      ...(rollOff ? { rollOff } : {}),
+    };
+
+    (rollOff ? rolledOff : rows).push(row);
   }
 
-  return rows.sort((a, b) => Math.abs(b.change) - Math.abs(a.change)).slice(0, MAX_ROWS);
+  const biggestFirst = (a: VelocityRow, b: VelocityRow) =>
+    Math.abs(b.change) - Math.abs(a.change);
+
+  return {
+    rows: rows.sort(biggestFirst),
+    rolledOff: rolledOff.sort(biggestFirst),
+  };
 }
 
 function toResult(stored: StoredVelocity): VelocityResult {
@@ -101,8 +147,14 @@ function toResult(stored: StoredVelocity): VelocityResult {
     );
   }
 
+  const { rows, rolledOff } =
+    current && previous ? diff(current, previous) : { rows: [], rolledOff: [] };
+
   return {
-    rows: current && previous ? diff(current, previous) : [],
+    rows: rows.slice(0, MAX_ROWS),
+    rolledOff: rolledOff.slice(0, MAX_ROWS),
+    rolledOffTotal: rolledOff.length,
+    expiredTotal: rolledOff.filter((r) => r.rollOff === 'expired').length,
     currentDate: current?.date ?? '',
     previousDate: previous?.date ?? null,
     capturedAt: current?.capturedAt ?? '',

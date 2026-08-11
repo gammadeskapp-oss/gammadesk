@@ -33,6 +33,23 @@ export interface StoredVelocity {
 
 export type VelocityTag = 'GREW' | 'SHRANK' | 'NEW';
 
+/**
+ * Why a row's change is an artefact of what was captured rather than real
+ * repositioning.
+ *
+ * All three come from the same underlying rule: a strike can only be honestly
+ * compared when its expiration was captured on *both* days. When it was not,
+ * the missing side reads as zero and the row shows a full-size change that
+ * nobody made.
+ */
+export type RollOffReason =
+  /** Expiry has passed, so the contract no longer exists. */
+  | 'expired'
+  /** Still live, but no longer inside the captured expirations. */
+  | 'left-window'
+  /** Newly inside the captured expirations, with open interest already on it. */
+  | 'entered-window';
+
 export interface VelocityRow {
   symbol: string;
   expiration: string;
@@ -47,10 +64,19 @@ export interface VelocityRow {
   tag: VelocityTag;
   spot: number;
   distancePct: number;
+  /** Absent on genuine changes. */
+  rollOff?: RollOffReason;
 }
 
 export interface VelocityResult {
+  /** Genuine repositioning at expirations captured on both days. */
   rows: VelocityRow[];
+  /** Artefacts, shown separately and collapsed. */
+  rolledOff: VelocityRow[];
+  /** Total artefacts found, before the display cap. */
+  rolledOffTotal: number;
+  /** How many of those were expiries that have passed. */
+  expiredTotal: number;
   /** Newest snapshot's trading day. */
   currentDate: string;
   /** The day it is compared against. */
