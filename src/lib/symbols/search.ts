@@ -38,8 +38,18 @@ const POPULAR_RANK = new Map(POPULAR.map((s, i) => [s, i]));
  * simply not what someone typing a company name means, and they are numerous
  * enough to bury the answer without this.
  */
-const DERIVATIVE =
-  /\b(?:[0-9](?:\.[0-9])?x|inverse|leveraged|etn|etns|daily target|ultrashort|ultrapro)\b/i;
+const DERIVATIVE = new RegExp(
+  [
+    // Leveraged and inverse funds.
+    String.raw`\b(?:[0-9](?:\.[0-9])?x|inverse|leveraged|etns?|daily target|ultrashort|ultrapro)\b`,
+    // Warrants, units, rights and note series, which ride on a company's
+    // ticker with a fifth letter and are not the company.
+    String.raw`\s[-–]\s*(?:warrant|unit|right|note|class|series|depositary|preferred)`,
+    String.raw`\bnotes due\b`,
+    String.raw`\bdepositary shares?\b`,
+  ].join('|'),
+  'i',
+);
 
 /** Pushes a match down its tier without removing it. */
 const DERIVATIVE_PENALTY = 40;
