@@ -1,16 +1,20 @@
+import { InfoTip } from './InfoTip';
 import { formatPrice, formatUsd } from '@/lib/format';
 import type { ForecastResult } from '@/lib/forecast/types';
+import type { TooltipKey } from '@/lib/tooltips';
 
 function Tile({
   label,
   value,
   sub,
   tone = 'neutral',
+  tip,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: 'neutral' | 'bull' | 'bear' | 'flip' | 'pos' | 'neg';
+  tip: TooltipKey;
 }) {
   const colour = {
     neutral: 'text-term-text',
@@ -31,7 +35,10 @@ function Tile({
 
   return (
     <div className={`panel border-l-2 px-3.5 py-2.5 ${edge}`}>
-      <div className="label-xs">{label}</div>
+      <div className="flex items-center gap-1.5">
+        <span className="label-xs">{label}</span>
+        <InfoTip for={tip} />
+      </div>
       <div className={`mt-1 text-lg font-bold tabular-nums ${colour}`}>{value}</div>
       {sub && <div className="mt-0.5 text-2xs text-term-faint">{sub}</div>}
     </div>
@@ -51,6 +58,7 @@ export function ForecastStats({ data }: { data: ForecastResult }) {
           value={`${o.higherPct.toFixed(0)}%`}
           sub={`median ${formatPrice(o.medianPrice)}`}
           tone={o.higherPct >= 50 ? 'bull' : 'bear'}
+          tip="odds"
         />
       ))}
 
@@ -59,6 +67,7 @@ export function ForecastStats({ data }: { data: ForecastResult }) {
         value={`${data.crashPct.toFixed(1)}%`}
         sub={`of ${data.paths.toLocaleString('en-US')} paths, any point`}
         tone={data.crashPct >= 5 ? 'bear' : 'neutral'}
+        tip="crash"
       />
 
       <Tile
@@ -72,6 +81,7 @@ export function ForecastStats({ data }: { data: ForecastResult }) {
             : formatUsd(data.netGex ?? 0)
         }
         tone={data.regime === null ? 'neutral' : data.regime === 'positive' ? 'pos' : 'neg'}
+        tip="regime"
       />
 
       <Tile
@@ -83,6 +93,7 @@ export function ForecastStats({ data }: { data: ForecastResult }) {
             : `flip ${formatPrice(data.gammaFlip)}`
         }
         tone="flip"
+        tip="realisedVol"
       />
     </section>
   );

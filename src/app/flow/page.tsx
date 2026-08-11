@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
+import { InfoTip } from '@/components/InfoTip';
 import { getFlowSnapshot, storeStatus } from '@/lib/flow';
 import type { UnusualLevel } from '@/lib/flow/types';
 import { formatContracts, formatPrice, formatStrike } from '@/lib/format';
@@ -91,7 +92,12 @@ export default async function FlowPage() {
                     <th scope="col" className={head}>Type</th>
                     <th scope="col" className={head}>Volume</th>
                     <th scope="col" className={head}>Open int.</th>
-                    <th scope="col" className={head}>Vol/OI</th>
+                    <th scope="col" className={head}>
+                      <span className="inline-flex items-center gap-1">
+                        Vol/OI
+                        <InfoTip for="volOi" />
+                      </span>
+                    </th>
                     <th scope="col" className={`${head} text-left`}>Flag</th>
                     <th scope="col" className={`${head} text-left`}>What happened</th>
                   </tr>

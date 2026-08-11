@@ -1,4 +1,6 @@
+import { InfoTip } from './InfoTip';
 import { formatPrice, formatRatio, formatStrike, formatUsd } from '@/lib/format';
+import type { TooltipKey } from '@/lib/tooltips';
 import type { Summary } from '@/lib/types';
 
 interface TileProps {
@@ -6,7 +8,8 @@ interface TileProps {
   value: string;
   sub?: string;
   tone?: 'neutral' | 'pos' | 'neg' | 'flip';
-  title?: string;
+  /** Plain-English explanation, opened by the `?` beside the label. */
+  tip: TooltipKey;
 }
 
 const TONE_VALUE: Record<NonNullable<TileProps['tone']>, string> = {
@@ -23,13 +26,13 @@ const TONE_EDGE: Record<NonNullable<TileProps['tone']>, string> = {
   flip: 'border-flip/40',
 };
 
-function Tile({ label, value, sub, tone = 'neutral', title }: TileProps) {
+function Tile({ label, value, sub, tone = 'neutral', tip }: TileProps) {
   return (
-    <div
-      title={title}
-      className={`panel border-l-2 px-3.5 py-2.5 ${TONE_EDGE[tone]}`}
-    >
-      <div className="label-xs">{label}</div>
+    <div className={`panel border-l-2 px-3.5 py-2.5 ${TONE_EDGE[tone]}`}>
+      <div className="flex items-center gap-1.5">
+        <span className="label-xs">{label}</span>
+        <InfoTip for={tip} />
+      </div>
       <div className={`mt-1 text-lg font-bold tabular-nums ${TONE_VALUE[tone]}`}>
         {value}
       </div>
@@ -66,7 +69,7 @@ export function SummaryStrip({ summary, symbol }: SummaryStripProps) {
         label={`${symbol} spot`}
         value={formatPrice(spot)}
         sub={`put/call OI ${formatRatio(putCallOiRatio)}`}
-        title="Underlying price the greeks were calculated at."
+        tip="spot"
       />
 
       <Tile
@@ -74,7 +77,7 @@ export function SummaryStrip({ summary, symbol }: SummaryStripProps) {
         value={formatUsd(netGex)}
         sub="$ delta per +1% move"
         tone={netGex >= 0 ? 'pos' : 'neg'}
-        title="Total dealer gamma exposure across every strike and expiration shown."
+        tip="netGex"
       />
 
       <Tile
@@ -86,11 +89,7 @@ export function SummaryStrip({ summary, symbol }: SummaryStripProps) {
             : 'dealers amplify moves'
         }
         tone={regime === 'positive' ? 'pos' : 'neg'}
-        title={
-          regime === 'positive'
-            ? 'Dealer hedging leans against price moves: expect chop and mean reversion.'
-            : 'Dealer hedging leans with price moves: expect trends and higher volatility.'
-        }
+        tip="regime"
       />
 
       <Tile
@@ -102,7 +101,7 @@ export function SummaryStrip({ summary, symbol }: SummaryStripProps) {
             : `spot is ${flipDistance >= 0 ? '+' : ''}${flipDistance.toFixed(2)}% vs flip`
         }
         tone="flip"
-        title="Price level at which aggregate dealer gamma changes sign."
+        tip="flip"
       />
 
       <Tile
@@ -112,7 +111,7 @@ export function SummaryStrip({ summary, symbol }: SummaryStripProps) {
         tone={
           magnetAbove ? (magnetAbove.gex >= 0 ? 'pos' : 'neg') : 'neutral'
         }
-        title="Strike above spot carrying the largest absolute gamma exposure."
+        tip="magnetAbove"
       />
 
       <Tile
@@ -122,7 +121,7 @@ export function SummaryStrip({ summary, symbol }: SummaryStripProps) {
         tone={
           magnetBelow ? (magnetBelow.gex >= 0 ? 'pos' : 'neg') : 'neutral'
         }
-        title="Strike at or below spot carrying the largest absolute gamma exposure."
+        tip="magnetBelow"
       />
     </section>
   );
