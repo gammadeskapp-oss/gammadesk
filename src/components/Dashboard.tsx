@@ -6,6 +6,8 @@ import { DataQuality } from './DataQuality';
 import { ExplainPanel } from './ExplainPanel';
 import { PageBar } from './PageBar';
 import { PositioningTable } from './PositioningTable';
+import { ReadMode, useReadMode } from './ReadMode';
+import { SimpleRead } from './SimpleRead';
 import { SummaryStrip } from './SummaryStrip';
 import { TabBar } from './TabBar';
 import type { MetricKey, PositioningData } from '@/lib/types';
@@ -49,17 +51,46 @@ export function Dashboard({ data }: DashboardProps) {
   const [explain, setExplain] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  const mode = useReadMode();
 
   const reload = () => startTransition(() => router.refresh());
 
   return (
     <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
       <PageBar
-        title={`${data.symbol} Dealer Positioning`}
+        title={mode === 'simple' ? `${data.symbol} Today` : `${data.symbol} Dealer Positioning`}
         asOfLabel={data.meta.asOfLabel}
         source={data.meta.source}
       />
 
+      {/*
+        Simple leads. The exposure tables are the same data one tap away, and
+        the toggle remembers which side the reader chose.
+      */}
+      <ReadMode
+        simple={
+          <SimpleRead
+            input={{
+              symbol: data.symbol,
+              regime: data.summary.regime,
+              flipLevel: data.summary.flipLevel,
+              aboveFlip:
+                data.summary.flipLevel === null
+                  ? null
+                  : data.summary.spot > data.summary.flipLevel,
+              magnetAbove: data.summary.magnetAbove?.strike ?? null,
+              magnetBelow: data.summary.magnetBelow?.strike ?? null,
+            }}
+          />
+        }
+        advanced={<Advanced />}
+      />
+    </main>
+  );
+
+  function Advanced() {
+    return (
+      <div className="space-y-4">
       <SummaryStrip summary={data.summary} symbol={data.symbol} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -113,6 +144,7 @@ export function Dashboard({ data }: DashboardProps) {
       </div>
 
       <DataQuality meta={data.meta} contracts={data.meta.contractsUsed} />
-    </main>
-  );
+      </div>
+    );
+  }
 }

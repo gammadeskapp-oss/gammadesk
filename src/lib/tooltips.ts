@@ -209,6 +209,64 @@ const ENTRIES = {
     label: 'Flagged',
     plain: 'How many strikes on this stock were unusual enough to make the list above.',
   },
+
+  // --- /decision, advanced view ---------------------------------------------
+  //
+  // The context labels there reuse `regime`, `flip`, `magnetAbove` and
+  // `magnetBelow` above rather than restating them, so the same number never
+  // gets two different explanations.
+
+  wallsAbove: {
+    label: 'Walls above',
+    plain: 'Ceilings overhead — price stalls when it rises into these.',
+  },
+
+  wallsBelow: {
+    label: 'Walls below',
+    plain: 'Floors underneath — price often bounces at these.',
+  },
+
+  wallStrength: {
+    label: 'Strength %',
+    plain:
+      'How strong this wall is vs the biggest wall on the SAME side. 100% = the strongest on that side (not stronger than the other side).',
+  },
+
+  wallDollar: {
+    label: 'Wall strength',
+    plain:
+      'Wall strength — how hard dealers must hedge here. Bigger = stronger wall. Not money sitting there.',
+  },
+
+  wallColour: {
+    label: 'Amber vs blue',
+    plain:
+      'Amber = calm (dealers push back against moves). Blue = wild (dealers speed moves up).',
+  },
+
+  convFirstTouch: {
+    label: 'First touch',
+    plain:
+      'A level is freshest the first time price tests it, and weaker each time after. 1st touch = cleanest reaction.',
+  },
+
+  convHowFar: {
+    label: 'How far',
+    plain:
+      'How far price traveled to get here. A big move means momentum is spent, so a bounce is more likely.',
+  },
+
+  convHowFast: {
+    label: 'How fast',
+    plain:
+      'How quickly price arrived. Fast moves burn out fast — a sharp bounce is more likely.',
+  },
+
+  verdict: {
+    label: 'Verdict',
+    plain:
+      'Plain-English summary of conditions — never a buy/sell call. Your own trigger still decides the entry.',
+  },
 };
 
 export type TooltipKey = keyof typeof ENTRIES;

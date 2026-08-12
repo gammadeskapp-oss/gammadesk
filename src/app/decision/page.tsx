@@ -2,13 +2,17 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { DecisionSearch } from '@/components/DecisionSearch';
 import { Footer } from '@/components/Footer';
+import { InfoTip } from '@/components/InfoTip';
 import { InteractiveChart } from '@/components/InteractiveChart';
 import { PageBar } from '@/components/PageBar';
+import { ReadMode } from '@/components/ReadMode';
+import { SimpleRead } from '@/components/SimpleRead';
 import { config } from '@/lib/config';
 import { DecisionError, getDecision, type DecisionResult } from '@/lib/decision';
-import type { Grade, Wall } from '@/lib/decision/types';
+import type { Check, Grade, Wall } from '@/lib/decision/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
 import { normaliseSymbol } from '@/lib/ticker/bars';
+import type { TooltipKey } from '@/lib/tooltips';
 
 export const metadata: Metadata = {
   title: 'Decision',
@@ -40,15 +44,24 @@ const GRADE_MARK: Record<Grade, string> = {
   red: '●',
 };
 
+/** Each check's beginner explanation, from the shared tooltip file. */
+const CHECK_TIP: Record<Check['id'], TooltipKey> = {
+  freshness: 'convFirstTouch',
+  distance: 'convHowFar',
+  speed: 'convHowFast',
+};
+
 function Section({
   step,
   title,
   tip,
+  help,
   children,
 }: {
   step: number;
   title: string;
   tip?: React.ReactNode;
+  help?: TooltipKey;
   children: React.ReactNode;
 }) {
   return (
@@ -58,6 +71,7 @@ function Section({
         <h2 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
           {title}
         </h2>
+        {help && <InfoTip for={help} />}
         {tip}
       </div>
       {children}
@@ -70,11 +84,13 @@ function Tile({
   value,
   sub,
   tone = 'neutral',
+  tip,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: 'neutral' | 'pos' | 'neg' | 'flip' | 'bull' | 'bear';
+  tip?: TooltipKey;
 }) {
   const colour = {
     neutral: 'text-term-text',
@@ -95,7 +111,10 @@ function Tile({
 
   return (
     <div className={`panel border-l-2 px-3.5 py-2.5 ${edge}`}>
-      <div className="label-xs">{label}</div>
+      <div className="flex items-center gap-1.5">
+        <span className="label-xs">{label}</span>
+        {tip && <InfoTip for={tip} />}
+      </div>
       <div className={`mt-1 text-lg font-bold tabular-nums ${colour}`}>{value}</div>
       {sub && <div className="mt-0.5 text-2xs text-term-faint">{sub}</div>}
     </div>
@@ -158,9 +177,11 @@ function Decision({ data }: { data: DecisionResult }) {
             value={c.mood === 'calm' ? 'CALM' : 'WILD'}
             sub={c.mood === 'calm' ? 'moves tend to fade' : 'moves tend to run'}
             tone={c.mood === 'calm' ? 'pos' : 'neg'}
+            tip="regime"
           />
           <Tile
             label="Gamma flip"
+            tip="flip"
             value={c.flipLevel === null ? '—' : formatPrice(c.flipLevel)}
             sub={
               c.aboveFlip === null
@@ -171,12 +192,14 @@ function Decision({ data }: { data: DecisionResult }) {
           />
           <Tile
             label="Magnet above"
+            tip="magnetAbove"
             value={c.magnetAbove ? formatStrike(c.magnetAbove.strike) : '—'}
             sub={c.magnetAbove ? formatUsd(c.magnetAbove.gex) : 'none nearby'}
             tone={c.magnetAbove ? (c.magnetAbove.gex >= 0 ? 'pos' : 'neg') : 'neutral'}
           />
           <Tile
             label="Magnet below"
+            tip="magnetBelow"
             value={c.magnetBelow ? formatStrike(c.magnetBelow.strike) : '—'}
             sub={c.magnetBelow ? formatUsd(c.magnetBelow.gex) : 'none nearby'}
             tone={c.magnetBelow ? (c.magnetBelow.gex >= 0 ? 'pos' : 'neg') : 'neutral'}
@@ -189,16 +212,27 @@ function Decision({ data }: { data: DecisionResult }) {
         <div className="grid gap-2 lg:grid-cols-2">
           {(
             [
-              ['Walls above', walls.above, 'bull'],
-              ['Walls below', walls.below, 'bear'],
+              ['Walls above', walls.above, 'bull', 'wallsAbove'],
+              ['Walls below', walls.below, 'bear', 'wallsBelow'],
             ] as const
-          ).map(([title, list, tone]) => (
+          ).map(([title, list, tone, tip]) => (
             <div key={title} className="panel">
-              <div className="flex items-baseline justify-between border-b border-term-line px-3.5 py-2">
-                <h3 className={`label-xs ${tone === 'bull' ? 'text-bull' : 'text-bear'}`}>
-                  {title}
-                </h3>
-                <span className="text-2xs text-term-faint">nearest first</span>
+              <div className="flex items-baseline justify-between gap-2 border-b border-term-line px-3.5 py-2">
+                <span className="flex items-center gap-1.5">
+                  <h3 className={`label-xs ${tone === 'bull' ? 'text-bull' : 'text-bear'}`}>
+                    {title}
+                  </h3>
+                  <InfoTip for={tip} />
+                </span>
+                <span className="flex items-center gap-2 text-2xs text-term-faint">
+                  nearest first
+                  <span className="flex items-center gap-1">
+                    strength <InfoTip for="wallStrength" />
+                  </span>
+                  <span className="flex items-center gap-1">
+                    $ <InfoTip for="wallDollar" />
+                  </span>
+                </span>
               </div>
               {list.length === 0 ? (
                 <p className="px-3.5 py-6 text-center text-xs text-term-dim">
@@ -214,11 +248,14 @@ function Decision({ data }: { data: DecisionResult }) {
             </div>
           ))}
         </div>
-        <p className="text-2xs leading-relaxed text-term-faint">
-          Strength is relative to the largest wall on the same side, not across
-          both — a 100% bar below does not mean the floor is stronger than the
-          ceiling. Amber bars are positive gamma (dealers lean against moves),
-          blue is negative.
+        <p className="flex flex-wrap items-center gap-1.5 text-2xs leading-relaxed text-term-faint">
+          <span>
+            Strength is relative to the largest wall on the same side, not
+            across both — a 100% bar below does not mean the floor is stronger
+            than the ceiling. Amber bars are positive gamma (dealers lean
+            against moves), blue is negative.
+          </span>
+          <InfoTip for="wallColour" />
         </p>
       </Section>
 
@@ -247,7 +284,10 @@ function Decision({ data }: { data: DecisionResult }) {
                 className={`panel border-l-2 ${GRADE_EDGE[check.grade]} px-3.5 py-3`}
               >
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="label-xs">{check.label}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="label-xs">{check.label}</span>
+                    <InfoTip for={CHECK_TIP[check.id]} />
+                  </span>
                   <span aria-hidden className={`text-sm ${GRADE_TEXT[check.grade]}`}>
                     {GRADE_MARK[check.grade]}
                   </span>
@@ -278,7 +318,7 @@ function Decision({ data }: { data: DecisionResult }) {
       </Section>
 
       {/* 5 — VERDICT */}
-      <Section step={5} title="Verdict">
+      <Section step={5} title="Verdict" help="verdict">
         <div className={`panel border-l-2 ${GRADE_EDGE[verdict.tone]} p-4 sm:p-5`}>
           <p className="text-base leading-relaxed text-term-text">{verdict.line}</p>
 
@@ -348,7 +388,28 @@ export default async function DecisionPage({ searchParams }: PageProps) {
           </div>
         )}
 
-        {data && <Decision data={data} />}
+        {data && (
+          <ReadMode
+            revealLabel="Show the data behind this"
+            simple={
+              <div className="space-y-4">
+                <SimpleRead
+                  input={{
+                    symbol: data.context.symbol,
+                    regime: data.context.regime,
+                    flipLevel: data.context.flipLevel,
+                    aboveFlip: data.context.aboveFlip,
+                    magnetAbove: data.context.magnetAbove?.strike ?? null,
+                    magnetBelow: data.context.magnetBelow?.strike ?? null,
+                  }}
+                />
+                {/* The chart carries no jargon, so it belongs in both views. */}
+                <InteractiveChart symbol={data.context.symbol} />
+              </div>
+            }
+            advanced={<Decision data={data} />}
+          />
+        )}
 
         {/*
           The chart survives a chain failure on purpose. Its bars come from a
