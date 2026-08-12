@@ -309,6 +309,17 @@ export function InteractiveChart({
             horzLine: { color: COLOR.crosshair, labelBackgroundColor: '#1a2133' },
           },
           localization: { locale: 'en-US' },
+          /*
+           * The page has to stay scrollable through the chart.
+           *
+           * This is a stacked report, not a dedicated charting screen: a
+           * 520px canvas that swallows the wheel traps a desktop reader
+           * halfway down, and one that swallows a vertical swipe traps a
+           * phone reader completely. Panning by drag and pinch-to-zoom both
+           * still work, which is what people actually reach for here.
+           */
+          handleScroll: { vertTouchDrag: false, mouseWheel: false },
+          handleScale: { mouseWheel: false },
         });
 
         // Strictly ascending, unique times: the library rejects anything else,
@@ -404,6 +415,11 @@ export function InteractiveChart({
             autoscaleInfoProvider: () => ({
               priceRange: { minValue: 0, maxValue: 100 },
             }),
+          });
+          // Default margins pad a 0-100 range out to roughly 0-120, which
+          // squeezes the 30-70 band nobody is looking away from.
+          rsiSeries.priceScale().applyOptions({
+            scaleMargins: { top: 0.08, bottom: 0.08 },
           });
 
           const panes = chart.panes();
