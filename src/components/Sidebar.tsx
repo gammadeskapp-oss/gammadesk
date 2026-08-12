@@ -34,6 +34,7 @@ const NAV: NavItem[] = [
   { href: '/forecast', label: 'Forecast', icon: '∿' },
   { href: '/groups', label: 'Groups', icon: '⊞' },
   { href: '/strength', label: 'Strength', icon: '⇅' },
+  { href: '/sectors', label: 'Sectors', icon: '⧉' },
   { href: '/watchlist', label: 'Watchlist', icon: '★' },
   { href: '/flow', label: 'Flow', icon: '⇄' },
   { href: '/velocity', label: 'Velocity', icon: 'Δ' },

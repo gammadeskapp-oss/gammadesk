@@ -267,6 +267,56 @@ const ENTRIES = {
     plain:
       'Plain-English summary of conditions — never a buy/sell call. Your own trigger still decides the entry.',
   },
+
+  // --- sector momentum -------------------------------------------------------
+
+  sectorScore: {
+    label: 'Score',
+    plain:
+      'How many of the nine health checks the average stock in this sector is passing, out of 100. 70 means most look healthy.',
+    detail:
+      'The same nine signals used on the ticker page, averaged across the sector’s members.',
+  },
+
+  sectorDelta: {
+    label: 'Δ1D / Δ3D / Δ5D',
+    plain:
+      'How much the score moved since 1, 3 and 5 trading days ago. +8 means the sector is eight points healthier than it was. It is the change that matters here, not the level.',
+  },
+
+  sectorSpark: {
+    label: 'Trend line',
+    plain:
+      'The last ten days of the score, drawn small. Rising line = getting healthier, falling = getting weaker.',
+  },
+
+  sectorAccelerating: {
+    label: 'Accelerating',
+    plain:
+      'Sectors getting healthier fastest. Often where money is moving in — but it means buyers have already been busy, not that you should chase.',
+  },
+
+  sectorDecelerating: {
+    label: 'Decelerating',
+    plain:
+      'Sectors getting weaker fastest. Often where money is leaving. A falling score is not the same as a cheap price.',
+  },
+
+  sectorBottoming: {
+    label: 'Bottoming + turning',
+    plain:
+      'This sector was beaten down recently and its score has started climbing again. Worth watching — plenty of these turns fail.',
+    detail:
+      'Average RSI dipped to 35 or lower in the last ten sessions and the 3-day change is now positive.',
+  },
+
+  sectorTopping: {
+    label: 'Topping + rolling over',
+    plain:
+      'This sector ran hot recently and its score has started falling. A reason to be careful, not a reason to sell.',
+    detail:
+      'Average RSI reached 65 or higher in the last ten sessions and the 3-day change is now negative.',
+  },
 };
 
 export type TooltipKey = keyof typeof ENTRIES;

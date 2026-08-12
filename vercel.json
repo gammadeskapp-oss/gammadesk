@@ -18,6 +18,10 @@
       "schedule": "0 22 * * 1-5"
     },
     {
+      "path": "/api/sectors/refresh",
+      "schedule": "10 22 * * 1-5"
+    },
+    {
       "path": "/api/digest",
       "schedule": "20 22 * * 1-5"
     },
