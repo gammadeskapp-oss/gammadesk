@@ -7,8 +7,10 @@ export default function Loading() {
         ))}
       </div>
       <div className="panel h-[70vh] animate-pulse" />
+      {/* Generic on purpose: this is the fallback for every page without its
+          own, and /guide and /sectors load no option chain at all. */}
       <p className="text-2xs uppercase tracking-[0.18em] text-term-faint">
-        Loading options chain…
+        Loading…
       </p>
     </main>
   );
