@@ -90,12 +90,13 @@ function buildVerdict(context: DecisionContext, checks: { grade: Grade }[]): Ver
           ? 'a fresh level after a contained move'
           : 'the move into it is reasonable';
 
+  // Worded so the stance never repeats the quality phrase it follows.
   const stance =
     reds >= 2
-      ? 'conditions are poor for trusting this level — wait for it to settle'
+      ? 'poor conditions for trusting this level, wait for it to settle'
       : reds === 1
-        ? 'conditions are mixed — let the chart show a trigger before acting'
-        : 'conditions are supportive — wait for a chart trigger';
+        ? 'not clean enough to lean on, let the chart show a trigger first'
+        : 'conditions supportive, wait for a chart trigger';
 
   /*
    * The interesting case is disagreement, and it is worth naming rather than
