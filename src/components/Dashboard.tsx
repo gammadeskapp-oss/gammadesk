@@ -7,6 +7,7 @@ import { ExplainPanel } from './ExplainPanel';
 import { PageBar } from './PageBar';
 import { PositioningTable } from './PositioningTable';
 import { ReadMode, useReadMode } from './ReadMode';
+import { nearestStrongWall } from '@/lib/simple/walls';
 import { SimpleRead } from './SimpleRead';
 import { SummaryStrip } from './SummaryStrip';
 import { TabBar } from './TabBar';
@@ -53,6 +54,8 @@ export function Dashboard({ data }: DashboardProps) {
   const router = useRouter();
   const mode = useReadMode();
 
+  const strikeGex = data.rows.map((r) => ({ strike: r.strike, gex: r.total.gex }));
+
   const reload = () => startTransition(() => router.refresh());
 
   return (
@@ -78,8 +81,11 @@ export function Dashboard({ data }: DashboardProps) {
                 data.summary.flipLevel === null
                   ? null
                   : data.summary.spot > data.summary.flipLevel,
-              magnetAbove: data.summary.magnetAbove?.strike ?? null,
-              magnetBelow: data.summary.magnetBelow?.strike ?? null,
+              // Same helper /decision uses, so both pages name the same
+              // level — the summary's magnet is the *biggest* wall, which
+              // can sit far above the one price actually runs into first.
+              magnetAbove: nearestStrongWall(strikeGex, data.summary.spot, 'above')?.strike ?? null,
+              magnetBelow: nearestStrongWall(strikeGex, data.summary.spot, 'below')?.strike ?? null,
             }}
           />
         }

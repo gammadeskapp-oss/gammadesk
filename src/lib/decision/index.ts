@@ -3,6 +3,7 @@ import 'server-only';
 import { getBars } from '../bars/intraday';
 import { cached } from '../cache';
 import { getPositioningForSymbol } from '../positioning';
+import { nearestStrongWall } from '../simple/walls';
 import { normaliseSymbol } from '../ticker/bars';
 import { buildConviction } from './conviction';
 import type { DecisionContext, DecisionResult, Grade, Verdict, Wall } from './types';
@@ -124,11 +125,26 @@ function buildVerdict(context: DecisionContext, checks: { grade: Grade }[]): Ver
   };
 }
 
+/** Wraps a raw strike as a `Wall`, with strength relative to itself. */
+function asWall(hit: { strike: number; gex: number } | null, spot: number): Wall | null {
+  if (!hit) return null;
+  return {
+    strike: hit.strike,
+    gex: hit.gex,
+    strength: 1,
+    distancePct: spot > 0 ? ((hit.strike - spot) / spot) * 100 : 0,
+  };
+}
+
 async function build(symbol: string): Promise<DecisionResult> {
   const positioning = await getPositioningForSymbol(symbol, EXPIRATIONS);
   const { summary, spot } = positioning;
 
   const walls = wallsFrom(positioning.rows, spot);
+  const strikeGex = positioning.rows.map((r) => ({
+    strike: r.strike,
+    gex: r.total.gex,
+  }));
 
   const flipLevel = summary.flipLevel;
   const context: DecisionContext = {
@@ -142,8 +158,10 @@ async function build(symbol: string): Promise<DecisionResult> {
       flipLevel === null || flipLevel === 0
         ? null
         : ((spot - flipLevel) / flipLevel) * 100,
-    magnetAbove: walls.above[0] ?? null,
-    magnetBelow: walls.below[0] ?? null,
+    // Nearest *strong*, shared with the simple view so the two cannot
+    // disagree about where price stalls — see lib/simple/walls.ts.
+    magnetAbove: asWall(nearestStrongWall(strikeGex, spot, 'above'), spot),
+    magnetBelow: asWall(nearestStrongWall(strikeGex, spot, 'below'), spot),
     asOfLabel: positioning.meta.asOfLabel,
   };
 
