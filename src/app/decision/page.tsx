@@ -13,6 +13,7 @@ import type { Check, Grade, Wall } from '@/lib/decision/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
 import { normaliseSymbol } from '@/lib/ticker/bars';
 import type { TooltipKey } from '@/lib/tooltips';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Decision',
@@ -23,7 +24,11 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
-  searchParams: Promise<{ symbol?: string }>;
+  /**
+   * `ticker` is the scheme `<TickerLink>` uses. `symbol` is still accepted so
+   * links shared before the rename keep working.
+   */
+  searchParams: Promise<{ ticker?: string; symbol?: string }>;
 }
 
 const GRADE_TEXT: Record<Grade, string> = {
@@ -343,8 +348,8 @@ function Decision({ data }: { data: DecisionResult }) {
 }
 
 export default async function DecisionPage({ searchParams }: PageProps) {
-  const { symbol } = await searchParams;
-  const query = symbol?.trim() || config.symbol;
+  const params = await searchParams;
+  const query = (params.ticker ?? params.symbol)?.trim() || config.symbol;
 
   let data: DecisionResult | null = null;
   let error: string | null = null;
@@ -367,6 +372,7 @@ export default async function DecisionPage({ searchParams }: PageProps) {
       <main className="mx-auto w-full max-w-[1200px] flex-1 space-y-6 px-4 py-5 sm:px-6">
         <PageBar
           title="Decision"
+          description={PAGE_DESCRIPTIONS['/decision']}
           meta="one screen, top to bottom"
           asOfLabel={data?.context.asOfLabel}
         />

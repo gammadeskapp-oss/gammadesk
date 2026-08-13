@@ -30,7 +30,7 @@ export interface Digest {
   leaders: DigestRank[];
   laggards: DigestRank[];
 
-  /** Plain-English sentences, in reading order. */
+  /** Plain-language sentences, in reading order. */
   lines: string[];
   /** Caveats worth carrying into the summary. */
   notes: string[];

@@ -21,7 +21,7 @@ A single dashboard page showing where options dealers are positioned:
   open interest, implied volatility, strike and expiry.
 - **Summary strip** — spot price, net GEX, gamma regime, gamma flip level, and
   the biggest magnet strike above and below spot.
-- **"What am I looking at?"** — a toggle that explains each tab in plain English.
+- **"What am I looking at?"** — a toggle that explains each tab in plain words.
 
 ### The dealer convention
 
@@ -361,7 +361,7 @@ $SPY this morning 🟡
 Mood: calm
 Wall above: 775 · Floor below: 773
 Gets wild only under: 767.50
-Plain English: Boxed between 773 and 775 — expect chop until one gives way.
+What this means: Boxed between 773 and 775 — expect chop until one gives way.
 15-min delayed · not advice · gammadesk.app
 ```
 

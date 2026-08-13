@@ -4,6 +4,8 @@ import { formatStrike, formatUsd } from '@/lib/format';
 import { formatAsOf } from '@/lib/time';
 import { getVelocity, storeStatus } from '@/lib/velocity';
 import type { RollOffReason, VelocityRow, VelocityTag } from '@/lib/velocity/types';
+import { TickerLink } from '@/components/TickerLink';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Gamma Velocity',
@@ -19,7 +21,7 @@ const TAG: Record<VelocityTag, string> = {
   NEW: 'text-flip border-flip/40',
 };
 
-/** Plain-English reason a row is not repositioning. */
+/** Plain-language reason a row is not repositioning. */
 const ROLL_OFF: Record<RollOffReason, string> = {
   expired: 'Expired — contract is gone',
   'left-window': 'No longer tracked',
@@ -66,7 +68,7 @@ function VelocityTable({
           {rows.map((r) => (
             <tr key={`${r.symbol}-${r.expiration}-${r.strike}`}>
               <th scope="row" className={`${cell} text-left font-bold text-term-text`}>
-                {r.symbol}
+                <TickerLink symbol={r.symbol} />
               </th>
               <td className={`${cell} text-term-dim`}>{r.expiryLabel}</td>
               <td className={`${cell} text-term-text`}>{formatStrike(r.strike)}</td>
@@ -130,9 +132,14 @@ export default async function VelocityPage() {
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-            Gamma Velocity
-          </h1>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+              Gamma Velocity
+            </h1>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
+              {PAGE_DESCRIPTIONS['/velocity']}
+            </p>
+          </div>
           {data.currentDate && (
             <p className="text-2xs text-term-faint">
               {data.previousDate

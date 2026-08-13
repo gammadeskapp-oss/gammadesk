@@ -13,6 +13,7 @@ import {
 } from '@/lib/sectors';
 import { formatAsOf } from '@/lib/time';
 import type { TooltipKey } from '@/lib/tooltips';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Sector Momentum',
@@ -182,6 +183,7 @@ export default async function SectorsPage() {
       <main className="mx-auto w-full max-w-[1400px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <PageBar
           title="Sector Momentum"
+          description={PAGE_DESCRIPTIONS['/sectors']}
           meta={
             snapshot
               ? `${snapshot.sectors.length} sectors · ${snapshot.sessions} sessions · close ${snapshot.asOfDate}`

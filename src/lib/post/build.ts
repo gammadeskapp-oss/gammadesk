@@ -9,7 +9,7 @@ import type { MorningPost } from './types';
  * The daily X post.
  *
  * The shape is fixed by hand — six lines, in this order, with these labels.
- * Only the plain-English line is written by the code, and it is the only part
+ * Only the "What this means" line is written by the code, and it is the only part
  * that should ever change wording without someone deciding to change it.
  */
 
@@ -78,7 +78,7 @@ function compose(args: {
     `Mood: ${mood}`,
     `Wall above: ${strike(wallAbove)} · Floor below: ${strike(floorBelow)}`,
     `Gets wild only under: ${flipLevel === null ? dash : formatStrike(flipLevel)}`,
-    `Plain English: ${plain}`,
+    `What this means: ${plain}`,
     FOOTER,
   ].join('\n');
 }

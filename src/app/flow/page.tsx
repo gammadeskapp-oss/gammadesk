@@ -7,6 +7,8 @@ import { filterFlow } from '@/lib/flow/filter';
 import type { UnusualLevel } from '@/lib/flow/types';
 import { formatContracts, formatPrice, formatStrike } from '@/lib/format';
 import type { TooltipKey } from '@/lib/tooltips';
+import { TickerLink } from '@/components/TickerLink';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Unusual Options Activity',
@@ -75,9 +77,14 @@ export default async function FlowPage({ searchParams }: PageProps) {
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-            Unusual Options Activity
-          </h1>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+              Unusual Options Activity
+            </h1>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
+              {PAGE_DESCRIPTIONS['/flow']}
+            </p>
+          </div>
           {snapshot && filtered && (
             <p className="text-2xs text-term-faint">
               {filtered.rows.length} flagged across{' '}
@@ -293,7 +300,7 @@ export default async function FlowPage({ searchParams }: PageProps) {
                     return (
                       <tr key={`${r.symbol}-${r.expiration}-${r.strike}-${r.type}`}>
                         <th scope="row" className={`${cell} text-left font-bold text-term-text`}>
-                          {r.symbol}
+                          <TickerLink symbol={r.symbol} />
                         </th>
                         <td className={`${cell} text-term-dim`}>{r.expiryLabel}</td>
                         <td className={`${cell} text-term-text`}>{formatStrike(r.strike)}</td>
@@ -407,7 +414,7 @@ export default async function FlowPage({ searchParams }: PageProps) {
                     return (
                       <tr key={s.symbol}>
                         <th scope="row" className={`${cell} text-left font-bold text-term-text`}>
-                          {s.symbol}
+                          <TickerLink symbol={s.symbol} />
                         </th>
                         {s.failed ? (
                           <td colSpan={5} className={`${cell} text-left text-2xs text-flip/80`}>

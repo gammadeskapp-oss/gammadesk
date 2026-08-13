@@ -8,7 +8,7 @@ interface TileProps {
   value: string;
   sub?: string;
   tone?: 'neutral' | 'pos' | 'neg' | 'flip';
-  /** Plain-English explanation, opened by the `?` beside the label. */
+  /** Plain-language explanation, opened by the `?` beside the label. */
   tip: TooltipKey;
 }
 

@@ -12,7 +12,7 @@ export function SimpleRead({ input }: { input: SimpleInput }) {
 
   return (
     <section
-      aria-label="Plain-English read"
+      aria-label="What this means"
       className={`panel border-l-2 ${calm ? 'border-l-pos/60' : 'border-l-bear/60'}`}
     >
       <div className="p-4 sm:p-6">

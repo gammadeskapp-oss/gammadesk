@@ -7,6 +7,7 @@ import { TickerChart } from '@/components/TickerChart';
 import { TickerSearch } from '@/components/TickerSearch';
 import { analyzeTicker, TickerError } from '@/lib/ticker/analyze';
 import type { TickerAnalysis } from '@/lib/ticker/types';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Ticker Consensus',
@@ -49,9 +50,14 @@ export default async function TickerPage({ searchParams }: PageProps) {
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-            Ticker Consensus
-          </h1>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+              Ticker Consensus
+            </h1>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
+              {PAGE_DESCRIPTIONS['/ticker']}
+            </p>
+          </div>
           {data && (
             <p className="text-2xs text-term-faint">
               {data.barsUsed} daily bars · {data.source} · close {data.asOfDate}

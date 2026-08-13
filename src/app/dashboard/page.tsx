@@ -10,6 +10,8 @@ import { rankTickers } from '@/lib/groups/ranking';
 import { formatContracts, formatPrice, formatRatio, formatUsd } from '@/lib/format';
 import { getPositioning } from '@/lib/positioning';
 import { formatAsOf } from '@/lib/time';
+import { TickerLink } from '@/components/TickerLink';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Dashboard',
@@ -128,9 +130,14 @@ export default async function DashboardPage() {
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-            Dashboard
-          </h1>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+              Dashboard
+            </h1>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
+              {PAGE_DESCRIPTIONS['/dashboard']}
+            </p>
+          </div>
           <p className="text-2xs text-term-faint">
             {config.symbol} {formatPrice(positioning.spot)} · {positioning.meta.asOfLabel}
           </p>
@@ -293,7 +300,7 @@ export default async function DashboardPage() {
                 <ul className="space-y-1">
                   {leaders.map((r) => (
                     <li key={r.symbol} className="flex items-baseline justify-between gap-3 text-xs">
-                      <span className="font-bold text-term-text">{r.symbol}</span>
+                      <TickerLink symbol={r.symbol} className="font-bold text-term-text" />
                       <span className="flex items-baseline gap-2 tabular-nums">
                         <span className="text-term-faint">{formatPrice(r.price)}</span>
                         <span className="w-8 text-right font-bold text-bull">{r.score}</span>
@@ -315,7 +322,7 @@ export default async function DashboardPage() {
                 <ul className="space-y-1">
                   {laggards.map((r) => (
                     <li key={r.symbol} className="flex items-baseline justify-between gap-3 text-xs">
-                      <span className="font-bold text-term-text">{r.symbol}</span>
+                      <TickerLink symbol={r.symbol} className="font-bold text-term-text" />
                       <span className="flex items-baseline gap-2 tabular-nums">
                         <span className="text-term-faint">{formatPrice(r.price)}</span>
                         <span className="w-8 text-right font-bold text-bear">{r.score}</span>
@@ -358,7 +365,7 @@ export default async function DashboardPage() {
                 ? 'Dealers are long gamma, so their hedging leans against moves — chop and mean reversion.'
                 : 'Dealers are short gamma, so their hedging leans with moves — faster, trendier action.'}
             </p>
-            <Sub>the full plain-English summary, and how it gets scored</Sub>
+            <Sub>the full summary in plain words, and how it gets scored</Sub>
           </Card>
         </div>
 

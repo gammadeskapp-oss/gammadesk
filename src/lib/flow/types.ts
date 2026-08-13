@@ -14,7 +14,7 @@ export interface FlowRow {
   /** Share of the symbol's whole-chain volume sitting in this one contract. */
   shareOfChain: number;
   level: UnusualLevel;
-  /** One line of plain English describing what is unusual. */
+  /** One line of plain language describing what is unusual. */
   note: string;
   /** Underlying price at snapshot, for context on how far out the strike is. */
   spot: number;

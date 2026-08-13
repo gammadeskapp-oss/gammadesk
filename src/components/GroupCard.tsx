@@ -1,5 +1,6 @@
 import { formatPrice } from '@/lib/format';
 import type { GroupScore } from '@/lib/groups/types';
+import { TickerLink } from './TickerLink';
 
 const TONE = {
   BULLISH: { text: 'text-bull', edge: 'border-l-bull/60' },
@@ -95,7 +96,7 @@ export function GroupCard({ group }: { group: GroupScore }) {
             {group.members.map((m) => (
               <tr key={m.symbol} className="border-t border-term-line/60">
                 <th scope="row" className="px-3.5 py-1.5 text-left font-bold text-term-text">
-                  {m.symbol}
+                  <TickerLink symbol={m.symbol} />
                 </th>
                 <td className="px-2 py-1.5 text-term-dim">{formatPrice(m.price)}</td>
                 <td

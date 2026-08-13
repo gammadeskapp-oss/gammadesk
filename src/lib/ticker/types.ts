@@ -15,7 +15,7 @@ export interface Signal {
   id: string;
   name: string;
   vote: Vote;
-  /** One line of plain English explaining the vote. */
+  /** One line of plain language explaining the vote. */
   reason: string;
   /** The numbers behind it, shown small. */
   detail: string;

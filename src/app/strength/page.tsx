@@ -10,6 +10,7 @@ import {
   toPlainList,
 } from '@/lib/groups/ranking';
 import { formatAsOf } from '@/lib/time';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Relative Strength',
@@ -31,9 +32,14 @@ export default async function StrengthPage() {
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-5 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-            Relative Strength
-          </h1>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+              Relative Strength
+            </h1>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
+              {PAGE_DESCRIPTIONS['/strength']}
+            </p>
+          </div>
           {snapshot && (
             <p className="text-2xs text-term-faint">
               {ranked.length} tickers · close {snapshot.asOfDate} · computed{' '}

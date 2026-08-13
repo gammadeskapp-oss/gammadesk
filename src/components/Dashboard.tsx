@@ -12,6 +12,7 @@ import { SimpleRead } from './SimpleRead';
 import { SummaryStrip } from './SummaryStrip';
 import { TabBar } from './TabBar';
 import type { MetricKey, PositioningData } from '@/lib/types';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 interface DashboardProps {
   data: PositioningData;
@@ -62,6 +63,7 @@ export function Dashboard({ data }: DashboardProps) {
     <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
       <PageBar
         title={mode === 'simple' ? `${data.symbol} Today` : `${data.symbol} Dealer Positioning`}
+        description={PAGE_DESCRIPTIONS['/']}
         asOfLabel={data.meta.asOfLabel}
         source={data.meta.source}
       />

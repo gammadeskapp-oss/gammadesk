@@ -6,6 +6,7 @@ import { PostActions } from '@/components/PostActions';
 import { formatPrice } from '@/lib/format';
 import { getMorningPost, storeStatus, X_LIMIT } from '@/lib/post';
 import { formatAsOf } from '@/lib/time';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Morning Post',
@@ -25,6 +26,7 @@ export default async function PostPage() {
       <main className="mx-auto w-full max-w-[820px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <PageBar
           title="Morning Post"
+          description={PAGE_DESCRIPTIONS['/post']}
           meta={`${post.date} · generated ${formatAsOf(new Date(post.generatedAt))}`}
         />
 
@@ -46,7 +48,7 @@ export default async function PostPage() {
 
           {over && (
             <p className="mt-2 text-2xs text-bear">
-              ! Over the limit for a single post. Shorten the plain-English line
+              ! Over the limit for a single post. Shorten the “What this means” line
               before sending.
             </p>
           )}
@@ -118,7 +120,7 @@ export default async function PostPage() {
             <span className="text-term-dim">A note on the fourth line. </span>
             &ldquo;Gets wild only under&rdquo; reads correctly while price is
             above the flip. When price is already below it the mood line says
-            jumpy and the plain-English line explains it — the level is still
+            jumpy and the “What this means” line explains it — the level is still
             the boundary either way.
           </p>
           {!store.durable && store.note && (

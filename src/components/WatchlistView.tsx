@@ -7,6 +7,7 @@ import { formatPrice } from '@/lib/format';
 import { strengthDots } from '@/lib/groups/ranking';
 import type { QuickScoreResult } from '@/lib/ticker/quickScore';
 import { isValidSymbol, MAX_WATCHLIST, useWatchlist } from '@/lib/watchlist/storage';
+import { TickerLink } from './TickerLink';
 
 function Dots({ bullish, total }: { bullish: number; total: number }) {
   const filled = strengthDots(bullish, total);
@@ -167,7 +168,7 @@ export function WatchlistView() {
                   return (
                     <tr key={symbol} className="border-t border-term-line/60">
                       <th scope="row" className="px-2.5 py-1.5 text-left font-bold text-term-text">
-                        {symbol}
+                        <TickerLink symbol={symbol} />
                       </th>
                       <td colSpan={6} className="px-2.5 py-1.5 text-left text-2xs text-term-faint">
                         {loading ? 'loading…' : 'no data'}
@@ -179,7 +180,7 @@ export function WatchlistView() {
                   return (
                     <tr key={symbol} className="border-t border-term-line/60">
                       <th scope="row" className="px-2.5 py-1.5 text-left font-bold text-term-faint">
-                        {symbol}
+                        <TickerLink symbol={symbol} />
                       </th>
                       <td colSpan={5} className="px-2.5 py-1.5 text-left text-2xs text-flip/80">
                         {row.reason}
@@ -202,12 +203,7 @@ export function WatchlistView() {
                 return (
                   <tr key={symbol} className="border-t border-term-line/60">
                     <th scope="row" className="px-2.5 py-1.5 text-left font-bold">
-                      <Link
-                        href={`/ticker?symbol=${encodeURIComponent(symbol)}`}
-                        className="text-term-text underline decoration-dotted underline-offset-2 hover:text-pos"
-                      >
-                        {symbol}
-                      </Link>
+                      <TickerLink symbol={symbol} className="text-term-text" />
                     </th>
                     <td
                       className={`px-2.5 py-1.5 font-bold ${

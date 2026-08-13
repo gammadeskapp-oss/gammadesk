@@ -4,11 +4,13 @@ import { Footer } from '@/components/Footer';
 import { getDigest, storeStatus } from '@/lib/digest';
 import { formatPrice, formatUsd } from '@/lib/format';
 import { formatAsOf } from '@/lib/time';
+import { TickerLink } from '@/components/TickerLink';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Daily Digest',
   description:
-    'A fifteen-second plain-English summary of SPY positioning, the forecast lean, and relative strength.',
+    'A fifteen-second summary of SPY positioning, the forecast lean, and relative strength, in plain words.',
 };
 
 export const dynamic = 'force-dynamic';
@@ -48,9 +50,14 @@ export default async function DigestPage() {
 
       <main className="mx-auto w-full max-w-[900px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-            Daily Digest
-          </h1>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+              Daily Digest
+            </h1>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
+              {PAGE_DESCRIPTIONS['/digest']}
+            </p>
+          </div>
           <p className="text-2xs text-term-faint">
             {digest.dateLabel} · generated {formatAsOf(new Date(digest.generatedAt))}
             {stored ? '' : ' · live, not yet posted'}
@@ -113,7 +120,7 @@ export default async function DigestPage() {
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums">
                   {digest.leaders.map((l) => (
                     <span key={l.symbol}>
-                      <span className="font-bold text-term-text">{l.symbol}</span>{' '}
+                      <TickerLink symbol={l.symbol} className="font-bold text-term-text" />{' '}
                       <span className="text-bull">{l.score}</span>
                     </span>
                   ))}
@@ -124,7 +131,7 @@ export default async function DigestPage() {
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums">
                   {digest.laggards.map((l) => (
                     <span key={l.symbol}>
-                      <span className="font-bold text-term-text">{l.symbol}</span>{' '}
+                      <TickerLink symbol={l.symbol} className="font-bold text-term-text" />{' '}
                       <span className="text-bear">{l.score}</span>
                     </span>
                   ))}

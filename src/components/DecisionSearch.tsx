@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import { SymbolSearch } from './SymbolSearch';
+import { tickerHref } from './TickerLink';
 
 const SUGGESTIONS = ['SPY', 'QQQ', 'AAPL', 'NVDA', 'TSLA'];
 
@@ -20,11 +21,9 @@ export function DecisionSearch({ initial = '' }: { initial?: string }) {
       pending={pending}
       initial={initial}
       suggestions={SUGGESTIONS}
-      onSubmit={(symbol) =>
-        startTransition(() =>
-          router.push(`/decision?symbol=${encodeURIComponent(symbol)}`),
-        )
-      }
+      // Same helper the links use, so the search box and every ticker in the
+      // app cannot end up pointing at different URLs.
+      onSubmit={(symbol) => startTransition(() => router.push(tickerHref(symbol)))}
     />
   );
 }

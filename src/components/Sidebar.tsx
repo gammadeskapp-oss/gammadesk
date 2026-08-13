@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCallback, useState, useSyncExternalStore } from 'react';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 /**
  * Left navigation.
@@ -104,7 +105,16 @@ export function Sidebar() {
             key={item.href}
             href={item.href}
             aria-current={active ? 'page' : undefined}
-            title={collapsed ? item.label : undefined}
+            /*
+             * Repeats the subtitle already on the page rather than adding
+             * anything: this is a desktop-hover convenience, and nothing that
+             * matters may live behind hover alone.
+             */
+            title={
+              collapsed
+                ? `${item.label} — ${PAGE_DESCRIPTIONS[item.href] ?? ''}`.replace(/ — $/, '')
+                : PAGE_DESCRIPTIONS[item.href]
+            }
             onClick={() => setDrawerOpen(false)}
             className={`group flex items-center gap-3 border-l-2 px-2.5 py-2 text-xs tracking-[0.12em] transition-colors ${
               active

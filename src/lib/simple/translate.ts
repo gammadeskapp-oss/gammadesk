@@ -1,7 +1,7 @@
 import { formatStrike } from '../format';
 
 /**
- * Turns the positioning book into plain English.
+ * Turns the positioning book into plain language.
  *
  * The rule for this file: no jargon reaches the output. Not "gamma", not
  * "GEX", not "dealer". Everything a beginner sees on the default view is

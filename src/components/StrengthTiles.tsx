@@ -1,6 +1,7 @@
 import { StarButton } from './StarButton';
 import { formatPrice } from '@/lib/format';
 import { strengthDots, type RankedTicker } from '@/lib/groups/ranking';
+import { TickerLink } from './TickerLink';
 
 /** Three dots, filled according to the ticker's vote share. */
 function Dots({
@@ -40,7 +41,7 @@ function Tile({ item, tone }: { item: RankedTicker; tone: 'bull' | 'bear' }) {
       <div className="flex items-baseline justify-between gap-2">
         <span className="flex items-center gap-1 text-sm font-bold tracking-[0.1em] text-term-text">
           <StarButton symbol={item.symbol} size="sm" />
-          {item.symbol}
+          <TickerLink symbol={item.symbol} />
         </span>
         <span className={`text-lg font-bold tabular-nums leading-none ${accent}`}>
           {item.score}

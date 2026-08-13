@@ -3,11 +3,12 @@ import Link from 'next/link';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { TOOLTIPS, TOOLTIP_ORDER } from '@/lib/tooltips';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Beginner Guide',
   description:
-    'What GammaDesk shows, in plain English, and how to read a trading day in three steps.',
+    'What GammaDesk shows, in plain words, and how to read a trading day in three steps.',
 };
 
 /** Nothing on this page is fetched, so it can be fully static. */
@@ -90,7 +91,8 @@ export default function GuidePage() {
   return (
     <>
       <main className="mx-auto w-full max-w-[860px] flex-1 space-y-6 px-4 py-5 sm:px-6">
-        <PageBar title="Beginner Guide" meta="no jargon, promise" />
+        <PageBar title="Beginner Guide"
+          description={PAGE_DESCRIPTIONS['/guide']} meta="no jargon, promise" />
 
         <section className="panel border-l-2 border-l-pos/50 p-4 sm:p-5">
           <h2 className="text-sm font-bold uppercase tracking-[0.14em] text-term-text">
@@ -119,7 +121,7 @@ export default function GuidePage() {
               <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-pos/60 text-[0.5625rem] font-bold leading-none text-pos">
                 ?
               </span>{' '}
-              next to a number, tap it for a plain-English explanation.
+              next to a number, tap it for an explanation of what it means.
             </p>
           </div>
         </section>

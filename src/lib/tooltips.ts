@@ -1,5 +1,5 @@
 /**
- * Plain-English explanations for every number the site puts on screen.
+ * Plain-language explanations for every number the site puts on screen.
  *
  * This is the one file to edit to reword them. Nothing here is computed and
  * nothing imports anything, so changing the wording cannot break a page.
@@ -265,7 +265,7 @@ const ENTRIES = {
   verdict: {
     label: 'Verdict',
     plain:
-      'Plain-English summary of conditions — never a buy/sell call. Your own trigger still decides the entry.',
+      'A summary of conditions in plain words — never a buy/sell call. Your own trigger still decides the entry.',
   },
 
   // --- sector momentum -------------------------------------------------------

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
 import { WatchlistView } from '@/components/WatchlistView';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Watchlist',
@@ -13,9 +14,14 @@ export default function WatchlistPage() {
 
       <main className="mx-auto w-full max-w-[1200px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-            Watchlist
-          </h1>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+              Watchlist
+            </h1>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
+              {PAGE_DESCRIPTIONS['/watchlist']}
+            </p>
+          </div>
           <p className="text-2xs text-term-faint">stored in this browser only</p>
         </div>
 

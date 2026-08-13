@@ -3,6 +3,7 @@ import { AccuracyLogTable } from '@/components/AccuracyLogTable';
 import { Footer } from '@/components/Footer';
 import { readLog, storeStatus } from '@/lib/log/store';
 import { summarise } from '@/lib/log/types';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Accuracy Log',
@@ -24,9 +25,14 @@ export default async function LogPage() {
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-            Accuracy Log
-          </h1>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+              Accuracy Log
+            </h1>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
+              {PAGE_DESCRIPTIONS['/log']}
+            </p>
+          </div>
           <p className="text-2xs text-term-faint">
             {stats.flipHeldPct === null
               ? 'no settled days yet'

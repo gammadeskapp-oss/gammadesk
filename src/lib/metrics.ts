@@ -13,7 +13,7 @@ export interface MetricDef {
   read: (m: Metrics) => number;
   /** Render a cell value. */
   format: (value: number) => string;
-  /** Plain-English explanation for the "What am I looking at?" panel. */
+  /** Plain-language explanation for the "What am I looking at?" panel. */
   plain: {
     what: string;
     positive: string;

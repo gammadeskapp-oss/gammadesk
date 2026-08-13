@@ -10,6 +10,7 @@ import { BLEND } from '@/lib/forecast/magnets';
 import { MAX_BEND_SIGMA } from '@/lib/forecast/simulate';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice } from '@/lib/format';
+import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Blended Magnets Forecast',
@@ -46,6 +47,7 @@ export default async function ForecastPage({ searchParams }: PageProps) {
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <PageBar
           title="Blended Magnets Forecast"
+          description={PAGE_DESCRIPTIONS['/forecast']}
           meta={
             data
               ? `${data.symbol} · ${data.paths.toLocaleString('en-US')} paths · ${data.horizon} trading days · spot ${formatPrice(data.spot)} · ${data.source}`

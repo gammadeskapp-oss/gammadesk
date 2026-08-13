@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { StarButton } from './StarButton';
 import { formatPrice } from '@/lib/format';
 import { strengthDots, type RankedTicker } from '@/lib/groups/ranking';
+import { TickerLink } from './TickerLink';
 
 /**
  * The full ranked table, with copy and CSV export.
@@ -122,7 +123,7 @@ export function StrengthTable({ ranked, csv, list, asOfDate }: Props) {
                   >
                     <span className="flex items-center gap-1">
                       <StarButton symbol={r.symbol} size="sm" />
-                      {r.symbol}
+                      <TickerLink symbol={r.symbol} />
                     </span>
                   </th>
                   <td
