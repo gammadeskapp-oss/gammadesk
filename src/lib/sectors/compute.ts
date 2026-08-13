@@ -5,8 +5,11 @@ import { rsi } from '../ticker/indicators';
 import { computeSignals } from '../ticker/signals';
 import type { Bar } from '../ticker/types';
 import { allSectorSymbols, duplicateSymbols, SECTORS } from './definitions';
+import { isFresh, refreshMarketCaps, type CapEntry } from './marketCap';
 import type {
+  ConsensusLabel,
   ScorePoint,
+  SectorConsensus,
   SectorFlag,
   SectorMomentum,
   SectorsSnapshot,
@@ -55,12 +58,22 @@ const WAVE = 5;
 const OVERSOLD = 40;
 const OVERBOUGHT = 60;
 
+/** Sessions of volume averaged into the consensus weight. */
+const WEIGHT_WINDOW = 20;
+
 /** One symbol's score at each of the last `SESSIONS` closes. */
 function historyFor(symbol: string, bars: Bar[]): SymbolHistory | null {
   if (bars.length < MIN_BARS + 1) return null;
 
   const closes = bars.map((b) => b.close);
   const rsiSeries = rsi(closes, 14);
+
+  const recent = bars.slice(-WEIGHT_WINDOW);
+  const weight =
+    recent.reduce((a, b) => a + b.close * b.volume, 0) / Math.max(1, recent.length);
+
+  let bullish = 0;
+  let total = 0;
 
   const points: ScorePoint[] = [];
   const oldest = Math.min(SESSIONS, bars.length - MIN_BARS);
@@ -74,16 +87,64 @@ function historyFor(symbol: string, bars: Bar[]): SymbolHistory | null {
     const signals = computeSignals(slice);
     if (signals.length === 0) continue;
 
-    const bullish = signals.filter((s) => s.vote === 'bullish').length;
+    const votes = signals.filter((s) => s.vote === 'bullish').length;
+
+    // `back` counts down to zero, so the last pass through is the newest
+    // session — which is the one the consensus badge reports.
+    bullish = votes;
+    total = signals.length;
 
     points.push({
       date: slice[slice.length - 1].date,
-      score: (bullish / signals.length) * 100,
+      score: (votes / signals.length) * 100,
       rsi: rsiSeries[end - 1] ?? 50,
     });
   }
 
-  return points.length > 0 ? { symbol, points } : null;
+  return points.length > 0
+    ? { symbol, points, weight: weight > 0 ? weight : 1, bullish, total }
+    : null;
+}
+
+/**
+ * Weighted nine-signal consensus for a sector.
+ *
+ * Cap-weighted when *every* member has a usable cap, equal-weighted otherwise
+ * — never a blend. Mixing the two silently would make a sector's number
+ * incomparable with its neighbours' while looking identical to them, so the
+ * whole sector falls back together and says which method it used.
+ */
+function consensusOf(
+  histories: SymbolHistory[],
+  caps: Record<string, CapEntry>,
+): SectorConsensus {
+  const total = Math.max(...histories.map((h) => h.total), 0);
+
+  const missing = histories
+    .filter((h) => !isFresh(caps[h.symbol]))
+    .map((h) => h.symbol);
+
+  const capWeighted = missing.length === 0 && histories.length > 0;
+  const weightOf = (h: SymbolHistory) => (capWeighted ? caps[h.symbol].cap : 1);
+
+  const denom = histories.reduce((a, h) => a + weightOf(h), 0);
+  const exact =
+    denom > 0
+      ? histories.reduce((a, h) => a + h.bullish * weightOf(h), 0) / denom
+      : 0;
+
+  const share = total > 0 ? exact / total : 0.5;
+  const label: ConsensusLabel =
+    share >= 0.6 ? 'BULLISH' : share <= 0.4 ? 'BEARISH' : 'NEUTRAL';
+
+  return {
+    bullish: Math.round(exact),
+    total,
+    label,
+    exact,
+    basis: capWeighted ? 'market-cap' : 'equal',
+    missingCaps: missing,
+  };
 }
 
 /** Averages member series into one sector series, session by session. */
@@ -147,6 +208,9 @@ async function inWaves<T>(
 export async function computeSectorsSnapshot(): Promise<SectorsSnapshot> {
   const symbols = allSectorSymbols();
 
+  // Caps and bars in parallel: different hosts, neither blocks the other.
+  const capsPromise = refreshMarketCaps(symbols);
+
   const loaded = await inWaves(symbols, async (symbol) => {
     try {
       // Yahoo, because Polygon's stocks quota is five requests a minute and
@@ -158,6 +222,8 @@ export async function computeSectorsSnapshot(): Promise<SectorsSnapshot> {
     }
   });
 
+  const { caps, failed: capFailures } = await capsPromise;
+
   const bySymbol = new Map(
     loaded.filter((l) => l.history).map((l) => [l.symbol, l.history as SymbolHistory]),
   );
@@ -166,6 +232,13 @@ export async function computeSectorsSnapshot(): Promise<SectorsSnapshot> {
   const failed = loaded.filter((l) => !l.history).map((l) => l.symbol);
   if (failed.length > 0) {
     notes.push(`No usable history for ${failed.length} symbols: ${failed.join(', ')}.`);
+  }
+
+  if (capFailures.length > 0) {
+    notes.push(
+      `No market cap returned for ${capFailures.length} symbols: ${capFailures.join(', ')}. ` +
+        'Any sector holding one falls back to equal weighting and is labelled.',
+    );
   }
 
   const duplicates = duplicateSymbols();
@@ -204,6 +277,7 @@ export async function computeSectorsSnapshot(): Promise<SectorsSnapshot> {
       rsiHigh: Math.max(...rsis),
       rsiNow: series[series.length - 1].rsi,
       flag: flagFor(series, delta3),
+      consensus: consensusOf(histories, caps),
     });
   }
 

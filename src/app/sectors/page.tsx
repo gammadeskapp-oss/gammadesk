@@ -1,6 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
+import { CrashCard } from '@/components/CrashCard';
+import { GroupCard } from '@/components/GroupCard';
+import { MarketInternalsStrip } from '@/components/MarketInternals';
+import { getForecast } from '@/lib/forecast';
+import type { ForecastResult } from '@/lib/forecast/types';
+import { getGroupsSnapshot } from '@/lib/groups';
+import type { GroupsSnapshot } from '@/lib/groups/types';
 import { InfoTip } from '@/components/InfoTip';
 import { PageBar } from '@/components/PageBar';
 import { Sparkline } from '@/components/Sparkline';
@@ -11,6 +18,7 @@ import {
   storeStatus,
   type SectorMomentum,
 } from '@/lib/sectors';
+import type { SectorConsensus } from '@/lib/sectors/types';
 import { formatAsOf } from '@/lib/time';
 import type { TooltipKey } from '@/lib/tooltips';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
@@ -22,6 +30,73 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * Which view the page is showing.
+ *
+ * Driven by the URL rather than client state, so the permanent redirect from
+ * the old /groups route can land straight on the groups view, and so either
+ * side can be linked and bookmarked.
+ */
+type View = 'sectors' | 'groups';
+
+interface PageProps {
+  searchParams: Promise<{ view?: string }>;
+}
+
+function ViewToggle({ view }: { view: View }) {
+  const tab = (target: View, label: string, hint: string) => {
+    const active = view === target;
+    return (
+      <Link
+        key={target}
+        href={target === 'sectors' ? '/sectors' : '/sectors?view=groups'}
+        aria-current={active ? 'page' : undefined}
+        title={hint}
+        className={`border px-4 py-2 text-2xs font-bold uppercase tracking-[0.14em] transition-colors ${
+          active
+            ? 'border-pos/60 bg-pos/15 text-pos'
+            : 'border-term-line bg-term-panel/60 text-term-faint hover:border-term-edge hover:text-term-dim'
+        }`}
+      >
+        {label}
+      </Link>
+    );
+  };
+
+  return (
+    <div role="group" aria-label="View" className="flex flex-wrap items-center gap-1">
+      {tab('sectors', 'Sectors', 'The eleven market sectors, by how their score is changing')}
+      {tab('groups', 'Groups', 'Themed baskets — megacap tech, chips, the index ETFs')}
+    </div>
+  );
+}
+
+/** Weighted nine-signal badge, in the same shape the ticker page uses. */
+function ConsensusBadge({ consensus }: { consensus: SectorConsensus }) {
+  const tone =
+    consensus.label === 'BULLISH'
+      ? 'border-bull/50 text-bull'
+      : consensus.label === 'BEARISH'
+        ? 'border-bear/50 text-bear'
+        : 'border-flip/50 text-flip';
+
+  return (
+    <span
+      className={`whitespace-nowrap border px-2 py-0.5 text-2xs font-bold tracking-[0.1em] ${tone}`}
+      title={
+        consensus.basis === 'market-cap'
+          ? 'Nine-signal consensus, market-cap weighted across the sector.'
+          : `Nine-signal consensus, equal-weighted — no cap data for ${consensus.missingCaps.join(', ')}.`
+      }
+    >
+      {consensus.bullish}/{consensus.total} {consensus.label}
+      {consensus.basis === 'equal' && (
+        <span className="ml-1 font-normal text-term-faint">· eq</span>
+      )}
+    </span>
+  );
+}
 
 function Delta({ value }: { value: number | null }) {
   if (value === null) return <span className="text-term-faint">—</span>;
@@ -63,6 +138,7 @@ function SectorRow({ sector, rising }: { sector: SectorMomentum; rising: boolean
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="text-sm font-bold text-term-text">{sector.name}</span>
+            <ConsensusBadge consensus={sector.consensus} />
             <span className="text-2xs tabular-nums text-term-faint">
               score {sector.score.toFixed(0)}
             </span>
@@ -173,25 +249,125 @@ function Side({
   );
 }
 
-export default async function SectorsPage() {
-  const snapshot = await getSectorsSnapshot();
+/**
+ * The old /groups page, living here as a view.
+ *
+ * Ported whole — group cards, the breadth strip and the downturn card — so the
+ * merge does not quietly drop anything that page did.
+ */
+function GroupsView({
+  snapshot,
+  forecast,
+}: {
+  snapshot: GroupsSnapshot | null;
+  forecast: ForecastResult | null;
+}) {
+  if (!snapshot) {
+    return (
+      <div className="panel px-4 py-10 text-center text-xs text-term-dim">
+        <p className="text-term-text">No group snapshot yet.</p>
+        <p className="mx-auto mt-2 max-w-xl leading-relaxed">
+          Scores are computed once a day and served from storage rather than
+          recalculated per visit. The first run happens on the next scheduled
+          refresh, or on the next request to this page.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {forecast && <CrashCard forecast={forecast} />}
+
+      <MarketInternalsStrip internals={snapshot.internals} />
+
+      <section aria-label="Group consensus" className="space-y-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-text">
+            Model consensus
+          </h2>
+          <p className="text-2xs text-term-faint">
+            click a group to see each ticker&rsquo;s own score
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          {snapshot.groups.map((group) => (
+            <GroupCard key={group.id} group={group} />
+          ))}
+        </div>
+      </section>
+
+      <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
+        <span className="label-xs">Groups are themes, not sectors</span>
+        <p className="mt-1.5">
+          These baskets overlap on purpose — NVDA sits in both MAG7 and SEMI —
+          which is why they are kept apart from the{' '}
+          <Link href="/sectors" className="text-term-dim underline decoration-dotted">
+            sector view
+          </Link>
+          , where membership is disjoint so the averages can be compared against
+          each other. Every ticker runs through the same nine-signal engine as{' '}
+          <Link href="/ticker" className="text-term-dim underline decoration-dotted">
+            the ticker page
+          </Link>
+          .
+        </p>
+      </section>
+    </div>
+  );
+}
+
+export default async function SectorsPage({ searchParams }: PageProps) {
+  const { view: rawView } = await searchParams;
+  const view: View = rawView === 'groups' ? 'groups' : 'sectors';
+
+  const [snapshot, groups, forecast] = await Promise.all([
+    getSectorsSnapshot(),
+    // Only paid for when the groups view is actually being shown.
+    view === 'groups' ? getGroupsSnapshot() : Promise.resolve(null),
+    view === 'groups' ? getForecast().catch(() => null) : Promise.resolve(null),
+  ]);
+
   const store = storeStatus();
   const split = snapshot ? splitByMomentum(snapshot) : null;
+
+  const equalWeighted = (snapshot?.sectors ?? []).filter(
+    (s) => s.consensus.basis === 'equal',
+  );
 
   return (
     <>
       <main className="mx-auto w-full max-w-[1400px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <PageBar
-          title="Sector Momentum"
+          title={view === 'groups' ? 'Groups' : 'Sector Momentum'}
           description={PAGE_DESCRIPTIONS['/sectors']}
           meta={
-            snapshot
-              ? `${snapshot.sectors.length} sectors · ${snapshot.sessions} sessions · close ${snapshot.asOfDate}`
-              : undefined
+            view === 'groups'
+              ? groups
+                ? `${groups.groups.length} groups · ${groups.internals.universe} names · close ${groups.asOfDate}`
+                : undefined
+              : snapshot
+                ? `${snapshot.sectors.length} sectors · ${snapshot.sessions} sessions · close ${snapshot.asOfDate}`
+                : undefined
           }
-          asOfLabel={snapshot ? formatAsOf(new Date(snapshot.computedAt)) : undefined}
+          asOfLabel={
+            view === 'groups'
+              ? groups
+                ? formatAsOf(new Date(groups.computedAt))
+                : undefined
+              : snapshot
+                ? formatAsOf(new Date(snapshot.computedAt))
+                : undefined
+          }
         />
 
+        <ViewToggle view={view} />
+
+        {view === 'groups' ? (
+          <GroupsView snapshot={groups} forecast={forecast} />
+        ) : (
+        <>
         <section className="panel border-l-2 border-l-pos/50 px-3.5 py-3 text-xs leading-relaxed">
           <p className="text-term-text">
             <span className="font-bold text-pos">This tracks change, not level. </span>
@@ -249,6 +425,34 @@ export default async function SectorsPage() {
               </section>
             )}
           </>
+        )}
+
+        {/* Never silently mixed: a sector missing one cap falls back whole. */}
+        <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
+          <span className="label-xs">Consensus weighting</span>
+          <p className="mt-1.5">
+            {equalWeighted.length === 0 ? (
+              <>
+                Every sector&rsquo;s consensus is{' '}
+                <span className="text-term-dim">market-cap weighted</span>, so a
+                small member cannot swing it. Caps come from Polygon and are
+                refreshed with the rest of the nightly run.
+              </>
+            ) : (
+              <>
+                <span className="text-flip">
+                  {equalWeighted.map((s) => s.name).join(', ')} —
+                  equal-weighted, cap data unavailable.
+                </span>{' '}
+                Every other sector is market-cap weighted. A sector missing even
+                one member&rsquo;s cap falls back entirely rather than blending
+                the two, because a half-weighted average would not be comparable
+                with the sector beside it while looking exactly like it.
+              </>
+            )}
+          </p>
+        </section>
+        </>
         )}
 
         <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">

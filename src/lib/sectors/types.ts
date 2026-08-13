@@ -12,6 +12,38 @@ export interface SymbolHistory {
   symbol: string;
   /** Oldest first, newest last. */
   points: ScorePoint[];
+  /**
+   * Weight this member carries in its sector's consensus.
+   *
+   * 20-session average dollar volume, *not* market cap — see the note on
+   * `SectorMomentum.weightBasis`.
+   */
+  weight: number;
+  /** Latest signal counts, for the consensus badge. */
+  bullish: number;
+  total: number;
+}
+
+export type ConsensusLabel = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+
+export interface SectorConsensus {
+  /** Weighted bullish signals, rounded to whole votes for display. */
+  bullish: number;
+  /** Always the signal count, i.e. 9. */
+  total: number;
+  label: ConsensusLabel;
+  /** Unrounded, so the ordering is not lumpy. */
+  exact: number;
+  /**
+   * How the members were weighted.
+   *
+   * All-or-nothing per sector: a blend of the two would be incomparable with
+   * the sector next to it while looking identical, so one missing cap drops
+   * the whole sector to `equal` and the page says so.
+   */
+  basis: 'market-cap' | 'equal';
+  /** Members that forced the fallback, named so the reason is checkable. */
+  missingCaps: string[];
 }
 
 export type SectorFlag = 'bottoming' | 'topping';
@@ -36,6 +68,8 @@ export interface SectorMomentum {
   rsiHigh: number;
   rsiNow: number;
   flag: SectorFlag | null;
+  /** Weighted nine-signal consensus across the members. */
+  consensus: SectorConsensus;
 }
 
 export interface SectorsSnapshot {
