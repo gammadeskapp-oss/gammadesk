@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
+import { FlowFilters } from '@/components/FlowFilters';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
 import { InfoTip } from '@/components/InfoTip';
 import { getFlowSnapshot, storeStatus } from '@/lib/flow';
 import { filterFlow } from '@/lib/flow/filter';
-import type { UnusualLevel } from '@/lib/flow/types';
-import { formatContracts, formatPrice, formatStrike } from '@/lib/format';
+import { formatContracts, formatPrice } from '@/lib/format';
 import type { TooltipKey } from '@/lib/tooltips';
 import { TickerLink } from '@/components/TickerLink';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
@@ -18,12 +19,7 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-const LEVEL: Record<UnusualLevel, { text: string; label: string }> = {
-  extreme: { text: 'text-bear', label: 'EXTREME' },
-  high: { text: 'text-flip', label: 'HIGH' },
-  notable: { text: 'text-term-dim', label: 'NOTABLE' },
-};
-
+const cell = 'border-b border-term-line/60 px-2.5 py-1.5';
 const head =
   'sticky top-0 z-10 whitespace-nowrap border-b border-term-edge bg-term-raised px-2.5 py-2 text-2xs font-bold uppercase tracking-[0.1em] text-term-dim';
 
@@ -69,8 +65,6 @@ export default async function FlowPage({ searchParams }: PageProps) {
     ? filterFlow(snapshot, { from: params.from, to: params.to })
     : null;
 
-  const field =
-    'border border-term-edge bg-term-panel px-2.5 py-1.5 text-xs tabular-nums text-term-text focus:border-pos/60 focus:outline-none focus:ring-1 focus:ring-pos/40';
 
   return (
     <>
@@ -155,192 +149,25 @@ export default async function FlowPage({ searchParams }: PageProps) {
           </dl>
         </section>
 
-        {/* Expiry range. A plain GET form, so the range lives in the URL and
-            can be linked or reloaded, and it works with JavaScript off. */}
+        {/*
+          Filtering happens in the browser over rows already sent: the table is
+          capped at sixty, so shipping them all is cheaper than one refetch and
+          typing never hits the network. Suspense because `useSearchParams`
+          needs a boundary.
+        */}
         {snapshot && filtered && (
-          <form
-            method="get"
-            aria-label="Filter by expiry date"
-            className="panel flex flex-wrap items-end gap-x-3 gap-y-2 px-3.5 py-3"
+          <Suspense
+            fallback={
+              <div className="panel h-40 animate-pulse" aria-hidden />
+            }
           >
-            <div>
-              <label htmlFor="flow-from" className="label-xs block">
-                Expiry from
-              </label>
-              <input
-                type="date"
-                id="flow-from"
-                name="from"
-                defaultValue={filtered.from ?? ''}
-                className={`mt-1 ${field}`}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="flow-to" className="label-xs block">
-                Expiry to
-              </label>
-              <input
-                type="date"
-                id="flow-to"
-                name="to"
-                defaultValue={filtered.to ?? ''}
-                className={`mt-1 ${field}`}
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="border border-pos/50 bg-pos/10 px-4 py-1.5 text-2xs font-bold uppercase tracking-[0.16em] text-pos transition-colors hover:bg-pos/20"
-            >
-              Apply
-            </button>
-
-            {!filtered.usingDefault && (
-              <Link
-                href="/flow"
-                className="border border-term-line bg-term-panel/60 px-4 py-1.5 text-2xs uppercase tracking-[0.14em] text-term-dim transition-colors hover:border-term-edge hover:text-term-text"
-              >
-                Reset to live only
-              </Link>
-            )}
-
-            <p className="ml-auto max-w-md text-2xs leading-relaxed text-term-faint">
-              {filtered.usingDefault ? (
-                <>
-                  Showing contracts expiring{' '}
-                  <span className="text-term-dim">{filtered.today}</span> or
-                  later.
-                  {filtered.expiredHidden > 0 && (
-                    <>
-                      {' '}
-                      {filtered.expiredHidden} expired row
-                      {filtered.expiredHidden === 1 ? '' : 's'} hidden — those
-                      contracts no longer trade.
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  <span className="text-flip">Custom range. </span>
-                  Your dates are being honoured, so expired contracts can appear
-                  here.
-                </>
-              )}
-            </p>
-          </form>
-        )}
-
-        {!snapshot || !filtered ? (
-          <div className="panel px-4 py-10 text-center text-xs text-term-dim">
-            <p className="text-term-text">No flow snapshot yet.</p>
-            <p className="mx-auto mt-2 max-w-xl leading-relaxed">
-              Chains are scanned once a day and served from storage. The first
-              run happens on the next scheduled refresh, or on the next request
-              to this page.
-            </p>
-          </div>
-        ) : filtered.rows.length === 0 ? (
-          <div className="panel px-4 py-10 text-center text-xs text-term-dim">
-            {snapshot.rows.length === 0 ? (
-              <>
-                <p className="text-term-text">Nothing unusual today.</p>
-                <p className="mx-auto mt-2 max-w-xl leading-relaxed">
-                  No contract in the tracked symbols traded more than its
-                  existing open interest on meaningful size. A quiet tape is a
-                  perfectly ordinary result.
-                </p>
-              </>
-            ) : filtered.usingDefault ? (
-              <>
-                <p className="text-term-text">
-                  Nothing unusual at a live expiry.
-                </p>
-                <p className="mx-auto mt-2 max-w-xl leading-relaxed">
-                  All {snapshot.rows.length} flagged contracts in this scan have
-                  since expired, so none of them can trade again. That happens
-                  when the scan is older than the contracts it caught — the next
-                  run will refill this.
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-term-text">Nothing in that date range.</p>
-                <p className="mx-auto mt-2 max-w-xl leading-relaxed">
-                  No flagged contract expires between the dates you chose. Widen
-                  the range, or reset to the live-only view.
-                </p>
-              </>
-            )}
-          </div>
-        ) : (
-          <section className="panel">
-            <div className="scroll-term max-h-[70vh] overflow-auto">
-              <table className="w-full border-separate border-spacing-0 text-right text-xs tabular-nums">
-                <caption className="sr-only">
-                  Contracts trading heavily relative to their open interest.
-                </caption>
-                <thead>
-                  <tr>
-                    <Th label="Ticker" tip="flowTicker" align="left" />
-                    <Th label="Expiry" tip="flowExpiry" />
-                    <Th label="Strike" tip="flowStrike" />
-                    <Th label="Type" tip="flowType" />
-                    <Th label="Volume" tip="flowVolume" />
-                    <Th label="Open int." tip="flowOpenInterest" />
-                    <Th label="Vol/OI" tip="volOi" />
-                    <Th label="Flag" tip="flowFlag" align="left" />
-                    <Th label="What happened" tip="flowWhat" align="left" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.rows.map((r) => {
-                    const tone = LEVEL[r.level];
-                    const cell = 'border-b border-term-line/60 px-2.5 py-1.5';
-                    return (
-                      <tr key={`${r.symbol}-${r.expiration}-${r.strike}-${r.type}`}>
-                        <th scope="row" className={`${cell} text-left font-bold text-term-text`}>
-                          <TickerLink symbol={r.symbol} />
-                        </th>
-                        <td className={`${cell} text-term-dim`}>{r.expiryLabel}</td>
-                        <td className={`${cell} text-term-text`}>{formatStrike(r.strike)}</td>
-                        <td
-                          className={`${cell} font-bold ${
-                            r.type === 'call' ? 'text-bull' : 'text-bear'
-                          }`}
-                        >
-                          {r.type === 'call' ? 'CALL' : 'PUT'}
-                        </td>
-                        <td className={`${cell} text-term-text`}>
-                          {formatContracts(r.volume)}
-                        </td>
-                        <td className={`${cell} text-term-dim`}>
-                          {formatContracts(r.openInterest)}
-                        </td>
-                        <td className={`${cell} font-bold ${tone.text}`}>
-                          {/* Floor, not round, so this agrees with the
-                              "over Nx" wording in the note beside it. */}
-                          {r.volumeToOi >= 100
-                            ? `${Math.floor(r.volumeToOi)}x`
-                            : `${r.volumeToOi.toFixed(1)}x`}
-                        </td>
-                        <td className={`${cell} text-left`}>
-                          <span
-                            className={`border px-1.5 py-0.5 text-2xs font-bold tracking-[0.1em] ${tone.text} border-current/40`}
-                          >
-                            {tone.label}
-                          </span>
-                        </td>
-                        <td className={`${cell} max-w-[26rem] text-left text-2xs text-term-dim`}>
-                          {r.note}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
+            <FlowFilters
+              rows={filtered.rows}
+              today={filtered.today}
+              head={head}
+              cell={cell}
+            />
+          </Suspense>
         )}
 
         {snapshot && (

@@ -3,6 +3,7 @@ import 'server-only';
 import { parseOccSymbol } from '../cboe';
 import { runScan, scanSymbols } from '../scanUniverse';
 import { formatExpiryLabel, formatAsOf, marketToday } from '../time';
+import { FLOW_SCHEMA } from './types';
 import type { FlowRow, FlowSnapshot, FlowSymbolSummary, UnusualLevel } from './types';
 
 /**
@@ -40,6 +41,24 @@ interface CboeContract {
   option?: string;
   volume?: number;
   open_interest?: number;
+  bid?: number;
+  ask?: number;
+  last_trade_price?: number;
+}
+
+/**
+ * What the contract traded for, per share.
+ *
+ * Mid when both sides are quoted; the last print otherwise. Returns null
+ * rather than zero when neither is usable, so an unknown premium is excluded
+ * from a minimum-premium filter instead of silently passing as $0.
+ */
+function contractPrice(c: CboeContract): number | null {
+  const bid = Number(c.bid ?? 0);
+  const ask = Number(c.ask ?? 0);
+  if (bid > 0 && ask > 0) return (bid + ask) / 2;
+  const last = Number(c.last_trade_price ?? 0);
+  return last > 0 ? last : null;
 }
 
 interface CboePayload {
@@ -161,6 +180,7 @@ async function scanSymbol(
     if (ratio < MIN_RATIO) continue;
 
     const distancePct = ((parsed.strike - spot) / spot) * 100;
+    const price = contractPrice(c);
 
     candidates.push({
       symbol,
@@ -171,6 +191,7 @@ async function scanSymbol(
       volume,
       openInterest,
       volumeToOi: ratio,
+      premium: price === null ? null : volume * price * 100,
       shareOfChain: 0, // filled once the chain total is known
       level: levelFor(ratio),
       note: noteFor({ ratio, volume, openInterest, type: parsed.type, distancePct }),
@@ -233,6 +254,7 @@ export async function computeFlowSnapshot(): Promise<FlowSnapshot> {
   const now = new Date();
 
   return {
+    schema: FLOW_SCHEMA,
     rows: rows
       .sort((a, b) => b.volumeToOi - a.volumeToOi || b.volume - a.volume)
       .slice(0, TOTAL_CAP),

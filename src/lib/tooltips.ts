@@ -205,6 +205,14 @@ const ENTRIES = {
       'A common nervousness gauge, and a crude one — puts are bought as insurance at least as often as they are bets.',
   },
 
+  flowPremium: {
+    label: 'Premium',
+    plain:
+      'The dollars that actually changed hands on this contract today — how many traded, times what each cost.',
+    detail:
+      'Volume x price x 100, priced off the mid where both sides are quoted and the last trade otherwise. Shown as a dash when neither is available, rather than as zero.',
+  },
+
   flowFlagged: {
     label: 'Flagged',
     plain: 'How many strikes on this stock were unusual enough to make the list above.',

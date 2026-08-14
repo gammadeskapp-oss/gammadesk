@@ -3,7 +3,7 @@ import 'server-only';
 import { cached } from '../cache';
 import { createJsonStore } from '../jsonStore';
 import { computeFlowSnapshot } from './compute';
-import type { FlowSnapshot } from './types';
+import { FLOW_SCHEMA, type FlowSnapshot } from './types';
 
 export { storeStatus } from '../jsonStore';
 
@@ -19,10 +19,14 @@ export { storeStatus } from '../jsonStore';
 const store = createJsonStore<FlowSnapshot | null>(
   'gammadesk/flow.json',
   () => null,
-  (raw) =>
-    raw && typeof raw === 'object' && Array.isArray((raw as FlowSnapshot).rows)
-      ? (raw as FlowSnapshot)
-      : null,
+  (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+    const snapshot = raw as FlowSnapshot;
+    // Exact-match the schema: a snapshot written before `premium` existed
+    // would otherwise validate and then filter as if nothing qualified.
+    if (snapshot.schema !== FLOW_SCHEMA) return null;
+    return Array.isArray(snapshot.rows) ? snapshot : null;
+  },
 );
 
 const MAX_AGE_MS = 20 * 60 * 60 * 1000;

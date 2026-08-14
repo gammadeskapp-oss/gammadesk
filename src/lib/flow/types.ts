@@ -11,6 +11,14 @@ export interface FlowRow {
   openInterest: number;
   /** volume / open interest. The core unusualness measure. */
   volumeToOi: number;
+  /**
+   * Dollars that changed hands: volume x price x 100.
+   *
+   * Priced off the mid where both sides are quoted, falling back to the last
+   * trade. Null when neither is available, so the filter can exclude the row
+   * rather than treat an unknown as zero.
+   */
+  premium: number | null;
   /** Share of the symbol's whole-chain volume sitting in this one contract. */
   shareOfChain: number;
   level: UnusualLevel;
@@ -34,7 +42,15 @@ export interface FlowSymbolSummary {
   failed?: string;
 }
 
+/**
+ * Bumped when the stored shape changes, so an older snapshot is rejected and
+ * recomputed rather than passing validation and missing a field the page now
+ * reads. Same reasoning as the sectors store.
+ */
+export const FLOW_SCHEMA = 2;
+
 export interface FlowSnapshot {
+  schema: number;
   rows: FlowRow[];
   symbols: FlowSymbolSummary[];
   asOfLabel: string;
