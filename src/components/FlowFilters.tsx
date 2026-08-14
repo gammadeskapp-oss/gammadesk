@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { InfoTip } from './InfoTip';
 import { TickerLink } from './TickerLink';
 import type { FlowRow, UnusualLevel } from '@/lib/flow/types';
@@ -14,10 +14,13 @@ import { formatContracts, formatStrike, formatUsd } from '@/lib/format';
  * is capped at sixty rows, so shipping them all costs less than a single
  * refetch would, and typing never touches the network.
  *
- * Filter state lives in the URL rather than component state, so a filtered
- * view is shareable and survives a refresh. `router.replace` keeps it out of
- * the back-button history, which otherwise fills up with one entry per
- * keystroke.
+ * Filter state is held locally and *mirrored* into the URL, so a filtered view
+ * is still shareable and still survives a refresh. The mirror is written with
+ * `history.replaceState` rather than `router.replace`: this route is
+ * force-dynamic, so a router navigation would re-run the server component on
+ * every keystroke — invisible to the user, but a real request per character
+ * against a page that reads the flow store. replaceState touches nothing but
+ * the address bar, and keeps the back button free of one entry per keystroke.
  */
 
 const LEVEL: Record<UnusualLevel, { text: string; label: string }> = {
@@ -89,64 +92,61 @@ export function FlowFilters({
   head: string;
   cell: string;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
+  // Read once, on mount, to seed the controls. After that this component owns
+  // the state and the URL only follows it.
+  const initial = useSearchParams();
 
-  const side = (params.get('side') as Side) || 'both';
-  const expiry = (params.get('expiry') as Expiry) || 'all';
-  const minPremium = Number(params.get('minPremium') ?? 0) || 0;
-  const urlTicker = params.get('ticker') ?? '';
+  const [side, setSide] = useState<Side>(() => {
+    const v = initial.get('side');
+    return v === 'calls' || v === 'puts' ? v : 'both';
+  });
+  const [expiry, setExpiry] = useState<Expiry>(() => {
+    const v = initial.get('expiry');
+    return v === '0dte' || v === 'week' || v === 'month' ? v : 'all';
+  });
+  const [minPremium, setMinPremium] = useState<number>(
+    () => Number(initial.get('minPremium') ?? 0) || 0,
+  );
+  const [tickerText, setTickerText] = useState(() => initial.get('ticker') ?? '');
 
-  /*
-   * The text box is the one control held locally as well as in the URL.
-   * Writing a URL per keystroke would make typing feel like navigation; this
-   * echoes immediately and pushes the debounced value.
-   */
-  const [tickerText, setTickerText] = useState(urlTicker);
-  const lastPushed = useRef(urlTicker);
+  /** The debounced value the filter actually uses. */
+  const [tickerApplied, setTickerApplied] = useState(tickerText);
 
-  // Keep the box in step when the URL changes from elsewhere — clear-all, or
-  // the back button — without clobbering what is being typed.
   useEffect(() => {
-    if (urlTicker !== lastPushed.current) {
-      lastPushed.current = urlTicker;
-      setTickerText(urlTicker);
-    }
-  }, [urlTicker]);
+    const handle = setTimeout(() => setTickerApplied(tickerText.trim()), 150);
+    return () => clearTimeout(handle);
+  }, [tickerText]);
 
-  const setParams = (next: Record<string, string | null>) => {
-    const merged = new URLSearchParams(params.toString());
-    for (const [key, value] of Object.entries(next)) {
+  // Mirror to the address bar. No navigation, so no server round-trip.
+  useEffect(() => {
+    const merged = new URLSearchParams(window.location.search);
+    const write = (key: string, value: string | null) => {
       if (value === null || value === '') merged.delete(key);
       else merged.set(key, value);
-    }
-    const query = merged.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  };
+    };
+    write('ticker', tickerApplied || null);
+    write('side', side === 'both' ? null : side);
+    write('expiry', expiry === 'all' ? null : expiry);
+    write('minPremium', minPremium ? String(minPremium) : null);
 
-  useEffect(() => {
-    const handle = setTimeout(() => {
-      const trimmed = tickerText.trim();
-      if (trimmed === lastPushed.current) return;
-      lastPushed.current = trimmed;
-      setParams({ ticker: trimmed || null });
-    }, 150);
-    return () => clearTimeout(handle);
-    // `setParams` closes over the current params, which is what we want.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickerText]);
+    const query = merged.toString();
+    window.history.replaceState(
+      null,
+      '',
+      query ? `${window.location.pathname}?${query}` : window.location.pathname,
+    );
+  }, [tickerApplied, side, expiry, minPremium]);
 
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // --- filtering ---
   const wanted = useMemo(
     () =>
-      tickerText
+      tickerApplied
         .split(',')
         .map((t) => t.trim().toUpperCase())
         .filter(Boolean),
-    [tickerText],
+    [tickerApplied],
   );
 
   const filtered = useMemo(() => {
@@ -179,8 +179,10 @@ export function FlowFilters({
 
   const clearAll = () => {
     setTickerText('');
-    lastPushed.current = '';
-    setParams({ ticker: null, side: null, expiry: null, minPremium: null });
+    setTickerApplied('');
+    setSide('both');
+    setExpiry('all');
+    setMinPremium(0);
   };
 
   const chip = (active: boolean) =>
@@ -216,7 +218,7 @@ export function FlowFilters({
               key={c.value}
               type="button"
               aria-pressed={side === c.value}
-              onClick={() => setParams({ side: c.value === 'both' ? null : c.value })}
+              onClick={() => setSide(c.value)}
               className={chip(side === c.value)}
             >
               {c.label}
@@ -233,7 +235,7 @@ export function FlowFilters({
               key={c.value}
               type="button"
               aria-pressed={expiry === c.value}
-              onClick={() => setParams({ expiry: c.value === 'all' ? null : c.value })}
+              onClick={() => setExpiry(c.value)}
               className={chip(expiry === c.value)}
             >
               {c.label}
@@ -253,7 +255,7 @@ export function FlowFilters({
               key={c.label}
               type="button"
               aria-pressed={minPremium === c.value}
-              onClick={() => setParams({ minPremium: c.value ? String(c.value) : null })}
+              onClick={() => setMinPremium(c.value)}
               className={chip(minPremium === c.value)}
             >
               {c.label}
