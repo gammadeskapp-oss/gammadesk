@@ -28,7 +28,7 @@ const PAGES: { href: string; name: string; blurb: string }[] = [
       'A thousand pretend versions of the next month, so you can see what counts as a normal move.',
   },
   {
-    href: '/groups',
+    href: '/sectors?view=groups',
     name: 'Groups',
     blurb:
       'The same read for baskets — big tech, chip makers, the indexes — plus how the wider market is breathing.',

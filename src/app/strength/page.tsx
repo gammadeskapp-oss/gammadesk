@@ -53,8 +53,8 @@ export default async function StrengthPage() {
             <p className="text-term-text">No ranking yet.</p>
             <p className="mx-auto mt-2 max-w-xl leading-relaxed">
               Strength is derived from the same daily group snapshot that powers{' '}
-              <a href="/groups" className="text-term-dim underline decoration-dotted">
-                /groups
+              <a href="/sectors?view=groups" className="text-term-dim underline decoration-dotted">
+                /sectors
               </a>
               . It appears once that has been computed.
             </p>
@@ -106,7 +106,7 @@ export default async function StrengthPage() {
                 Strength here means strength against the {ranked.length} names
                 in the tracked groups, not against the market. A leader in a
                 weak universe is still weak in absolute terms — check{' '}
-                <a href="/groups" className="text-term-dim underline decoration-dotted">
+                <a href="/sectors?view=groups" className="text-term-dim underline decoration-dotted">
                   market internals
                 </a>{' '}
                 for that context.

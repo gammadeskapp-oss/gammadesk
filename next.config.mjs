@@ -2,6 +2,17 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  async redirects() {
+    return [
+      {
+        // Groups is a view on /sectors now, not its own route. Permanent, so
+        // bookmarks and shared links land on the merged page.
+        source: '/groups',
+        destination: '/sectors?view=groups',
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {

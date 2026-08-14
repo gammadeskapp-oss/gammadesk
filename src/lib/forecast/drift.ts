@@ -15,7 +15,7 @@ import type { DriftBlend } from './types';
 export const MAX_ANNUAL_TILT = 0.08;
 
 export interface BreadthInput {
-  /** -1 to +1, from the tracked universe on /groups. */
+  /** -1 to +1, from the tracked universe behind the groups view. */
   score: number;
   universe: number;
   above50Pct: number;
@@ -76,7 +76,7 @@ export function buildDrift(bars: Bar[], breadth?: BreadthInput | null): DriftBle
     unavailable.push(
       breadth
         ? `Market breadth — only ${breadth.universe} symbols resolved, too few to be meaningful.`
-        : 'Market breadth — no group snapshot stored yet, so it is left out rather than approximated. It appears here once /groups has been computed.',
+        : 'Market breadth — no group snapshot stored yet, so it is left out rather than approximated. It appears here once the group snapshot has been computed.',
     );
   }
 

@@ -234,7 +234,7 @@ export default async function DashboardPage() {
 
           {/* ---- model consensus ---- */}
           <Card
-            href="/groups"
+            href="/sectors?view=groups"
             title="Model consensus"
             tone={bullishTickers >= bearishTickers ? 'bull' : 'bear'}
           >
@@ -265,7 +265,7 @@ export default async function DashboardPage() {
                 </Sub>
               </>
             ) : (
-              <Missing what="Group consensus" where="/groups" />
+              <Missing what="Group consensus" where="/sectors" />
             )}
           </Card>
 
@@ -311,7 +311,7 @@ export default async function DashboardPage() {
                 <Sub>strongest of the {ranked.length} tracked names</Sub>
               </>
             ) : (
-              <Missing what="The ranking" where="/groups" />
+              <Missing what="The ranking" where="/sectors" />
             )}
           </Card>
 
@@ -333,7 +333,7 @@ export default async function DashboardPage() {
                 <Sub>weakest of the {ranked.length} tracked names</Sub>
               </>
             ) : (
-              <Missing what="The ranking" where="/groups" />
+              <Missing what="The ranking" where="/sectors" />
             )}
           </Card>
 
