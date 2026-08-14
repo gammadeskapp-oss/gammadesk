@@ -20,13 +20,27 @@ export type { SectorMomentum, SectorsSnapshot } from './types';
  * produces the full window regardless.
  */
 
+/**
+ * Rejects a snapshot written before a field the page now requires.
+ *
+ * Checking only `Array.isArray(sectors)` was not enough: adding `consensus` to
+ * the stored shape meant yesterday's copy still validated, still looked
+ * current, and then threw when the page read a field that was never written.
+ * Refusing it here makes the miss self-healing — `getSectorsSnapshot` sees
+ * nothing stored and recomputes — instead of serving a shape the renderer
+ * cannot use.
+ */
 const store = createJsonStore<SectorsSnapshot | null>(
   'gammadesk/sectors.json',
   () => null,
-  (raw) =>
-    raw && typeof raw === 'object' && Array.isArray((raw as SectorsSnapshot).sectors)
-      ? (raw as SectorsSnapshot)
-      : null,
+  (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+    const snapshot = raw as SectorsSnapshot;
+    if (!Array.isArray(snapshot.sectors) || snapshot.sectors.length === 0) return null;
+    // Every sector is written by the same loop, so the first is representative.
+    if (!snapshot.sectors[0]?.consensus) return null;
+    return snapshot;
+  },
 );
 
 const MAX_AGE_MS = 20 * 60 * 60 * 1000;

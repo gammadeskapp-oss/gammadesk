@@ -73,7 +73,11 @@ function ViewToggle({ view }: { view: View }) {
 }
 
 /** Weighted nine-signal badge, in the same shape the ticker page uses. */
-function ConsensusBadge({ consensus }: { consensus: SectorConsensus }) {
+function ConsensusBadge({ consensus }: { consensus?: SectorConsensus }) {
+  // Belt and braces. The store now rejects snapshots without this, but a
+  // missing badge is a far better failure than a 500 on the whole page.
+  if (!consensus) return null;
+
   const tone =
     consensus.label === 'BULLISH'
       ? 'border-bull/50 text-bull'
@@ -333,7 +337,7 @@ export default async function SectorsPage({ searchParams }: PageProps) {
   const split = snapshot ? splitByMomentum(snapshot) : null;
 
   const equalWeighted = (snapshot?.sectors ?? []).filter(
-    (s) => s.consensus.basis === 'equal',
+    (s) => s.consensus?.basis === 'equal',
   );
 
   return (
