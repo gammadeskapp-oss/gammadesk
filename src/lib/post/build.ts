@@ -3,6 +3,7 @@ import 'server-only';
 import { formatStrike } from '../format';
 import { getPositioning } from '../positioning';
 import { marketToday } from '../time';
+import type { Digest } from '../digest/types';
 import type { MorningPost } from './types';
 
 /**
@@ -151,7 +152,18 @@ function headerDate(date: string): string {
  * would otherwise eat the `·` separators, and a reader on a phone gets a
  * one-tap copy of exactly the characters that go out.
  */
-export function toDiscordMessage(post: MorningPost): string {
+export function toDiscordMessage(
+  post: MorningPost,
+  /**
+   * The day's digest, folded in below the headline.
+   *
+   * Optional on purpose: the morning run fires hours before the digest job,
+   * so this is built live from already-cached sources and can fail. When it
+   * does the post still goes out — a headline with no narrative beats no
+   * message at all.
+   */
+  digest?: Digest | null,
+): string {
   const dash = '—';
   const strike = (v: number | null) => (v === null ? dash : formatStrike(v));
   const mood = post.mood === 'calm' ? '🟡 **CALM**' : '🔴 **JUMPY**';
@@ -162,13 +174,25 @@ export function toDiscordMessage(post: MorningPost): string {
     `Wall above **${strike(post.wallAbove)}** · Floor below **${strike(post.floorBelow)}**`,
     `Gets wild only under **${strike(post.flipLevel)}**`,
     `What this means: ${post.plainEnglish}`,
+  ];
+
+  if (digest && digest.lines.length > 0) {
+    // Blank line between each: Discord collapses single newlines, and these
+    // are paragraphs rather than a list.
+    lines.push('', ...digest.lines.flatMap((line) => [line, '']));
+    lines.pop();
+  }
+
+  for (const note of digest?.notes ?? []) lines.push(`⚠ ${note}`);
+
+  lines.push(
     `_15-min delayed · not advice · gammadesk.app_`,
     '',
     'Copy for X:',
     '```',
     post.text,
     '```',
-  ];
+  );
 
   return lines.join('\n');
 }

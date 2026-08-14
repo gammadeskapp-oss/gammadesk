@@ -4,7 +4,7 @@ import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { PostActions } from '@/components/PostActions';
 import { formatPrice } from '@/lib/format';
-import { getMorningPost, storeStatus, toDiscordMessage, X_LIMIT } from '@/lib/post';
+import { buildDiscordMessage, getMorningPost, storeStatus, X_LIMIT } from '@/lib/post';
 import { formatAsOf } from '@/lib/time';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
@@ -21,7 +21,7 @@ export default async function PostPage() {
   const store = storeStatus();
   const over = post.length > X_LIMIT;
   // Shown so the exact text reaching the channel is checkable before it does.
-  const discord = toDiscordMessage(post);
+  const discord = await buildDiscordMessage(post);
 
   return (
     <>

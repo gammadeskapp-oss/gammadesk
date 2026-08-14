@@ -3,10 +3,25 @@ import 'server-only';
 import { cached } from '../cache';
 import { createJsonStore } from '../jsonStore';
 import { marketToday } from '../time';
+import { getDigest } from '../digest';
 import { buildMorningPost, toDiscordMessage } from './build';
 import type { MorningPost } from './types';
 
 export { toDiscordMessage, X_LIMIT } from './build';
+
+/**
+ * The Discord message with the day's narrative folded in.
+ *
+ * The digest is built live from already-cached sources, since the morning run
+ * fires hours before the digest job stores one. A failure here is not fatal:
+ * the post still goes out, just without the paragraphs under it.
+ */
+export async function buildDiscordMessage(post: MorningPost): Promise<string> {
+  const digest = await getDigest()
+    .then((r) => r.digest)
+    .catch(() => null);
+  return toDiscordMessage(post, digest);
+}
 export { storeStatus } from '../jsonStore';
 export type { MorningPost } from './types';
 
@@ -89,7 +104,7 @@ export async function postToDiscord(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        content: toDiscordMessage(post),
+        content: await buildDiscordMessage(post),
         // The post mentions nobody; suppress pings outright so a ticker that
         // happens to match a role name cannot notify a channel.
         allowed_mentions: { parse: [] },

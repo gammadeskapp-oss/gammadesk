@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
 import {
+  buildDiscordMessage,
   generateAndStorePost,
   postToDiscord,
   readPosts,
   storeStatus,
-  toDiscordMessage,
 } from '@/lib/post';
 import { marketNow, marketToday } from '@/lib/time';
 
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
           status: 'already-posted',
           date: today,
           generatedAt: existing.generatedAt,
-          message: toDiscordMessage(existing),
+          message: await buildDiscordMessage(existing),
         });
       }
     }
@@ -74,7 +74,7 @@ export async function GET(request: Request) {
       discord: delivery,
       // Exactly what was, or would have been, sent.
       text: post.text,
-      message: toDiscordMessage(post),
+      message: await buildDiscordMessage(post),
       store: storeStatus(),
     });
   } catch (error) {
