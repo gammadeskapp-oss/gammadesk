@@ -47,10 +47,22 @@ export interface FlowSymbolSummary {
  * recomputed rather than passing validation and missing a field the page now
  * reads. Same reasoning as the sectors store.
  */
-export const FLOW_SCHEMA = 2;
+export const FLOW_SCHEMA = 3;
 
 export interface FlowSnapshot {
   schema: number;
+  /**
+   * The trading session this scan describes, `YYYY-MM-DD` New York.
+   *
+   * Distinct from `computedAt`, and the distinction matters: the scan runs
+   * after the close, so for most of the following day the page is showing the
+   * previous session. Labelling only the compute time left a reader unable to
+   * tell which day's flow they were looking at.
+   *
+   * Taken from the chain's own last-trade time rather than the wall clock, so
+   * it stays correct whenever the job happens to run.
+   */
+  sessionDate: string;
   rows: FlowRow[];
   symbols: FlowSymbolSummary[];
   asOfLabel: string;

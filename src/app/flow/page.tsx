@@ -10,6 +10,7 @@ import { formatContracts, formatPrice } from '@/lib/format';
 import type { TooltipKey } from '@/lib/tooltips';
 import { TickerLink } from '@/components/TickerLink';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
+import { marketToday } from '@/lib/time';
 
 export const metadata: Metadata = {
   title: 'Unusual Options Activity',
@@ -65,6 +66,15 @@ export default async function FlowPage({ searchParams }: PageProps) {
     ? filterFlow(snapshot, { from: params.from, to: params.to })
     : null;
 
+  /*
+   * The scan runs after the close, so through most of the next day this page
+   * shows the previous session. That is intended, but it has to be said out
+   * loud — a bare compute timestamp left a reader unable to tell which day's
+   * flow they were looking at.
+   */
+  const sessionDate = snapshot?.sessionDate ?? null;
+  const stale = sessionDate !== null && sessionDate < marketToday();
+
 
   return (
     <>
@@ -81,6 +91,14 @@ export default async function FlowPage({ searchParams }: PageProps) {
           </div>
           {snapshot && filtered && (
             <p className="text-2xs text-term-faint">
+              {sessionDate && (
+                <>
+                  <span className={stale ? 'text-flip' : 'text-term-dim'}>
+                    {sessionDate} session
+                  </span>
+                  {' · '}
+                </>
+              )}
               {filtered.rows.length} flagged across{' '}
               <span
                 className={
@@ -148,6 +166,22 @@ export default async function FlowPage({ searchParams }: PageProps) {
             </div>
           </dl>
         </section>
+
+        {stale && (
+          <div className="panel border-l-2 border-l-flip/60 px-3.5 py-3 text-xs leading-relaxed">
+            <p className="text-flip">
+              <span className="font-bold">
+                This is the {sessionDate} session, not today&rsquo;s.{' '}
+              </span>
+              The chains are scanned once a day after the close, so today&rsquo;s
+              activity does not appear here until tonight&rsquo;s run.
+            </p>
+            <p className="mt-1.5 text-term-dim">
+              Nothing below has changed since that close. It is the last
+              completed session, not a live tape.
+            </p>
+          </div>
+        )}
 
         {/*
           Filtering happens in the browser over rows already sent: the table is

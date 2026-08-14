@@ -65,6 +65,8 @@ interface CboePayload {
   data?: {
     current_price?: number;
     close?: number;
+    /** Underlying's last print, New York time, e.g. `2026-08-14T10:39:22`. */
+    last_trade_time?: string;
     options?: CboeContract[];
   };
 }
@@ -102,7 +104,7 @@ function noteFor(row: {
 
 async function scanSymbol(
   symbol: string,
-): Promise<{ rows: FlowRow[]; summary: FlowSymbolSummary }> {
+): Promise<{ rows: FlowRow[]; summary: FlowSymbolSummary; session: string | null }> {
   const empty: FlowSymbolSummary = {
     symbol,
     spot: 0,
@@ -131,7 +133,7 @@ async function scanSymbol(
         res.status === 429
           ? 'Rate limited by Cboe — the scan list is longer than one window allows.'
           : `Cboe returned HTTP ${res.status}.`;
-      return { rows: [], summary: { ...empty, failed } };
+      return { rows: [], summary: { ...empty, failed }, session: null };
     }
     payload = (await res.json()) as CboePayload;
   } catch (error) {
@@ -141,6 +143,7 @@ async function scanSymbol(
         ...empty,
         failed: error instanceof Error ? error.message : 'Chain request failed.',
       },
+      session: null,
     };
   }
 
@@ -148,8 +151,16 @@ async function scanSymbol(
   const spot = data?.current_price || data?.close || 0;
   const contracts = data?.options ?? [];
   if (spot <= 0 || contracts.length === 0) {
-    return { rows: [], summary: { ...empty, failed: 'No chain data returned.' } };
+    return {
+      rows: [],
+      summary: { ...empty, failed: 'No chain data returned.' },
+      session: null,
+    };
   }
+
+  // Already New York time and already a date-first ISO string, so the day is
+  // the first ten characters. No conversion, nothing to get wrong.
+  const session = data?.last_trade_time?.slice(0, 10) ?? null;
 
   const today = marketToday();
   const candidates: FlowRow[] = [];
@@ -211,6 +222,7 @@ async function scanSymbol(
     .slice(0, PER_SYMBOL_CAP);
 
   return {
+    session,
     rows,
     summary: {
       symbol,
@@ -234,6 +246,19 @@ export async function computeFlowSnapshot(): Promise<FlowSnapshot> {
   const rows = results.flatMap((r) => r.rows);
   const summaries = results.map((r) => r.summary);
 
+  /*
+   * The session every chain agrees on, taken as the most common rather than
+   * the first: a thin name whose last print is stale would otherwise date the
+   * whole scan wrongly. Falls back to the wall clock only if no chain reported
+   * one at all.
+   */
+  const tally = new Map<string, number>();
+  for (const { session } of results) {
+    if (session) tally.set(session, (tally.get(session) ?? 0) + 1);
+  }
+  const sessionDate =
+    [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? marketToday();
+
   const failed = summaries.filter((s) => s.failed);
   const notes: string[] = [];
   if (failed.length > 0) {
@@ -255,6 +280,7 @@ export async function computeFlowSnapshot(): Promise<FlowSnapshot> {
 
   return {
     schema: FLOW_SCHEMA,
+    sessionDate,
     rows: rows
       .sort((a, b) => b.volumeToOi - a.volumeToOi || b.volume - a.volume)
       .slice(0, TOTAL_CAP),
