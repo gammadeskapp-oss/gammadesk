@@ -86,6 +86,15 @@ export const config = {
     return Math.max(300, num(process.env.GAMMADESK_FORECAST_CACHE_SECONDS, 1800));
   },
   /**
+   * Least share of its expiry's total gamma exposure a strike must hold before
+   * the forecast chart draws it as a magnet. Display only — the simulation is
+   * still shaped by the full field. Without it every significant strike gets a
+   * marker on every simulated day, which is hundreds of overlapping dots.
+   */
+  get magnetMinExposureShare(): number {
+    return Math.min(1, Math.max(0, num(process.env.GAMMADESK_MAGNET_MIN_SHARE, 0.05)));
+  },
+  /**
    * Widest expiration set any consumer needs. The chain is trimmed to this
    * once, so the dashboard and the forecast share a single upstream fetch.
    */
