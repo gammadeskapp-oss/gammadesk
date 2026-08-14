@@ -9,7 +9,9 @@ const nextConfig = {
         // bookmarks and shared links land on the merged page.
         source: '/groups',
         destination: '/sectors?view=groups',
-        permanent: true,
+        // 301 rather than `permanent: true`, which emits 308. Both are fine
+        // for a GET-only page route; this matches what the brief asked for.
+        statusCode: 301,
       },
     ];
   },
