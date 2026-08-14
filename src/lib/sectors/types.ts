@@ -8,6 +8,24 @@ export interface ScorePoint {
   rsi: number;
 }
 
+/** One constituent, as the drill-in lists it. */
+export interface SectorMember {
+  symbol: string;
+  bullish: number;
+  total: number;
+  price: number;
+  /** Session change, as a fraction. */
+  changePct: number;
+  /**
+   * 20-session average dollar volume, used to break consensus ties.
+   *
+   * The brief asked for options liquidity. That needs a full chain per name,
+   * and Cboe allows about sixty chain pulls per window against a universe of
+   * 132 — so this is share liquidity, named honestly rather than mislabelled.
+   */
+  liquidity: number;
+}
+
 export interface SymbolHistory {
   symbol: string;
   /** Oldest first, newest last. */
@@ -22,6 +40,8 @@ export interface SymbolHistory {
   /** Latest signal counts, for the consensus badge. */
   bullish: number;
   total: number;
+  price: number;
+  changePct: number;
 }
 
 export type ConsensusLabel = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
@@ -52,8 +72,8 @@ export interface SectorMomentum {
   id: string;
   name: string;
   blurb: string;
-  /** Members whose history resolved. */
-  members: string[];
+  /** Members whose history resolved, richest-first data for the drill-in. */
+  members: SectorMember[];
   failures: string[];
   /** Sector average score per session, oldest first. */
   series: ScorePoint[];
@@ -72,7 +92,18 @@ export interface SectorMomentum {
   consensus: SectorConsensus;
 }
 
+/**
+ * Bumped whenever the stored shape changes.
+ *
+ * The validator requires an exact match, so an older snapshot is rejected and
+ * recomputed rather than passing validation and throwing later when the page
+ * reads a field that was never written. That failure has happened twice;
+ * a version is cheaper than remembering to add a field check each time.
+ */
+export const SECTORS_SCHEMA = 3;
+
 export interface SectorsSnapshot {
+  schema: number;
   sectors: SectorMomentum[];
   /** `YYYY-MM-DD` of the newest session scored. */
   asOfDate: string;

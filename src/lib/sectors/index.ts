@@ -3,7 +3,7 @@ import 'server-only';
 import { cached } from '../cache';
 import { createJsonStore } from '../jsonStore';
 import { computeSectorsSnapshot } from './compute';
-import type { SectorsSnapshot } from './types';
+import { SECTORS_SCHEMA, type SectorsSnapshot } from './types';
 
 export { storeStatus } from '../jsonStore';
 export { SECTOR_THRESHOLDS } from './compute';
@@ -36,9 +36,8 @@ const store = createJsonStore<SectorsSnapshot | null>(
   (raw) => {
     if (!raw || typeof raw !== 'object') return null;
     const snapshot = raw as SectorsSnapshot;
+    if (snapshot.schema !== SECTORS_SCHEMA) return null;
     if (!Array.isArray(snapshot.sectors) || snapshot.sectors.length === 0) return null;
-    // Every sector is written by the same loop, so the first is representative.
-    if (!snapshot.sectors[0]?.consensus) return null;
     return snapshot;
   },
 );

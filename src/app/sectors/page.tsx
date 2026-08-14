@@ -137,7 +137,11 @@ function SectorRow({ sector, rising }: { sector: SectorMomentum; rising: boolean
   const flag = sector.flag ? FLAG[sector.flag] : null;
 
   return (
-    <li className="border-b border-term-line/60 px-3.5 py-3 last:border-b-0">
+    <li className="border-b border-term-line/60 last:border-b-0">
+      <Link
+        href={`/sectors/${sector.id}`}
+        className="block px-3.5 py-3 transition-colors hover:bg-term-raised/60 focus-visible:outline focus-visible:-outline-offset-2 focus-visible:outline-pos"
+      >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -183,21 +187,28 @@ function SectorRow({ sector, rising }: { sector: SectorMomentum; rising: boolean
         </dl>
       </div>
 
-      {flag && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span
-            className={`border px-2 py-0.5 text-2xs font-bold tracking-[0.1em] ${flag.classes}`}
-          >
-            {flag.text}
-          </span>
-          <InfoTip for={flag.tip} />
-        </div>
-      )}
+      </Link>
 
-      {sector.failures.length > 0 && (
-        <p className="mt-1.5 text-2xs text-flip/70">
-          ! {sector.failures.join(', ')} had no usable history and are excluded.
-        </p>
+      {/* Outside the row link: InfoTip renders a button, and a button inside
+          an anchor is invalid and would navigate when tapped. */}
+      {(flag || sector.failures.length > 0) && (
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-3.5 pb-3">
+          {flag && (
+            <>
+              <span
+                className={`border px-2 py-0.5 text-2xs font-bold tracking-[0.1em] ${flag.classes}`}
+              >
+                {flag.text}
+              </span>
+              <InfoTip for={flag.tip} />
+            </>
+          )}
+          {sector.failures.length > 0 && (
+            <p className="text-2xs text-flip/70">
+              ! {sector.failures.join(', ')} had no usable history and are excluded.
+            </p>
+          )}
+        </div>
       )}
     </li>
   );

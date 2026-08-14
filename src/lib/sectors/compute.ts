@@ -6,6 +6,7 @@ import { computeSignals } from '../ticker/signals';
 import type { Bar } from '../ticker/types';
 import { allSectorSymbols, duplicateSymbols, SECTORS } from './definitions';
 import { isFresh, refreshMarketCaps, type CapEntry } from './marketCap';
+import { SECTORS_SCHEMA } from './types';
 import type {
   ConsensusLabel,
   ScorePoint,
@@ -101,8 +102,19 @@ function historyFor(symbol: string, bars: Bar[]): SymbolHistory | null {
     });
   }
 
+  const last = bars[bars.length - 1];
+  const prev = bars[bars.length - 2] ?? last;
+
   return points.length > 0
-    ? { symbol, points, weight: weight > 0 ? weight : 1, bullish, total }
+    ? {
+        symbol,
+        points,
+        weight: weight > 0 ? weight : 1,
+        bullish,
+        total,
+        price: last.close,
+        changePct: prev.close > 0 ? last.close / prev.close - 1 : 0,
+      }
     : null;
 }
 
@@ -266,7 +278,14 @@ export async function computeSectorsSnapshot(): Promise<SectorsSnapshot> {
       id: definition.id,
       name: definition.name,
       blurb: definition.blurb,
-      members: histories.map((h) => h.symbol),
+      members: histories.map((h) => ({
+        symbol: h.symbol,
+        bullish: h.bullish,
+        total: h.total,
+        price: h.price,
+        changePct: h.changePct,
+        liquidity: h.weight,
+      })),
       failures: missing,
       series,
       score: series[series.length - 1].score,
@@ -287,6 +306,7 @@ export async function computeSectorsSnapshot(): Promise<SectorsSnapshot> {
     .pop();
 
   return {
+    schema: SECTORS_SCHEMA,
     sectors,
     asOfDate: newest ?? '',
     computedAt: new Date().toISOString(),
