@@ -1,11 +1,13 @@
+import { config } from '@/lib/config';
 import { formatPrice, formatUsd } from '@/lib/format';
-import type { ForecastResult } from '@/lib/forecast/types';
+import type { ForecastResult, MagnetStrike } from '@/lib/forecast/types';
 
 /**
  * The forecast cone, rendered as plain SVG on the server.
  *
  * No charting library and no client JavaScript: the whole thing is static
  * geometry, so it costs nothing to hydrate and renders identically everywhere.
+ * Even the "show all strikes" toggle is CSS — see `.gd-forecast` in globals.css.
  */
 
 const W = 1000;
@@ -95,10 +97,56 @@ export function ForecastChart({ data }: { data: ForecastResult }) {
     if (day <= horizon) xTicks.push({ i: originIndex + day, label: `+${day}d` });
   }
 
-  // Magnet dots, dropped when the strike falls outside the visible price range.
-  const dots = magnets.flatMap((expiry) =>
+  // --- magnet markers --------------------------------------------------------
+  // The field carries every significant strike for every expiry, so plotting it
+  // raw is one dot per strike per day — hundreds of them, all overlapping. The
+  // default view keeps only the strongest attractor and the strongest repeller
+  // per expiry and drops strikes too small to matter against the whole chain.
+  // "Show all strikes" brings the raw field back.
+
+  const inFrame = (s: MagnetStrike) => s.strike >= lo && s.strike <= hi;
+  const inHorizon = magnets.filter((e) => e.tradingDay >= 1 && e.tradingDay <= horizon);
+
+  /**
+   * The exposure bar is per expiry, not chain-wide. Gamma is spread across
+   * dozens of strikes and every listed expiry, so even the single largest
+   * strike rarely holds 5% of the chain's grand total — that denominator
+   * silently drops every marker. A strike's share of its own expiry is what
+   * "dominant magnet" actually means.
+   */
+  const exposureFloor = (expiry: (typeof inHorizon)[number]) =>
+    expiry.strikes.reduce((acc, s) => acc + Math.abs(s.gex), 0) *
+    config.magnetMinExposureShare;
+
+  /** The one strike per expiry that pulls hardest in the given direction. */
+  const dominantPicks = (sign: 1 | -1) =>
+    inHorizon.flatMap((expiry) => {
+      const floor = exposureFloor(expiry);
+      let best: MagnetStrike | null = null;
+      for (const s of expiry.strikes) {
+        if (Math.sign(s.weight) !== sign) continue;
+        if (!inFrame(s) || Math.abs(s.gex) < floor) continue;
+        if (!best || Math.abs(s.weight) > Math.abs(best.weight)) best = s;
+      }
+      return best ? [{ day: expiry.tradingDay, label: expiry.label, strike: best }] : [];
+    });
+
+  const toMarker = (picks: ReturnType<typeof dominantPicks>) =>
+    picks.map(({ day, label, strike }) => ({
+      day,
+      label,
+      strike: strike.strike,
+      weight: strike.weight,
+      gex: strike.gex,
+      attract: strike.weight > 0,
+    }));
+
+  const markers = [...toMarker(dominantPicks(1)), ...toMarker(dominantPicks(-1))];
+
+  // Every significant strike, shown only behind the toggle.
+  const allDots = magnets.flatMap((expiry) =>
     expiry.strikes
-      .filter((s) => Math.abs(s.weight) >= 0.25 && s.strike >= lo && s.strike <= hi)
+      .filter((s) => Math.abs(s.weight) >= 0.25 && inFrame(s))
       .filter(() => expiry.tradingDay >= 1 && expiry.tradingDay <= horizon)
       .map((s) => ({
         cx: forwardX(expiry.tradingDay),
@@ -112,7 +160,7 @@ export function ForecastChart({ data }: { data: ForecastResult }) {
   );
 
   return (
-    <figure className="panel p-0">
+    <figure className="gd-forecast panel p-0">
       <figcaption className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-term-line px-3.5 py-2">
         <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-text">
           {data.symbol} — 90 sessions, then {horizon} days simulated
@@ -142,6 +190,13 @@ export function ForecastChart({ data }: { data: ForecastResult }) {
             <span className="h-2 w-2 rounded-full" style={{ background: COLOR.repeller }} />
             repeller
           </span>
+          <label
+            className="flex cursor-pointer items-center gap-1.5 text-term-dim"
+            title="Show every significant strike instead of the strongest magnet per expiry."
+          >
+            <input type="checkbox" className="gd-show-all h-3 w-3 shrink-0 accent-[#f0a500]" />
+            show all strikes
+          </label>
         </div>
       </figcaption>
 
@@ -238,23 +293,47 @@ export function ForecastChart({ data }: { data: ForecastResult }) {
             strokeDasharray="5 4"
           />
 
-          {/* magnet strikes */}
-          {dots.map((d, i) => (
-            <circle
-              key={`${d.strike}-${d.cx}-${i}`}
-              cx={d.cx}
-              cy={d.cy}
-              r={d.r}
-              fill={d.attract ? COLOR.attractor : COLOR.repeller}
-              fillOpacity={0.85}
-              stroke="#0a0e17"
-              strokeWidth={0.75}
-            >
-              <title>
-                {`${d.label} ${formatPrice(d.strike)} — ${d.attract ? 'attractor' : 'repeller'} (GEX ${formatUsd(d.gex)})`}
-              </title>
-            </circle>
-          ))}
+          {/* dominant magnet per expiry — one dot each way, per expiry */}
+          <g data-magnets="dominant">
+            {/* Two expiries can land on the same trading day, so the index is
+                part of the key — strike and day alone are not unique. */}
+            {markers.map((s, i) => (
+              <circle
+                key={`${s.attract ? 'a' : 'r'}-${s.strike}-${s.day}-${i}`}
+                cx={forwardX(s.day)}
+                cy={y(s.strike)}
+                r={2 + Math.abs(s.weight) * 3.5}
+                fill={s.attract ? COLOR.attractor : COLOR.repeller}
+                fillOpacity={0.85}
+                stroke="#0a0e17"
+                strokeWidth={0.75}
+              >
+                <title>
+                  {`${s.label} ${formatPrice(s.strike)} — ${s.attract ? 'attractor' : 'repeller'} (GEX ${formatUsd(s.gex)})`}
+                </title>
+              </circle>
+            ))}
+          </g>
+
+          {/* the raw field, revealed by the "show all strikes" checkbox */}
+          <g data-magnets="all">
+            {allDots.map((d, i) => (
+              <circle
+                key={`${d.strike}-${d.cx}-${i}`}
+                cx={d.cx}
+                cy={d.cy}
+                r={d.r}
+                fill={d.attract ? COLOR.attractor : COLOR.repeller}
+                fillOpacity={0.85}
+                stroke="#0a0e17"
+                strokeWidth={0.75}
+              >
+                <title>
+                  {`${d.label} ${formatPrice(d.strike)} — ${d.attract ? 'attractor' : 'repeller'} (GEX ${formatUsd(d.gex)})`}
+                </title>
+              </circle>
+            ))}
+          </g>
         </svg>
       </div>
     </figure>

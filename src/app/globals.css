@@ -101,6 +101,21 @@ body {
   }
 }
 
+/*
+ * Forecast magnets. The "show all strikes" checkbox swaps the marker set in
+ * CSS so the chart stays a pure server render with nothing to hydrate. Where
+ * :has() is unsupported the chart keeps its default reduced view.
+ */
+.gd-forecast [data-magnets='all'] {
+  display: none;
+}
+.gd-forecast:has(.gd-show-all:checked) [data-magnets='all'] {
+  display: inline;
+}
+.gd-forecast:has(.gd-show-all:checked) [data-magnets='dominant'] {
+  display: none;
+}
+
 /* Scrollbars styled to match the terminal chrome instead of the OS default. */
 .scroll-term {
   scrollbar-width: thin;
