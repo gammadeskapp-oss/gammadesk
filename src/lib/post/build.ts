@@ -127,12 +127,48 @@ export async function buildMorningPost(): Promise<MorningPost> {
   };
 }
 
+/** `2026-08-14` -> `Fri 14 Aug`, matching the digest's header style. */
+function headerDate(date: string): string {
+  const parsed = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(parsed);
+}
+
 /**
- * The Discord version.
+ * The Discord version, formatted like the daily digest.
  *
- * Wrapped in a code fence so the channel shows exactly the characters that go
- * to X — no Markdown eating the `·`, and one tap to copy on mobile.
+ * Two halves on purpose. The top is written for someone reading the channel:
+ * bold values, one idea per line, the same shape the digest uses so the two
+ * daily messages look like they come from the same place.
+ *
+ * The bottom keeps the post verbatim inside a code fence, because the whole
+ * point of this message is that it can be copied to X unchanged — Markdown
+ * would otherwise eat the `·` separators, and a reader on a phone gets a
+ * one-tap copy of exactly the characters that go out.
  */
 export function toDiscordMessage(post: MorningPost): string {
-  return [`**Morning post — ${post.date}**`, '```', post.text, '```'].join('\n');
+  const dash = '—';
+  const strike = (v: number | null) => (v === null ? dash : formatStrike(v));
+  const mood = post.mood === 'calm' ? '🟡 **CALM**' : '🔴 **JUMPY**';
+
+  const lines = [
+    `**GammaDesk morning post ${dash} ${headerDate(post.date)}**`,
+    `$${post.symbol} **${post.spot.toFixed(2)}** · mood ${mood}`,
+    `Wall above **${strike(post.wallAbove)}** · Floor below **${strike(post.floorBelow)}**`,
+    `Gets wild only under **${strike(post.flipLevel)}**`,
+    `What this means: ${post.plainEnglish}`,
+    `_15-min delayed · not advice · gammadesk.app_`,
+    '',
+    'Copy for X:',
+    '```',
+    post.text,
+    '```',
+  ];
+
+  return lines.join('\n');
 }

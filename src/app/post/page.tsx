@@ -4,7 +4,7 @@ import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { PostActions } from '@/components/PostActions';
 import { formatPrice } from '@/lib/format';
-import { getMorningPost, storeStatus, X_LIMIT } from '@/lib/post';
+import { getMorningPost, storeStatus, toDiscordMessage, X_LIMIT } from '@/lib/post';
 import { formatAsOf } from '@/lib/time';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
@@ -20,6 +20,8 @@ export default async function PostPage() {
   const { post, stored } = await getMorningPost();
   const store = storeStatus();
   const over = post.length > X_LIMIT;
+  // Shown so the exact text reaching the channel is checkable before it does.
+  const discord = toDiscordMessage(post);
 
   return (
     <>
@@ -57,6 +59,23 @@ export default async function PostPage() {
             <PostActions text={post.text} />
           </div>
         </section>
+
+        {/* What Discord actually receives. Collapsed, because the X text above
+            is the thing most visits are here for. */}
+        <details className="panel group">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3.5 py-3 text-xs text-term-dim transition-colors hover:text-term-text [&::-webkit-details-marker]:hidden">
+            <span aria-hidden className="text-pos transition-transform group-open:rotate-90">
+              &#9656;
+            </span>
+            <span className="font-bold uppercase tracking-[0.14em] text-pos">
+              What Discord gets
+            </span>
+            <span className="text-term-faint">same numbers, formatted for reading</span>
+          </summary>
+          <pre className="scroll-term overflow-x-auto border-t border-term-line bg-term-bg/60 px-4 py-3 text-2xs leading-relaxed text-term-dim">
+{discord}
+          </pre>
+        </details>
 
         {/* Where each line came from, so a wrong number is traceable. */}
         <section className="panel px-3.5 py-3">
