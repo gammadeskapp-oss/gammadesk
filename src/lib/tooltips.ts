@@ -325,6 +325,72 @@ const ENTRIES = {
     detail:
       'Average RSI reached 65 or higher in the last ten sessions and the 3-day change is now negative.',
   },
+
+  // --- relative strength -----------------------------------------------------
+
+  rsScore: {
+    label: 'RS Score',
+    plain:
+      '0-100 rank vs the other 499. 90 = stronger than 90% of the market.',
+    detail:
+      'A weighted blend of the stock’s percentile rank over 1, 3 and 6 months. Always ranked against the whole index, never against the group you have filtered to.',
+  },
+
+  rsLeaders: {
+    label: 'Leaders',
+    plain:
+      'Strongest names now — money flowing in. A research shortlist, not a buy.',
+    detail:
+      'The top of the ranking. It says these have outperformed, which is a fact about the past, not a forecast.',
+  },
+
+  rsLaggards: {
+    label: 'Laggards',
+    plain:
+      'Weakest names — money leaving. Don’t buy just because they look cheap.',
+    detail:
+      'The bottom of the ranking. A low score is a statement about relative performance, not about valuation.',
+  },
+
+  rsTrend: {
+    label: 'Rising / Falling RS',
+    plain:
+      'Climbing or dropping in the ranks this week. Rising = gaining strength.',
+    detail:
+      'Today’s score minus the same score five sessions ago. Because the rank is relative, it can fall while the stock rises — that just means the rest of the market rose more.',
+  },
+
+  rsWindows: {
+    label: '1mo / 3mo / 6mo',
+    plain:
+      'Performance over each window. Blended so one hot week can’t fool it.',
+    detail:
+      'Measured over 21, 63 and 126 trading sessions. The table shows the percentile rank for each; the raw return sits underneath it.',
+  },
+
+  rsVolume: {
+    label: 'Confirmed / Unconfirmed',
+    plain:
+      "A price move on high volume is real — money's behind it. A move on low volume is weak and can reverse. 'Confirmed' = the strength has buying volume.",
+    detail:
+      'Compares the last month’s average volume against the three months before it. It describes the move, not the direction — a laggard marked confirmed is falling on heavy volume, which makes the weakness more credible, not less.',
+  },
+
+  rsLiquidity: {
+    label: 'Liquidity floor',
+    plain:
+      'Skips stocks that barely trade. $10M a day means at least ten million dollars of stock changes hands on an average day.',
+    detail:
+      'Average daily dollar turnover over 20 sessions. Applied before ranking, so a thin name cannot take a percentile place from a tradeable one.',
+  },
+
+  rsSignalScore: {
+    label: 'Nine-signal score',
+    plain:
+      'A different question: is this stock’s own trend healthy? RS asks whether it is beating the market.',
+    detail:
+      'The share of the nine /ticker checks voting bullish, 0-100. Computed by the /sectors and /groups jobs, which cover a smaller universe — so most names show a dash.',
+  },
 };
 
 export type TooltipKey = keyof typeof ENTRIES;
@@ -352,4 +418,11 @@ export const TOOLTIP_ORDER: TooltipKey[] = [
   'crash',
   'realisedVol',
   'volOi',
+  'rsScore',
+  'rsTrend',
+  'rsWindows',
+  'rsVolume',
+  'rsLiquidity',
+  'rsLeaders',
+  'rsLaggards',
 ];

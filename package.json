@@ -16,7 +16,8 @@
     "verify:greeks": "node scripts/verify-greeks.js",
     "verify:indicators": "node scripts/verify-indicators.js",
     "verify:simulation": "node scripts/verify-simulation.js",
-    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation"
+    "verify:rs": "node scripts/verify-rs.js",
+    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs"
   },
   "dependencies": {
     "@vercel/blob": "^2.7.0",

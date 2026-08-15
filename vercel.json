@@ -32,6 +32,26 @@
     {
       "path": "/api/velocity/refresh",
       "schedule": "50 21 * * 1-5"
+    },
+    {
+      "path": "/api/rs/refresh",
+      "schedule": "0 23 * * 1-5"
+    },
+    {
+      "path": "/api/rs/refresh",
+      "schedule": "0 1 * * 2-6"
+    },
+    {
+      "path": "/api/rs/refresh",
+      "schedule": "0 3 * * 2-6"
+    },
+    {
+      "path": "/api/rs/refresh",
+      "schedule": "0 5 * * 2-6"
+    },
+    {
+      "path": "/api/rs/members",
+      "schedule": "30 22 * * 6"
     }
   ]
 }
