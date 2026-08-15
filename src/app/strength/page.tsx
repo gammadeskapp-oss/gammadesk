@@ -38,6 +38,13 @@ export default async function StrengthPage() {
             <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
               Relative Strength
             </h1>
+            {/* Directly under the title, because the confusion it heads off —
+                a 95 sitting beside a red daily change — happens on first
+                glance, before anyone reaches the "How to use this" panel. */}
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-flip">
+              Strength is measured over months — today&rsquo;s move doesn&rsquo;t
+              change it much.
+            </p>
             <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
               {PAGE_DESCRIPTIONS['/strength']}
             </p>

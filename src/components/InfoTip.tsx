@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
 import { TOOLTIPS, type TooltipKey } from '@/lib/tooltips';
@@ -45,9 +46,19 @@ function useMounted(): boolean {
 export function InfoTip({
   for: key,
   className = '',
+  children,
 }: {
   for: TooltipKey;
   className?: string;
+  /**
+   * Custom trigger content, in place of the `?` circle.
+   *
+   * Lets an existing piece of text open the bubble itself — the CONF/UNCONF
+   * badge on /strength does this. It matters that the trigger stays a
+   * `button`: the whole point over a `title` attribute is that a tap opens it,
+   * and only a real control gets that on a touch screen.
+   */
+  children?: ReactNode;
 }) {
   const tip = TOOLTIPS[key];
   const id = useId();
@@ -149,13 +160,19 @@ export function InfoTip({
         }}
         onFocus={() => setHovered(true)}
         onBlur={() => setHovered(false)}
-        className={`inline-flex h-4 w-4 shrink-0 select-none items-center justify-center rounded-full border text-[0.5625rem] font-bold leading-none transition-colors ${
-          open
-            ? 'border-pos/70 bg-pos/15 text-pos'
-            : 'border-term-edge text-term-faint hover:border-pos/60 hover:text-pos'
-        } ${className}`}
+        className={
+          children
+            ? `inline-flex shrink-0 select-none items-center gap-1 underline decoration-dotted underline-offset-2 transition-colors ${
+                open ? 'text-pos' : ''
+              } ${className}`
+            : `inline-flex h-4 w-4 shrink-0 select-none items-center justify-center rounded-full border text-[0.5625rem] font-bold leading-none transition-colors ${
+                open
+                  ? 'border-pos/70 bg-pos/15 text-pos'
+                  : 'border-term-edge text-term-faint hover:border-pos/60 hover:text-pos'
+              } ${className}`
+        }
       >
-        <span aria-hidden>?</span>
+        {children ?? <span aria-hidden>?</span>}
       </button>
 
       {open &&

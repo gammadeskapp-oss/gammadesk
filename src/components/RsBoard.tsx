@@ -123,7 +123,14 @@ function ConfirmBadge({ row, compact = false }: { row: RsRow; compact?: boolean 
           : `Recent volume is ${ratio.toFixed(2)}x its prior three-month average`
       }
     >
-      <span className={compact ? 'text-[0.5625rem]' : 'text-2xs'}>{tone.label}</span>
+      {/*
+        The label itself opens the explanation. A `title` attribute alone was
+        hover-only, so on a phone — where most people meet CONF/UNCONF for the
+        first time — there was no way to find out what it meant.
+      */}
+      <InfoTip for="rsVolume" className={compact ? 'text-[0.5625rem]' : 'text-2xs'}>
+        {tone.label}
+      </InfoTip>
       {!compact && ratio !== null && (
         <span className="text-term-faint">{ratio.toFixed(2)}x</span>
       )}
@@ -219,7 +226,9 @@ export function RsBoard({
   const initial = useSearchParams();
 
   const [facetId, setFacetId] = useState(() => initial.get('group') ?? 'all');
-  const [showSignal, setShowSignal] = useState(() => initial.get('signal') === '1');
+  // Shown by default, so the URL now carries the *hidden* case. `signal=1`
+  // from an older shared link still reads as shown, which is what it meant.
+  const [showSignal, setShowSignal] = useState(() => initial.get('signal') !== '0');
   const [minVolume, setMinVolume] = useState(() => {
     const raw = initial.get('minVol');
     return raw === null ? DEFAULT_MIN_DOLLAR_VOLUME : Math.max(0, Number(raw) || 0);
@@ -231,6 +240,20 @@ export function RsBoard({
     m6: Number(initial.get('w6') ?? DEFAULT_PERCENTS.m6) || 0,
   }));
   const [copied, setCopied] = useState<'list' | 'csv' | null>(null);
+  /*
+   * The blend sits behind "Advanced", collapsed.
+   *
+   * 20/50/30 is the answer for almost everyone, and three number boxes at the
+   * top of the controls invited retuning the weights before reading a single
+   * score. A link that arrives carrying non-default weights opens the panel,
+   * so a shared URL never hides the one setting that makes it different.
+   */
+  const [advanced, setAdvanced] = useState(
+    () =>
+      initial.get('w1') !== null ||
+      initial.get('w3') !== null ||
+      initial.get('w6') !== null,
+  );
 
   const weights = useMemo(() => normaliseWeights(percents), [percents]);
 
@@ -283,7 +306,7 @@ export function RsBoard({
       else merged.set(key, value);
     };
     write('group', facetId === 'all' ? null : facetId);
-    write('signal', showSignal ? '1' : null);
+    write('signal', showSignal ? null : '0');
     write('conf', confirmedOnly ? '1' : null);
     write('minVol', minVolume === DEFAULT_MIN_DOLLAR_VOLUME ? null : String(minVolume));
     write('w1', percents.m1 === DEFAULT_PERCENTS.m1 ? null : String(percents.m1));
@@ -370,57 +393,6 @@ export function RsBoard({
         <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
           <div>
             <span className="label-xs flex items-center gap-1.5">
-              Blend weights
-              <InfoTip for="rsWindows" />
-            </span>
-            <div className="mt-1 flex flex-wrap items-end gap-2">
-              {WEIGHT_FIELDS.map((f) => (
-                <label key={f.key} className="flex flex-col gap-1">
-                  <span className="text-2xs uppercase tracking-[0.12em] text-term-faint">
-                    {f.label}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={5}
-                      value={percents[f.key]}
-                      onChange={(e) =>
-                        setPercents((p) => ({
-                          ...p,
-                          [f.key]: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
-                        }))
-                      }
-                      className="w-16 border border-term-edge bg-term-panel px-2 py-1 text-xs tabular-nums text-term-text focus:border-pos/60 focus:outline-none focus:ring-1 focus:ring-pos/40"
-                    />
-                    <span className="text-2xs text-term-faint">%</span>
-                  </span>
-                </label>
-              ))}
-              {weightsChanged && (
-                <button
-                  type="button"
-                  onClick={() => setPercents({ ...DEFAULT_PERCENTS })}
-                  className="border border-flip/50 bg-flip/10 px-3 py-1.5 text-2xs font-bold uppercase tracking-[0.12em] text-flip transition-colors hover:bg-flip/20"
-                >
-                  Reset
-                </button>
-              )}
-            </div>
-            {/*
-              The three do not have to add to 100 — they are renormalised — but
-              a reader who typed 30/30/30 deserves to be told what that actually
-              became rather than left wondering whether it was ignored.
-            */}
-            <p className="mt-1.5 text-2xs text-term-faint">
-              Used as {Math.round(weights.m1 * 100)} / {Math.round(weights.m3 * 100)} /{' '}
-              {Math.round(weights.m6 * 100)} after scaling to 100%.
-            </p>
-          </div>
-
-          <div>
-            <span className="label-xs flex items-center gap-1.5">
               Min liquidity
               <InfoTip for="rsLiquidity" />
             </span>
@@ -472,6 +444,86 @@ export function RsBoard({
               {showSignal ? 'Shown' : 'Hidden'}
             </button>
           </div>
+        </div>
+
+        <div className="border-t border-term-line/70 pt-3">
+          <button
+            type="button"
+            aria-expanded={advanced}
+            aria-controls="rs-advanced"
+            onClick={() => setAdvanced((v) => !v)}
+            className="flex items-center gap-1.5 text-2xs font-bold uppercase tracking-[0.14em] text-term-faint transition-colors hover:text-term-dim"
+          >
+            <span aria-hidden>{advanced ? '▾' : '▸'}</span>
+            Advanced
+            {weightsChanged && (
+              <span className="font-normal normal-case tracking-normal text-flip">
+                blend changed from {DEFAULT_PERCENTS.m1}/{DEFAULT_PERCENTS.m3}/
+                {DEFAULT_PERCENTS.m6}
+              </span>
+            )}
+          </button>
+
+          {advanced && (
+            <div id="rs-advanced" className="mt-2.5">
+              <span className="label-xs flex items-center gap-1.5">
+                Blend weights
+                <InfoTip for="rsWindows" />
+              </span>
+              <div className="mt-1 flex flex-wrap items-end gap-2">
+                {WEIGHT_FIELDS.map((f) => (
+                  <label key={f.key} className="flex flex-col gap-1">
+                    <span className="text-2xs uppercase tracking-[0.12em] text-term-faint">
+                      {f.label}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={5}
+                        value={percents[f.key]}
+                        onChange={(e) =>
+                          setPercents((p) => ({
+                            ...p,
+                            [f.key]: Math.max(
+                              0,
+                              Math.min(100, Number(e.target.value) || 0),
+                            ),
+                          }))
+                        }
+                        className="w-16 border border-term-edge bg-term-panel px-2 py-1 text-xs tabular-nums text-term-text focus:border-pos/60 focus:outline-none focus:ring-1 focus:ring-pos/40"
+                      />
+                      <span className="text-2xs text-term-faint">%</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {/*
+                The three do not have to add to 100 — they are renormalised — but
+                a reader who typed 30/30/30 deserves to be told what that actually
+                became rather than left wondering whether it was ignored.
+              */}
+              <p className="mt-1.5 text-2xs text-term-faint">
+                Used as {Math.round(weights.m1 * 100)} / {Math.round(weights.m3 * 100)} /{' '}
+                {Math.round(weights.m6 * 100)} after scaling to 100%. Default is{' '}
+                {DEFAULT_PERCENTS.m1} / {DEFAULT_PERCENTS.m3} / {DEFAULT_PERCENTS.m6}.{' '}
+                {/*
+                  Always rendered, not only once the weights differ: a reader who
+                  has been typing needs to see the way back before deciding to
+                  experiment, not after.
+                */}
+                <button
+                  type="button"
+                  onClick={() => setPercents({ ...DEFAULT_PERCENTS })}
+                  disabled={!weightsChanged}
+                  className="underline decoration-dotted underline-offset-2 transition-colors enabled:text-flip enabled:hover:text-term-text disabled:cursor-default disabled:no-underline disabled:opacity-40"
+                >
+                  Reset to default
+                </button>
+              </p>
+            </div>
+          )}
         </div>
 
         {excluded > 0 && (
@@ -579,6 +631,14 @@ export function RsBoard({
                     </th>
                     <th scope="col" className={head}>
                       Price
+                    </th>
+                    {/*
+                      Today's change. It had no header at all, which shifted
+                      every column to its right off its own heading — the
+                      nine-signal column was printing CONF/UNCONF under "9-sig".
+                    */}
+                    <th scope="col" className={head}>
+                      1d
                     </th>
                     <th scope="col" className={head}>
                       $ Vol/d
