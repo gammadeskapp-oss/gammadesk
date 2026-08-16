@@ -15,6 +15,7 @@ import {
   toPlainList,
 } from '@/lib/rs/rank';
 import type { Gics } from '@/lib/rs/universe';
+import { FLAT_EPSILON, type SectorPulse } from '@/lib/sectors/types';
 import {
   DEFAULT_MIN_DOLLAR_VOLUME,
   DEFAULT_WEIGHTS,
@@ -112,6 +113,151 @@ function rsiTone(rsi: number): string {
   return 'text-term-dim';
 }
 
+// --- sector readings ----------------------------------------------------------
+
+/**
+ * Is this sector strong, weak, or neither?
+ *
+ * The nine-signal consensus decides it, because that is the sector's own
+ * health reading and the one /sectors leads with. When the consensus is
+ * neutral the five-session change breaks the tie — a mixed sector that is
+ * getting healthier is worth marking as strong, and grey would say nothing.
+ *
+ * Nothing is computed here. Both inputs are read straight off the stored
+ * snapshot; this only decides which of them to colour by.
+ */
+function sectorTone(pulse: SectorPulse | undefined): 'strong' | 'weak' | null {
+  if (!pulse) return null;
+  if (pulse.label === 'BULLISH') return 'strong';
+  if (pulse.label === 'BEARISH') return 'weak';
+  if (pulse.delta5 === null || Math.abs(pulse.delta5) < FLAT_EPSILON) return null;
+  return pulse.delta5 > 0 ? 'strong' : 'weak';
+}
+
+const SECTOR_TEXT: Record<'strong' | 'weak', string> = {
+  strong: 'text-bull',
+  weak: 'text-bear',
+};
+
+/**
+ * One Δ figure.
+ *
+ * Matches /sectors exactly, down to the `|| 0` — averages of ninths land on
+ * -1.8e-15, which would otherwise render as a very confident-looking "-0.0".
+ */
+function Delta({ label, value }: { label: string; value: number | null }) {
+  const rounded = value === null ? null : Math.round(value * 10) / 10 || 0;
+  const tone =
+    rounded === null
+      ? 'text-term-faint'
+      : rounded > 0
+        ? 'text-bull'
+        : rounded < 0
+          ? 'text-bear'
+          : 'text-term-faint';
+
+  return (
+    <div className="text-right">
+      <dt className="text-2xs uppercase tracking-[0.1em] text-term-faint">Δ{label}</dt>
+      <dd className={`text-sm font-bold tabular-nums ${tone}`}>
+        {rounded === null ? '—' : `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)}`}
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * The detail tile under the selector.
+ *
+ * Display-only, on purpose: no links and no controls beyond the help bubbles.
+ * Clicking a sector chip is already a filter action, and a tile that also
+ * navigated would make one tap mean two things.
+ */
+function SectorDetail({ pulse }: { pulse: SectorPulse }) {
+  const rising =
+    pulse.delta5 !== null && Math.abs(pulse.delta5) >= FLAT_EPSILON
+      ? pulse.delta5 > 0
+      : null;
+
+  const tone = sectorTone(pulse);
+  const consensusTone =
+    pulse.label === 'BULLISH'
+      ? 'text-bull'
+      : pulse.label === 'BEARISH'
+        ? 'text-bear'
+        : 'text-flip';
+
+  return (
+    <section
+      aria-label={`${pulse.name} detail`}
+      className="panel px-3.5 py-3"
+    >
+      {/* The header names the direction before any number, because that is
+          the question someone clicking a sector is actually asking. */}
+      <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
+        {rising === null ? (
+          <>
+            <span className="text-2xs font-bold uppercase tracking-[0.14em] text-term-dim">
+              Flat
+            </span>
+            <span className="text-2xs text-term-faint">
+              — strength holding steady over the last five sessions
+            </span>
+          </>
+        ) : rising ? (
+          <>
+            <span className="text-2xs font-bold uppercase tracking-[0.14em] text-bull">
+              Accelerating
+            </span>
+            <span className="text-2xs text-term-faint">
+              — strength rising fastest, where money may be rotating IN
+            </span>
+            <InfoTip for="sectorAccelerating" />
+          </>
+        ) : (
+          <>
+            <span className="text-2xs font-bold uppercase tracking-[0.14em] text-bear">
+              Decelerating
+            </span>
+            <span className="text-2xs text-term-faint">— strength fading</span>
+            <InfoTip for="sectorDecelerating" />
+          </>
+        )}
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-start justify-between gap-x-4 gap-y-3 border-t border-term-line pt-2.5">
+        <div className="min-w-0 flex-1">
+          <p className="flex flex-wrap items-baseline gap-x-1.5 text-sm font-bold">
+            <span className={tone ? SECTOR_TEXT[tone] : 'text-term-text'}>
+              {pulse.name}
+            </span>
+            <span className="text-term-faint">·</span>
+            <span className={consensusTone}>
+              {pulse.bullish}/{pulse.total}{' '}
+              {pulse.label.charAt(0) + pulse.label.slice(1).toLowerCase()}
+            </span>
+            <span className="text-term-faint">·</span>
+            <span className="font-normal tabular-nums text-term-dim">
+              score {pulse.score.toFixed(0)}
+            </span>
+            <InfoTip for="sectorScore" />
+          </p>
+          <p className="mt-1 text-2xs leading-relaxed text-term-faint">{pulse.blurb}</p>
+        </div>
+
+        <dl className="flex shrink-0 items-start gap-x-4">
+          <Delta label="1D" value={pulse.delta1} />
+          <Delta label="3D" value={pulse.delta3} />
+          <Delta label="5D" value={pulse.delta5} />
+          <div className="self-center">
+            <InfoTip for="sectorDelta" />
+          </div>
+        </dl>
+      </div>
+    </section>
+  );
+}
+
 const pctText = (v: number | null, dp = 1): string =>
   v === null ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
 
@@ -159,12 +305,20 @@ function ConfirmBadge({ row, compact = false }: { row: RsRow; compact?: boolean 
   );
 }
 
+/**
+ * One name in the Leaders or Laggards grid.
+ *
+ * The tile itself is neutral. Colour is carried by the text — the score, the
+ * change, the trend — because a green-edged panel reads as a verdict on the
+ * whole name, when what is actually green is one reading among several. A tile
+ * can hold a leader's score above a red daily change, and that contradiction
+ * is the useful part; a green box around it argues with its own contents.
+ */
 function Tile({ row, tone }: { row: RsRow; tone: 'bull' | 'bear' }) {
-  const edge = tone === 'bull' ? 'border-l-bull/60' : 'border-l-bear/60';
   const accent = tone === 'bull' ? 'text-bull' : 'text-bear';
 
   return (
-    <div className={`panel border-l-2 ${edge} px-3 py-2.5`}>
+    <div className="panel px-3 py-2.5">
       <div className="flex items-baseline justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1 text-sm font-bold tracking-[0.1em] text-term-text">
           <StarButton symbol={row.symbol} size="sm" />
@@ -238,11 +392,20 @@ export function RsBoard({
   sectors,
   signals,
   asOfDate,
+  sectorPulse,
 }: {
   entries: DigestEntry[];
   sectors: Record<string, Gics>;
   signals: Record<string, { score: number; bullish: number; total: number }>;
   asOfDate: string;
+  /**
+   * The stored sector readings, or null when the /sectors job has not run.
+   *
+   * Nullable rather than defaulted to an empty array so "no snapshot" and "a
+   * snapshot with nothing in it" stay distinguishable — the first is worth
+   * explaining to a reader, the second would be a bug.
+   */
+  sectorPulse: SectorPulse[] | null;
 }) {
   const initial = useSearchParams();
 
@@ -307,6 +470,18 @@ export function RsBoard({
 
   const excluded = entries.length - ranked.length;
   const facets = useMemo(() => facetsFor(ranked), [ranked]);
+
+  /*
+   * Sector readings by facet id.
+   *
+   * The two id schemes line up already — `facetsFor` keys sector facets by the
+   * same GICS slug `lib/sectors/definitions.ts` uses — so this is a lookup
+   * rather than a translation. A sector with no entry simply stays neutral.
+   */
+  const pulseById = useMemo(
+    () => new Map((sectorPulse ?? []).map((p) => [p.id, p])),
+    [sectorPulse],
+  );
 
   /*
    * Whether the RSI column can be offered at all.
@@ -427,25 +602,63 @@ export function RsBoard({
       {/* --- controls --- */}
       <section aria-label="Controls" className="panel space-y-3 px-3.5 py-3">
         <div>
-          <span className="label-xs block">View</span>
+          <span className="label-xs flex items-center gap-1.5">
+            View
+            {/* One key for every sector chip below, rather than a bubble on
+                each of the eleven. */}
+            {sectorPulse && (
+              <>
+                <span className="font-normal normal-case tracking-normal text-term-faint">
+                  <span className="text-bull">green</span> = strong sector,{' '}
+                  <span className="text-bear">red</span> = weak
+                </span>
+                <InfoTip for="rsSectorColour" />
+              </>
+            )}
+          </span>
           <div
             role="group"
             aria-label="Group or sector"
             className="mt-1 flex flex-wrap gap-1"
           >
-            {facets.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                aria-pressed={f.id === active?.id}
-                onClick={() => setFacetId(f.id)}
-                className={chip(f.id === active?.id)}
-              >
-                {f.label}
-                <span className="ml-1 font-normal opacity-70">{f.count}</span>
-              </button>
-            ))}
+            {facets.map((f) => {
+              const tone = sectorTone(pulseById.get(f.id));
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  aria-pressed={f.id === active?.id}
+                  onClick={() => setFacetId(f.id)}
+                  className={chip(f.id === active?.id)}
+                >
+                  {/*
+                    Only the name is coloured. The chip's border and fill are
+                    already saying which one is selected, and tinting the whole
+                    box would leave those two facts fighting over one control.
+                  */}
+                  <span className={tone ? SECTOR_TEXT[tone] : ''}>{f.label}</span>
+                  <span className="ml-1 font-normal opacity-70">{f.count}</span>
+                </button>
+              );
+            })}
           </div>
+
+          {/* The detail for whichever sector is selected. Absent for All and
+              for the themed groups, which have no sector reading of their
+              own. */}
+          {active?.kind === 'sector' && (
+            <div className="mt-2">
+              {pulseById.has(active.id) ? (
+                <SectorDetail pulse={pulseById.get(active.id)!} />
+              ) : (
+                <p className="text-2xs leading-relaxed text-term-faint">
+                  No stored sector reading for {active.label} yet — the sector
+                  job builds these once a day, and the ranking above does not
+                  wait for it.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
@@ -632,6 +845,19 @@ export function RsBoard({
         </div>
       ) : (
         <>
+          {/*
+            One key for the whole board, stated once rather than repeated at
+            every coloured number. It sits above the first tiles because that
+            is where the colours start.
+          */}
+          <p className="flex items-center gap-1.5 px-0.5 text-2xs text-term-faint">
+            <span>
+              <span className="text-bull">Green</span> = strength,{' '}
+              <span className="text-bear">red</span> = weakness.
+            </span>
+            <InfoTip for="rsColour" />
+          </p>
+
           <Tiles
             title="Leaders"
             tip="rsLeaders"

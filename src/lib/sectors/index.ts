@@ -3,11 +3,12 @@ import 'server-only';
 import { cached } from '../cache';
 import { createJsonStore } from '../jsonStore';
 import { computeSectorsSnapshot } from './compute';
-import { SECTORS_SCHEMA, type SectorsSnapshot } from './types';
+import { FLAT_EPSILON, SECTORS_SCHEMA, type SectorsSnapshot } from './types';
 
 export { storeStatus } from '../jsonStore';
 export { SECTOR_THRESHOLDS } from './compute';
-export type { SectorMomentum, SectorsSnapshot } from './types';
+export { FLAT_EPSILON, toSectorPulse } from './types';
+export type { SectorMomentum, SectorPulse, SectorsSnapshot } from './types';
 
 /**
  * Computed once a day and served to everyone from storage.
@@ -86,15 +87,7 @@ export function getSectorsSnapshot(): Promise<SectorsSnapshot | null> {
  * one-day number flips too often to rank anything usefully. Sectors with no
  * five-day reading yet fall to the bottom of whichever side they land on.
  */
-/**
- * Below this the change is not worth calling a direction.
- *
- * Also guards the display: the deltas are averages of ninths, so an unchanged
- * sector lands on values like -1.8e-15 rather than a clean zero. Without a
- * floor that sector is filed under "fading fastest" and rendered as "-0.0",
- * which looks like a bug because it is one.
- */
-const FLAT_EPSILON = 0.05;
+// `FLAT_EPSILON` lives in ./types, which the client bundle can reach.
 
 export function splitByMomentum(snapshot: SectorsSnapshot) {
   const ranked = snapshot.sectors.filter(

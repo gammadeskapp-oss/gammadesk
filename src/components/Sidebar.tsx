@@ -28,20 +28,27 @@ interface NavItem {
   match?: string[];
 }
 
+/*
+ * Nine entries, in the order a session actually runs: the market backdrop,
+ * then what is strong, then one name in depth, then the things you keep an eye
+ * on, then the written-up day, then the manual.
+ *
+ * Several routes are deliberately absent rather than deleted — `/` (the
+ * positioning book), `/forecast`, `/sectors` and `/ticker` are all still live
+ * and still linked from the pages that lead into them. They are reached
+ * through the work rather than from a list of fourteen.
+ */
 const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: '◎' },
-  { href: '/decision', label: 'Decision', icon: '◈' },
-  { href: '/', label: 'Positioning', icon: '▦' },
-  { href: '/forecast', label: 'Forecast', icon: '∿' },
   { href: '/strength', label: 'Strength', icon: '⇅' },
-  { href: '/sectors', label: 'Sectors', icon: '⧉' },
+  // `/` and `/ticker` both land a symbol here, so they light the same item.
+  { href: '/decision', label: 'Decision', icon: '◈' },
   { href: '/watchlist', label: 'Watchlist', icon: '★' },
   { href: '/flow', label: 'Flow', icon: '⇄' },
   { href: '/velocity', label: 'Velocity', icon: 'Δ' },
   { href: '/log', label: 'Accuracy Log', icon: '✓' },
-  { href: '/ticker', label: 'Ticker', icon: '⌕' },
-  { href: '/digest', label: 'Digest', icon: '≡' },
-  { href: '/post', label: 'Morning Post', icon: '✎' },
+  // Digest and the morning post were one day's writing split over two pages.
+  { href: '/daily', label: 'Daily', icon: '≡', match: ['/digest', '/post'] },
   { href: '/guide', label: 'Guide', icon: '?' },
 ];
 
@@ -87,10 +94,13 @@ export function Sidebar() {
 
   const toggleCollapsed = useCallback(() => writeCollapsed(!readCollapsed()), []);
 
-  const isActive = (item: NavItem) =>
-    item.href === '/'
+  const under = (base: string) =>
+    base === '/'
       ? pathname === '/'
-      : pathname === item.href || pathname.startsWith(`${item.href}/`);
+      : pathname === base || pathname.startsWith(`${base}/`);
+
+  const isActive = (item: NavItem) =>
+    under(item.href) || (item.match?.some(under) ?? false);
 
   // Width lives in globals.css under `.gd-sidebar[data-collapsed]` — see the
   // comment there for why it is not a Tailwind responsive utility.

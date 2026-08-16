@@ -1,24 +1,30 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { ChartForecastSwitch } from '@/components/ChartForecastSwitch';
 import { DecisionSearch } from '@/components/DecisionSearch';
+import { ExposureTables } from '@/components/ExposureTables';
 import { Footer } from '@/components/Footer';
+import { ForecastChart } from '@/components/ForecastChart';
 import { InfoTip } from '@/components/InfoTip';
-import { InteractiveChart } from '@/components/InteractiveChart';
 import { PageBar } from '@/components/PageBar';
 import { ReadMode } from '@/components/ReadMode';
 import { SimpleRead } from '@/components/SimpleRead';
 import { config } from '@/lib/config';
 import { DecisionError, getDecision, type DecisionResult } from '@/lib/decision';
 import type { Check, Grade, Wall } from '@/lib/decision/types';
+import { getForecast } from '@/lib/forecast';
+import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
+import { getPositioningView } from '@/lib/positioning';
 import { normaliseSymbol } from '@/lib/ticker/bars';
+import type { PositioningData } from '@/lib/types';
 import type { TooltipKey } from '@/lib/tooltips';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
   title: 'Decision',
   description:
-    'Positioning, levels, a conviction check and an interactive chart for one ticker, on one screen.',
+    'Context, levels, a conviction check, a chart or forecast, and the exposure tables for one ticker, on one screen.',
 };
 
 export const dynamic = 'force-dynamic';
@@ -63,7 +69,8 @@ function Section({
   help,
   children,
 }: {
-  step: number;
+  /** Omitted for the pieces that are not one of the numbered steps. */
+  step?: number;
   title: string;
   tip?: React.ReactNode;
   help?: TooltipKey;
@@ -72,7 +79,9 @@ function Section({
   return (
     <section className="space-y-2">
       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-        <span className="text-xs font-bold text-pos">{step}</span>
+        {step !== undefined && (
+          <span className="text-xs font-bold text-pos">{step}</span>
+        )}
         <h2 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
           {title}
         </h2>
@@ -129,12 +138,12 @@ function Tile({
 function WallRow({ wall, spot }: { wall: Wall; spot: number }) {
   const pct = Math.round(wall.strength * 100);
   return (
-    <li className="flex items-center gap-3 px-3.5 py-2 text-xs tabular-nums">
-      <span className="w-16 shrink-0 font-bold text-term-text">
+    <li className="flex items-center gap-2.5 px-3 py-2 text-xs tabular-nums">
+      <span className="w-14 shrink-0 font-bold text-term-text">
         {formatStrike(wall.strike)}
       </span>
       <span
-        className={`w-16 shrink-0 text-2xs ${
+        className={`w-14 shrink-0 text-2xs ${
           Math.abs(wall.distancePct) < 0.5 ? 'text-flip' : 'text-term-faint'
         }`}
       >
@@ -150,7 +159,7 @@ function WallRow({ wall, spot }: { wall: Wall; spot: number }) {
         />
       </span>
 
-      <span className="w-10 shrink-0 text-right text-2xs text-term-dim">{pct}%</span>
+      <span className="w-9 shrink-0 text-right text-2xs text-term-dim">{pct}%</span>
       <span
         className={`w-20 shrink-0 text-right ${wall.gex >= 0 ? 'text-pos' : 'text-neg'}`}
       >
@@ -164,19 +173,81 @@ function WallRow({ wall, spot }: { wall: Wall; spot: number }) {
   );
 }
 
+/** One of the two wall lists inside the Levels box. */
+function WallList({
+  title,
+  list,
+  tone,
+  tip,
+  spot,
+}: {
+  title: string;
+  list: Wall[];
+  tone: 'bull' | 'bear';
+  tip: TooltipKey;
+  spot: number;
+}) {
+  return (
+    <div className="border border-term-line">
+      <div className="flex items-baseline justify-between gap-2 border-b border-term-line px-3 py-2">
+        <span className="flex items-center gap-1.5">
+          <h4 className={`label-xs ${tone === 'bull' ? 'text-bull' : 'text-bear'}`}>
+            {title}
+          </h4>
+          <InfoTip for={tip} />
+        </span>
+        <span className="flex items-center gap-2 text-2xs text-term-faint">
+          nearest first
+          <span className="flex items-center gap-1">
+            strength <InfoTip for="wallStrength" />
+          </span>
+          <span className="flex items-center gap-1">
+            $ <InfoTip for="wallDollar" />
+          </span>
+        </span>
+      </div>
+      {list.length === 0 ? (
+        <p className="px-3 py-6 text-center text-xs text-term-dim">
+          No meaningful gamma on this side.
+        </p>
+      ) : (
+        <ul className="divide-y divide-term-line/60">
+          {list.map((w) => (
+            <WallRow key={w.strike} wall={w} spot={spot} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Decision({ data }: { data: DecisionResult }) {
   const { context: c, walls, conviction, verdict } = data;
 
   return (
     <>
-      {/* 1 — CONTEXT */}
+      {/*
+        1 — CONTEXT, as one row.
+
+        Five readings that only mean anything together: the regime says how the
+        tape behaves, the flip says where that changes, the magnets say where
+        price stalls, and the last tile says which side of the boundary we are
+        currently on. Spot moved up into the heading — it is the one number
+        nobody needs a tile to find.
+      */}
       <Section
         step={1}
         title="Context"
-        tip={<span className="text-2xs text-term-faint">from the positioning book</span>}
+        tip={
+          <span className="flex items-baseline gap-2 text-2xs text-term-faint">
+            <span className="text-sm font-bold tabular-nums text-term-text">
+              {formatPrice(c.spot)}
+            </span>
+            <span>{c.symbol} spot · from the positioning book</span>
+          </span>
+        }
       >
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
-          <Tile label={`${c.symbol} spot`} value={formatPrice(c.spot)} />
           <Tile
             label="Gamma regime"
             value={c.mood === 'calm' ? 'CALM' : 'WILD'}
@@ -188,11 +259,7 @@ function Decision({ data }: { data: DecisionResult }) {
             label="Gamma flip"
             tip="flip"
             value={c.flipLevel === null ? '—' : formatPrice(c.flipLevel)}
-            sub={
-              c.aboveFlip === null
-                ? 'no crossing nearby'
-                : `${c.aboveFlip ? 'above' : 'below'} · ${c.flipDistancePct! >= 0 ? '+' : ''}${c.flipDistancePct!.toFixed(2)}%`
-            }
+            sub={c.flipLevel === null ? 'no crossing nearby' : 'calm above, wild below'}
             tone="flip"
           />
           <Tile
@@ -209,121 +276,124 @@ function Decision({ data }: { data: DecisionResult }) {
             sub={c.magnetBelow ? formatUsd(c.magnetBelow.gex) : 'none nearby'}
             tone={c.magnetBelow ? (c.magnetBelow.gex >= 0 ? 'pos' : 'neg') : 'neutral'}
           />
+          {/*
+            Its own tile now rather than a subtitle under the flip level. Which
+            side of the flip price sits on is the single most consequential
+            reading in the row, and it was set in the smallest type on screen.
+          */}
+          <Tile
+            label="Above / below flip"
+            tip="flip"
+            value={
+              c.aboveFlip === null ? '—' : c.aboveFlip ? 'ABOVE' : 'BELOW'
+            }
+            sub={
+              c.flipDistancePct === null
+                ? 'no flip level to measure from'
+                : `${c.flipDistancePct >= 0 ? '+' : ''}${c.flipDistancePct.toFixed(2)}% from the flip`
+            }
+            tone={c.aboveFlip === null ? 'neutral' : c.aboveFlip ? 'pos' : 'neg'}
+          />
         </div>
       </Section>
 
-      {/* 2 — LEVELS */}
-      <Section step={2} title="Levels">
-        <div className="grid gap-2 lg:grid-cols-2">
-          {(
-            [
-              ['Walls above', walls.above, 'bull', 'wallsAbove'],
-              ['Walls below', walls.below, 'bear', 'wallsBelow'],
-            ] as const
-          ).map(([title, list, tone, tip]) => (
-            <div key={title} className="panel">
-              <div className="flex items-baseline justify-between gap-2 border-b border-term-line px-3.5 py-2">
-                <span className="flex items-center gap-1.5">
-                  <h3 className={`label-xs ${tone === 'bull' ? 'text-bull' : 'text-bear'}`}>
-                    {title}
-                  </h3>
-                  <InfoTip for={tip} />
-                </span>
-                <span className="flex items-center gap-2 text-2xs text-term-faint">
-                  nearest first
-                  <span className="flex items-center gap-1">
-                    strength <InfoTip for="wallStrength" />
-                  </span>
-                  <span className="flex items-center gap-1">
-                    $ <InfoTip for="wallDollar" />
-                  </span>
-                </span>
-              </div>
-              {list.length === 0 ? (
-                <p className="px-3.5 py-6 text-center text-xs text-term-dim">
-                  No meaningful gamma on this side.
-                </p>
-              ) : (
-                <ul className="divide-y divide-term-line/60">
-                  {list.map((w) => (
-                    <WallRow key={w.strike} wall={w} spot={c.spot} />
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
-        </div>
-        <p className="flex flex-wrap items-center gap-1.5 text-2xs leading-relaxed text-term-faint">
-          <span>
-            Strength is relative to the largest wall on the same side, not
-            across both — a 100% bar below does not mean the floor is stronger
-            than the ceiling. Amber bars are positive gamma (dealers lean
-            against moves), blue is negative.
-          </span>
-          <InfoTip for="wallColour" />
-        </p>
-      </Section>
+      {/*
+        2 — LEVELS and CONVICTION, side by side.
 
-      {/* 3 — CONVICTION */}
-      <Section
-        step={3}
-        title="Conviction check"
-        tip={
-          conviction.level !== null ? (
-            <span className="text-2xs text-term-faint">
-              measured against {formatStrike(conviction.level)}, the nearest level{' '}
-              {conviction.side}
-            </span>
-          ) : undefined
-        }
-      >
-        {conviction.unavailable ? (
-          <div className="panel px-4 py-6 text-center text-xs text-term-dim">
-            {conviction.note}
+        They are read together: the levels say where price is going to meet
+        something, the checks say whether the move into it is worth trusting.
+        Stacked, the second was below the fold on a laptop and routinely
+        missed.
+      */}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Section step={2} title="Levels">
+          <div className="panel space-y-2 p-2">
+            <WallList
+              title="Walls above"
+              list={walls.above}
+              tone="bull"
+              tip="wallsAbove"
+              spot={c.spot}
+            />
+            <WallList
+              title="Walls below"
+              list={walls.below}
+              tone="bear"
+              tip="wallsBelow"
+              spot={c.spot}
+            />
+            <p className="flex flex-wrap items-center gap-1.5 px-1 pb-1 text-2xs leading-relaxed text-term-faint">
+              <span>
+                Strength is relative to the largest wall on the same side, not
+                across both — a 100% bar below does not mean the floor is
+                stronger than the ceiling. Amber bars are positive gamma
+                (dealers lean against moves), blue is negative.
+              </span>
+              <InfoTip for="wallColour" />
+            </p>
           </div>
-        ) : (
-          <div className="grid gap-2 md:grid-cols-3">
-            {conviction.checks.map((check) => (
-              <div
-                key={check.id}
-                className={`panel border-l-2 ${GRADE_EDGE[check.grade]} px-3.5 py-3`}
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="flex items-center gap-1.5">
-                    <span className="label-xs">{check.label}</span>
-                    <InfoTip for={CHECK_TIP[check.id]} />
-                  </span>
-                  <span aria-hidden className={`text-sm ${GRADE_TEXT[check.grade]}`}>
-                    {GRADE_MARK[check.grade]}
-                  </span>
-                </div>
-                <div className={`mt-1 text-lg font-bold tabular-nums ${GRADE_TEXT[check.grade]}`}>
-                  {check.value}
-                </div>
-                <p className="mt-1.5 text-2xs leading-relaxed text-term-faint">
-                  {check.detail}
-                </p>
-                <span className="sr-only">Rated {check.grade}.</span>
+        </Section>
+
+        <Section
+          step={3}
+          title="Conviction check"
+          tip={
+            conviction.level !== null ? (
+              <span className="text-2xs text-term-faint">
+                measured against {formatStrike(conviction.level)}, the nearest level{' '}
+                {conviction.side}
+              </span>
+            ) : undefined
+          }
+        >
+          <div className="panel space-y-2 p-2">
+            {conviction.unavailable ? (
+              <div className="border border-term-line px-4 py-6 text-center text-xs text-term-dim">
+                {conviction.note}
               </div>
-            ))}
+            ) : (
+              conviction.checks.map((check) => (
+                <div
+                  key={check.id}
+                  className={`border border-term-line border-l-2 ${GRADE_EDGE[check.grade]} px-3 py-2.5`}
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="flex items-center gap-1.5">
+                      <span className="label-xs">{check.label}</span>
+                      <InfoTip for={CHECK_TIP[check.id]} />
+                    </span>
+                    <span className="flex items-baseline gap-2">
+                      <span
+                        className={`text-lg font-bold tabular-nums ${GRADE_TEXT[check.grade]}`}
+                      >
+                        {check.value}
+                      </span>
+                      <span aria-hidden className={`text-sm ${GRADE_TEXT[check.grade]}`}>
+                        {GRADE_MARK[check.grade]}
+                      </span>
+                    </span>
+                  </div>
+                  <p className="mt-1 text-2xs leading-relaxed text-term-faint">
+                    {check.detail}
+                  </p>
+                  <span className="sr-only">Rated {check.grade}.</span>
+                </div>
+              ))
+            )}
+            <p className="px-1 pb-1 text-2xs leading-relaxed text-term-faint">
+              These thresholds are conventions, not measured edges. A first
+              touch is widely treated as more reliable than a third, and a move
+              that covers most of the day&rsquo;s range in minutes is widely
+              treated as stretched. Both are beliefs about markets; the page
+              applies them consistently and shows its working so you can
+              disagree with it.
+            </p>
           </div>
-        )}
-        <p className="text-2xs leading-relaxed text-term-faint">
-          These thresholds are conventions, not measured edges. A first touch is
-          widely treated as more reliable than a third, and a move that covers
-          most of the day&rsquo;s range in minutes is widely treated as
-          stretched. Both are beliefs about markets; the page applies them
-          consistently and shows its working so you can disagree with it.
-        </p>
-      </Section>
+        </Section>
+      </div>
 
-      {/* 4 — CHART */}
-      <Section step={4} title="Chart">
-        <InteractiveChart symbol={c.symbol} />
-      </Section>
-
-      {/* 5 — VERDICT */}
-      <Section step={5} title="Verdict" help="verdict">
+      {/* The one line that reads the two boxes above together. */}
+      <Section title="Verdict" help="verdict">
         <div className={`panel border-l-2 ${GRADE_EDGE[verdict.tone]} p-4 sm:p-5`}>
           <p className="text-base leading-relaxed text-term-text">{verdict.line}</p>
 
@@ -366,10 +436,38 @@ export default async function DecisionPage({ searchParams }: PageProps) {
   // Sanitised here too, because on the failure path there is no result object
   // to take a validated symbol from.
   const chartSymbol = normaliseSymbol(query);
+  const symbol = data?.context.symbol ?? chartSymbol;
+
+  /*
+   * The cone and the exposure grid, fetched alongside the decision itself.
+   *
+   * Both are behind the same TTL cache as the pages they came from, so a
+   * ticker someone has already opened elsewhere costs nothing upstream. Both
+   * are allowed to fail on their own: a name with a readable chain but no
+   * simulation still gets everything else.
+   */
+  const [forecast, positioning] = symbol
+    ? await Promise.all([
+        getForecast(symbol).catch((): ForecastResult | null => null),
+        getPositioningView(symbol).catch((): PositioningData | null => null),
+      ])
+    : [null, null];
+
+  const forecastPanel = forecast ? (
+    <ForecastChart data={forecast} />
+  ) : (
+    <div className="panel px-4 py-10 text-center text-xs text-term-dim">
+      <p className="text-term-text">No forecast for this ticker.</p>
+      <p className="mx-auto mt-2 max-w-md leading-relaxed">
+        The cone needs enough price history to measure realised volatility from.
+        The chart beside it does not, and is still there.
+      </p>
+    </div>
+  );
 
   return (
     <>
-      <main className="mx-auto w-full max-w-[1200px] flex-1 space-y-6 px-4 py-5 sm:px-6">
+      <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-6 px-4 py-5 sm:px-6">
         <PageBar
           title="Decision"
           description={PAGE_DESCRIPTIONS['/decision']}
@@ -398,33 +496,49 @@ export default async function DecisionPage({ searchParams }: PageProps) {
           <ReadMode
             revealLabel="Show the data behind this"
             simple={
-              <div className="space-y-4">
-                <SimpleRead
-                  input={{
-                    symbol: data.context.symbol,
-                    regime: data.context.regime,
-                    flipLevel: data.context.flipLevel,
-                    aboveFlip: data.context.aboveFlip,
-                    magnetAbove: data.context.magnetAbove?.strike ?? null,
-                    magnetBelow: data.context.magnetBelow?.strike ?? null,
-                  }}
-                />
-                {/* The chart carries no jargon, so it belongs in both views. */}
-                <InteractiveChart symbol={data.context.symbol} />
-              </div>
+              /* The chart and the tables sit below either view, so the simple
+                 read is just the sentences. */
+              <SimpleRead
+                input={{
+                  symbol: data.context.symbol,
+                  regime: data.context.regime,
+                  flipLevel: data.context.flipLevel,
+                  aboveFlip: data.context.aboveFlip,
+                  magnetAbove: data.context.magnetAbove?.strike ?? null,
+                  magnetBelow: data.context.magnetBelow?.strike ?? null,
+                }}
+              />
             }
             advanced={<Decision data={data} />}
           />
         )}
 
         {/*
-          The chart survives a chain failure on purpose. Its bars come from a
-          different source entirely, and losing the whole screen because the
-          options feed is down would throw away the part that still works.
+          4 — CHART / FORECAST.
+
+          Outside the read-mode toggle and outside the chain failure path on
+          purpose. Its bars come from a different source entirely, and losing
+          the part that still works because the options feed is down would be
+          the wrong trade.
         */}
-        {!data && chartSymbol && (
-          <Section step={4} title="Chart">
-            <InteractiveChart symbol={chartSymbol} />
+        {symbol && (
+          <Section step={4} title="Chart / Forecast">
+            <ChartForecastSwitch symbol={symbol} forecast={forecastPanel} />
+          </Section>
+        )}
+
+        {/* 5 — the working behind the levels above. */}
+        {positioning && (
+          <Section
+            step={5}
+            title="Exposure tables"
+            tip={
+              <span className="text-2xs text-term-faint">
+                every strike and expiration — where the walls above came from
+              </span>
+            }
+          >
+            <ExposureTables data={positioning} />
           </Section>
         )}
 
@@ -449,8 +563,12 @@ export default async function DecisionPage({ searchParams }: PageProps) {
             <Link href="/" className="text-term-dim underline decoration-dotted">
               positioning
             </Link>{' '}
-            page; the page exists to put them next to the chart rather than a
-            click apart. The dealer convention behind the gamma figures is an
+            page and the cone is the same simulation as{' '}
+            <Link href="/forecast" className="text-term-dim underline decoration-dotted">
+              forecast
+            </Link>
+            ; the page exists to put them next to each other rather than a click
+            apart. The dealer convention behind the gamma figures is an
             assumption, and it is sometimes wrong.
           </p>
         </section>

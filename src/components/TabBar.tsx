@@ -7,16 +7,29 @@ import type { MetricKey } from '@/lib/types';
 interface TabBarProps {
   active: MetricKey;
   onChange: (metric: MetricKey) => void;
+  /**
+   * Which metrics to offer. Defaults to all four; /decision shows only the
+   * three exposure tabs, because the raw open interest behind them is a
+   * positioning-book question rather than a one-ticker one.
+   */
+  order?: MetricKey[];
+  /** The panel these tabs drive, for `aria-controls`. */
+  panelId?: string;
 }
 
-export function TabBar({ active, onChange }: TabBarProps) {
+export function TabBar({
+  active,
+  onChange,
+  order = METRIC_ORDER,
+  panelId = 'positioning-panel',
+}: TabBarProps) {
   return (
     <div
       role="tablist"
       aria-label="Exposure metric"
       className="flex flex-wrap items-center gap-x-2.5 gap-y-1"
     >
-      {METRIC_ORDER.map((key) => {
+      {order.map((key) => {
         const def = METRICS[key];
         const selected = key === active;
         return (
@@ -30,7 +43,7 @@ export function TabBar({ active, onChange }: TabBarProps) {
               role="tab"
               id={`tab-${key}`}
               aria-selected={selected}
-              aria-controls="positioning-panel"
+              aria-controls={panelId}
               onClick={() => onChange(key)}
               title={def.name}
               className={`border px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] transition-colors ${

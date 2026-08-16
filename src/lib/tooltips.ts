@@ -352,6 +352,20 @@ const ENTRIES = {
       'The bottom of the ranking. A low score is a statement about relative performance, not about valuation.',
   },
 
+  rsColour: {
+    label: 'Reading the colours',
+    plain: 'Green = strength, red = weakness.',
+    detail:
+      'It applies to the words and the numbers, not to the panels behind them — a tile is not "a green name", the green text on it is telling you what that particular reading says. Amber is the caution colour and means neither.',
+  },
+
+  rsSectorColour: {
+    label: 'Sector colours',
+    plain: 'Green = strong sector, red = weak sector.',
+    detail:
+      'Read off the sector’s nine-signal consensus, and off the direction its score is moving when that consensus is neutral. Grey means neither — a mixed sector, or one with no stored reading yet. Only the sector name is coloured; the box around it shows which one you have selected.',
+  },
+
   rsTrend: {
     label: 'Rising / Falling RS',
     plain:
@@ -434,4 +448,6 @@ export const TOOLTIP_ORDER: TooltipKey[] = [
   'rsLiquidity',
   'rsLeaders',
   'rsLaggards',
+  'rsColour',
+  'rsSectorColour',
 ];

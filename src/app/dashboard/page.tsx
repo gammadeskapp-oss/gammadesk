@@ -359,7 +359,7 @@ export default async function DashboardPage() {
           </Card>
 
           {/* ---- digest ---- */}
-          <Card href="/digest" title="Today in one line" tone="neutral">
+          <Card href="/daily" title="Today in one line" tone="neutral">
             <p className="text-xs leading-relaxed text-term-dim">
               {summary.regime === 'positive'
                 ? 'Dealers are long gamma, so their hedging leans against moves — chop and mean reversion.'

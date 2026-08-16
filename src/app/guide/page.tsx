@@ -232,10 +232,11 @@ export default function GuidePage() {
               Ticker
             </Link>{' '}
             runs the full read on any stock you type in, and{' '}
-            <Link href="/digest" className="text-term-dim underline decoration-dotted">
-              Digest
+            <Link href="/daily" className="text-term-dim underline decoration-dotted">
+              Daily
             </Link>{' '}
-            is the whole day written out in a few sentences.
+            is the whole day written out in a few sentences, with the postable
+            version underneath it.
           </p>
         </section>
 

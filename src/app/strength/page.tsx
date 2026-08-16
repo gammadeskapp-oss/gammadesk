@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Footer } from '@/components/Footer';
 import { RsBoard } from '@/components/RsBoard';
 import { getRsInputs, storeStatus } from '@/lib/rs';
+import { peekStoredSectors, toSectorPulse } from '@/lib/sectors';
 import { formatAsOf } from '@/lib/time';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
@@ -25,7 +26,16 @@ export const dynamic = 'force-dynamic';
  * — see the note there.
  */
 export default async function StrengthPage() {
-  const result = await getRsInputs();
+  /*
+   * The sector snapshot is read with `peek` rather than `get`: it decorates
+   * the group selector and drives the detail tile, and a secondary reading on
+   * this page must never be the thing that triggers a sector recompute. If the
+   * /sectors job has not run, the chips stay neutral and the tile says so.
+   */
+  const [result, sectorMomentum] = await Promise.all([
+    getRsInputs(),
+    peekStoredSectors().catch(() => null),
+  ]);
   const store = storeStatus();
 
   const hasData = result.entries.length > 0;
@@ -144,6 +154,7 @@ export default async function StrengthPage() {
               sectors={result.sectors}
               signals={result.signals}
               asOfDate={result.asOfDate}
+              sectorPulse={sectorMomentum?.sectors.map(toSectorPulse) ?? null}
             />
           </Suspense>
         )}

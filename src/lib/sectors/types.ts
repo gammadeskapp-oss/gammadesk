@@ -93,6 +93,56 @@ export interface SectorMomentum {
 }
 
 /**
+ * Below which a change is not worth calling a direction.
+ *
+ * Also guards the display: the deltas are averages of ninths, so an unchanged
+ * sector lands on values like -1.8e-15 rather than a clean zero. Without a
+ * floor that sector is filed under "fading fastest" and rendered as "-0.0",
+ * which looks like a bug because it is one.
+ *
+ * It lives here rather than beside `splitByMomentum` because /strength colours
+ * the same deltas in the browser, and two pages disagreeing about which sector
+ * counts as flat would be worse than either answer on its own.
+ */
+export const FLAT_EPSILON = 0.05;
+
+/**
+ * A sector's reading, trimmed to what a client component needs.
+ *
+ * `SectorMomentum` carries every member and a month of daily points — tens of
+ * kilobytes of JSON per page view, for a chip label and a six-line tile. This
+ * is the part that crosses the boundary; the drill-in on /sectors still reads
+ * the full shape on the server.
+ */
+export interface SectorPulse {
+  id: string;
+  name: string;
+  blurb: string;
+  score: number;
+  delta1: number | null;
+  delta3: number | null;
+  delta5: number | null;
+  bullish: number;
+  total: number;
+  label: ConsensusLabel;
+}
+
+export function toSectorPulse(sector: SectorMomentum): SectorPulse {
+  return {
+    id: sector.id,
+    name: sector.name,
+    blurb: sector.blurb,
+    score: sector.score,
+    delta1: sector.delta1,
+    delta3: sector.delta3,
+    delta5: sector.delta5,
+    bullish: sector.consensus.bullish,
+    total: sector.consensus.total,
+    label: sector.consensus.label,
+  };
+}
+
+/**
  * Bumped whenever the stored shape changes.
  *
  * The validator requires an exact match, so an older snapshot is rejected and
