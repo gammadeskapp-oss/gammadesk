@@ -3,8 +3,10 @@
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { DataQuality } from './DataQuality';
+import { DealerConventionNote } from './DealerConventionNote';
 import { ExplainPanel } from './ExplainPanel';
 import { PageBar } from './PageBar';
+import { PositioningSearch } from './PositioningSearch';
 import { PositioningTable } from './PositioningTable';
 import { ReadMode, useReadMode } from './ReadMode';
 import { nearestStrongWall } from '@/lib/simple/walls';
@@ -67,6 +69,15 @@ export function Dashboard({ data }: DashboardProps) {
         asOfLabel={data.meta.asOfLabel}
         source={data.meta.source}
       />
+
+      <PositioningSearch initial={data.symbol} />
+
+      {/*
+        Above the read, and outside the mode toggle, because it qualifies both
+        views equally — the simple wording is if anything the easier one to
+        take at face value.
+      */}
+      <DealerConventionNote symbol={data.symbol} />
 
       {/*
         Simple leads. The exposure tables are the same data one tap away, and
