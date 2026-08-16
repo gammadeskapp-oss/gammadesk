@@ -155,6 +155,44 @@ export async function getForecastPositioning(): Promise<PositioningData> {
 }
 
 /**
+ * Fresh single-symbol chain fetches allowed per minute, process-wide.
+ *
+ * Cboe answers roughly sixty chain requests per window before it starts
+ * returning 429 (see `SCAN_MAX_REQUESTS`), and the flow scan already spends
+ * most of one window when it runs. Letting an on-demand ticker box issue an
+ * unbounded number of fetches would mean anyone walking the alphabet through
+ * `?symbol=` could drain that quota and take the scan down with them.
+ *
+ * A third of the window is a generous slice for readers — a cache hit costs
+ * nothing and never touches this — while leaving the scheduled scan room to
+ * finish. The cap refuses rather than queues: a page that eventually renders
+ * three minutes late is worse than one that says it is busy.
+ */
+const ON_DEMAND_CHAINS_PER_MINUTE = 20;
+const ON_DEMAND_WINDOW_MS = 60_000;
+
+const budgetKey = Symbol.for('gammadesk.positioning.onDemandBudget');
+type GlobalWithBudget = typeof globalThis & { [budgetKey]?: number[] };
+
+/**
+ * Per-process, so a fleet of lambdas each get their own allowance. That is the
+ * same caveat `rateLimit.ts` carries and for the same reason: the durable
+ * protection is the TTL cache in front of this, and the budget is the backstop
+ * for the case the cache cannot help with — a flood of *distinct* symbols.
+ */
+function claimChainBudget(): boolean {
+  const g = globalThis as GlobalWithBudget;
+  const hits = (g[budgetKey] ??= []);
+
+  const now = Date.now();
+  while (hits.length > 0 && now - hits[0] >= ON_DEMAND_WINDOW_MS) hits.shift();
+
+  if (hits.length >= ON_DEMAND_CHAINS_PER_MINUTE) return false;
+  hits.push(now);
+  return true;
+}
+
+/**
  * Positioning for an arbitrary symbol, for the forecast's ticker mode.
  *
  * Separate from the cached SPY path on purpose: that one shares a single chain
@@ -173,6 +211,15 @@ export async function getPositioningForSymbol(
     `positioning-symbol:${symbol}:${expirationCount}:${config.strikesEachSide}`,
     config.cacheSeconds,
     async () => {
+      // Inside the producer, so only a genuine miss spends budget — a cached
+      // symbol is free however often it is asked for.
+      if (!claimChainBudget()) {
+        throw new ChainError(
+          'Too many different tickers were requested in the last minute.',
+          429,
+          'Cboe caps how many chains can be pulled per window, and the allowance is shared. Wait a moment and try again — tickers already loaded are still instant.',
+        );
+      }
       const snapshot = await fetchCboeSnapshot(symbol);
       return toPositioning(
         { snapshot, source: 'cboe', notes: snapshot.notes },
@@ -181,6 +228,40 @@ export async function getPositioningForSymbol(
       );
     },
   );
+}
+
+/**
+ * A ticker as it may be typed into the positioning box, or null when it could
+ * not be one.
+ *
+ * Deliberately strict, and applied before the symbol reaches a URL: the value
+ * goes straight into a CDN path and into a cache key, and neither should be
+ * reachable by anything a visitor can type. One to five letters covers every
+ * plain US listing the symbol directory keeps (see `symbols/directory.ts`,
+ * which filters on the same rule).
+ */
+export function normaliseSymbol(raw: string | undefined): string | null {
+  const symbol = (raw ?? '').trim().toUpperCase();
+  return /^[A-Z]{1,5}$/.test(symbol) ? symbol : null;
+}
+
+/**
+ * The positioning page's data entry point, for whichever symbol was asked for.
+ *
+ * The configured symbol keeps its existing path, so the dashboard and the
+ * forecast still share one chain snapshot between them; anything else gets its
+ * own fetch and its own cache entry, on demand.
+ *
+ * On demand is the whole design. Cboe answers roughly sixty chain requests per
+ * window (`SCAN_MAX_REQUESTS` in `scanUniverse.ts`), which the flow scan
+ * already spends most of, so preloading a stock universe here is not available
+ * even in principle. One chain per symbol somebody actually asked for, cached
+ * for `GAMMADESK_CACHE_SECONDS`, is what fits — and it means the cost scales
+ * with readers rather than with the size of the market.
+ */
+export async function getPositioningView(symbol: string): Promise<PositioningData> {
+  if (symbol === config.symbol) return getPositioning();
+  return getPositioningForSymbol(symbol, config.expirationCount);
 }
 
 /** Seconds until the cached snapshot goes stale — shown next to "data as of". */

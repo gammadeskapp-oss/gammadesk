@@ -18,7 +18,7 @@ export const PAGE_DESCRIPTIONS: Record<string, string> = {
   '/sectors':
     'Which parts of the market the models currently rate strongest and weakest.',
   '/':
-    'Where dealers are exposed, and which price levels that exposure pulls toward.',
+    'Where dealers are exposed on any optionable ticker, and which price levels that exposure pulls toward.',
   '/velocity':
     'How fast dealer positioning is shifting — slow drift or sudden change.',
   '/forecast':
