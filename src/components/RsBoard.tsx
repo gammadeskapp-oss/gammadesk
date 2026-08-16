@@ -308,6 +308,22 @@ export function RsBoard({
   const excluded = entries.length - ranked.length;
   const facets = useMemo(() => facetsFor(ranked), [ranked]);
 
+  /*
+   * Whether the RSI column can be offered at all.
+   *
+   * Every ranked name has to have one — a column that is RSI for some rows and
+   * a dash for others invites reading the dash as a property of the stock
+   * rather than of our storage. The shards refresh one a night, so for the
+   * first few nights after this shipped part of the index carries an RSI and
+   * part does not; the column stays away until the whole ranking has one.
+   *
+   * Judged against the full ranking rather than the filtered view on purpose.
+   * Keyed off `visible`, the column would appear when someone filtered to MAG7
+   * and vanish when they went back to All, which reads as a glitch.
+   */
+  const rsiAvailable = ranked.length > 0 && ranked.every((r) => r.rsi !== null);
+  const rsiColumn = showRsi && rsiAvailable;
+
   const active = facets.find((f) => f.id === facetId) ?? facets[0];
 
   const visible = useMemo(() => {
@@ -494,12 +510,24 @@ export function RsBoard({
             </span>
             <button
               type="button"
-              aria-pressed={showRsi}
+              aria-pressed={rsiColumn}
+              disabled={!rsiAvailable}
               onClick={() => setShowRsi((v) => !v)}
-              className={`mt-1 ${amberChip(showRsi)}`}
+              className={`mt-1 ${amberChip(rsiColumn)} disabled:cursor-default disabled:opacity-50`}
             >
-              {showRsi ? 'Shown' : 'Hidden'}
+              {rsiAvailable ? (rsiColumn ? 'Shown' : 'Hidden') : 'Not yet'}
             </button>
+            {/*
+              A control that silently does nothing is worse than one that says
+              why. The wait is bounded — a shard a night — so the reason is
+              worth a line rather than leaving someone clicking a dead chip.
+            */}
+            {!rsiAvailable && (
+              <p className="mt-1 max-w-[14rem] text-2xs leading-relaxed text-term-faint">
+                Part of the index has not been through a nightly refresh since
+                this was added. Back once every ranked name has one.
+              </p>
+            )}
           </div>
         </div>
 
@@ -706,7 +734,7 @@ export function RsBoard({
                         <InfoTip for="rsVolume" />
                       </span>
                     </th>
-                    {showRsi && (
+                    {rsiColumn && (
                       <th scope="col" className={head}>
                         <span className="inline-flex items-center justify-end gap-1">
                           RSI
@@ -776,8 +804,14 @@ export function RsBoard({
                         <ConfirmBadge row={r} />
                       </td>
 
-                      {showRsi && (
+                      {rsiColumn && (
                         <td className={cell}>
+                          {/*
+                            The dash is unreachable while the column is gated on
+                            every row having a value, and kept anyway: `rsi` is
+                            nullable, and a later change to that gate should not
+                            be able to print "NaN" here.
+                          */}
                           {r.rsi === null ? (
                             <span className="text-term-faint">—</span>
                           ) : (

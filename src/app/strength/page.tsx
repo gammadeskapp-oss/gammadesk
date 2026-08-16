@@ -221,8 +221,11 @@ export default async function StrengthPage() {
               <Link href="/ticker" className="text-term-dim underline decoration-dotted">
                 /ticker
               </Link>
-              . Rows whose shard has not been refreshed since the column was added
-              show a dash until that night&rsquo;s run.
+              . The column is offered only once every ranked name has an RSI:
+              the price history is refreshed a quarter of the index a night, and
+              a column that were RSI for some rows and blank for others would
+              invite reading the blank as a fact about the stock rather than
+              about our storage.
             </p>
             <p className="mt-2">
               <span className="text-term-dim">The nine-signal score is a different question. </span>
