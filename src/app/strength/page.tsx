@@ -209,6 +209,22 @@ export default async function StrengthPage() {
               inside the noise of a quiet week.
             </p>
             <p className="mt-2">
+              <span className="text-term-dim">RSI is a different comparison. </span>
+              Off by default, switched on above. RSI measures a stock against{' '}
+              <span className="text-term-dim">its own</span> recent moves rather
+              than against the market: over 70 it is stretched high and may be due
+              a pullback, under 30 it is stretched low. That makes it orthogonal
+              to the RS score beside it — a genuine leader can sit above 70 for
+              months while the trend runs, so read it as a stretch reading rather
+              than a signal to act on. Computed over 14 of the stock&rsquo;s own
+              sessions, the same RSI(14) drawn on{' '}
+              <Link href="/ticker" className="text-term-dim underline decoration-dotted">
+                /ticker
+              </Link>
+              . Rows whose shard has not been refreshed since the column was added
+              show a dash until that night&rsquo;s run.
+            </p>
+            <p className="mt-2">
               <span className="text-term-dim">The nine-signal score is a different question. </span>
               RS asks &ldquo;is this beating the market?&rdquo;. The nine-signal
               score, from the same engine as{' '}

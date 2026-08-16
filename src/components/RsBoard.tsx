@@ -18,6 +18,8 @@ import type { Gics } from '@/lib/rs/universe';
 import {
   DEFAULT_MIN_DOLLAR_VOLUME,
   DEFAULT_WEIGHTS,
+  RSI_OVERBOUGHT,
+  RSI_OVERSOLD,
   type Confirmation,
   type DigestEntry,
   type RsRow,
@@ -88,6 +90,25 @@ function scoreTone(score: number): string {
   if (score >= 60) return 'text-term-text';
   if (score <= 20) return 'text-bear';
   if (score <= 40) return 'text-flip';
+  return 'text-term-dim';
+}
+
+/**
+ * Colour for the RSI column.
+ *
+ * Amber above 70 and green below 30 — a caution and an all-clear, not a
+ * direction. Worth being explicit about, because green normally means "up" on
+ * this page and here it marks a stock that has been falling hard enough to
+ * look stretched. Everything between is left dim: two-thirds of the index sits
+ * there on any given day, and colouring it would drown the two ends.
+ *
+ * Takes the *rounded* value, the one actually printed. Toning the raw number
+ * put a cell reading exactly 70 in the neutral grey because it was really
+ * 69.6, which reads as a bug rather than as a boundary.
+ */
+function rsiTone(rsi: number): string {
+  if (rsi >= RSI_OVERBOUGHT) return 'text-flip';
+  if (rsi <= RSI_OVERSOLD) return 'text-bull';
   return 'text-term-dim';
 }
 
@@ -229,6 +250,13 @@ export function RsBoard({
   // Shown by default, so the URL now carries the *hidden* case. `signal=1`
   // from an older shared link still reads as shown, which is what it meant.
   const [showSignal, setShowSignal] = useState(() => initial.get('signal') !== '0');
+  /*
+   * Hidden by default, unlike the nine-signal column. RSI answers a question
+   * nobody arrives at this page asking — the point of /strength is the market
+   * comparison — and a twelfth column earns its place only once someone goes
+   * looking for it.
+   */
+  const [showRsi, setShowRsi] = useState(() => initial.get('rsi') === '1');
   const [minVolume, setMinVolume] = useState(() => {
     const raw = initial.get('minVol');
     return raw === null ? DEFAULT_MIN_DOLLAR_VOLUME : Math.max(0, Number(raw) || 0);
@@ -307,6 +335,7 @@ export function RsBoard({
     };
     write('group', facetId === 'all' ? null : facetId);
     write('signal', showSignal ? null : '0');
+    write('rsi', showRsi ? '1' : null);
     write('conf', confirmedOnly ? '1' : null);
     write('minVol', minVolume === DEFAULT_MIN_DOLLAR_VOLUME ? null : String(minVolume));
     write('w1', percents.m1 === DEFAULT_PERCENTS.m1 ? null : String(percents.m1));
@@ -319,7 +348,7 @@ export function RsBoard({
       '',
       query ? `${window.location.pathname}?${query}` : window.location.pathname,
     );
-  }, [facetId, showSignal, confirmedOnly, minVolume, percents]);
+  }, [facetId, showSignal, showRsi, confirmedOnly, minVolume, percents]);
 
   const copy = async (text: string, which: 'list' | 'csv') => {
     try {
@@ -354,6 +383,19 @@ export function RsBoard({
     `border px-2.5 py-1.5 text-2xs font-bold uppercase tracking-[0.1em] transition-colors ${
       on
         ? 'border-pos/60 bg-pos/15 text-pos'
+        : 'border-term-line bg-term-panel/60 text-term-faint hover:border-term-edge hover:text-term-dim'
+    }`;
+
+  /*
+   * The RSI toggle wears amber rather than the green every other control uses,
+   * matching the colour the column itself is about. One control in a different
+   * accent is the cheapest way to signal that it adds a different kind of
+   * reading rather than filtering the same one.
+   */
+  const amberChip = (on: boolean) =>
+    `border px-2.5 py-1.5 text-2xs font-bold uppercase tracking-[0.1em] transition-colors ${
+      on
+        ? 'border-flip/60 bg-flip/15 text-flip'
         : 'border-term-line bg-term-panel/60 text-term-faint hover:border-term-edge hover:text-term-dim'
     }`;
 
@@ -442,6 +484,21 @@ export function RsBoard({
               className={`mt-1 ${chip(showSignal)}`}
             >
               {showSignal ? 'Shown' : 'Hidden'}
+            </button>
+          </div>
+
+          <div>
+            <span className="label-xs flex items-center gap-1.5">
+              RSI (14)
+              <InfoTip for="rsRsi" />
+            </span>
+            <button
+              type="button"
+              aria-pressed={showRsi}
+              onClick={() => setShowRsi((v) => !v)}
+              className={`mt-1 ${amberChip(showRsi)}`}
+            >
+              {showRsi ? 'Shown' : 'Hidden'}
             </button>
           </div>
         </div>
@@ -649,6 +706,14 @@ export function RsBoard({
                         <InfoTip for="rsVolume" />
                       </span>
                     </th>
+                    {showRsi && (
+                      <th scope="col" className={head}>
+                        <span className="inline-flex items-center justify-end gap-1">
+                          RSI
+                          <InfoTip for="rsRsi" />
+                        </span>
+                      </th>
+                    )}
                     {showSignal && (
                       <th scope="col" className={head}>
                         <span className="inline-flex items-center justify-end gap-1">
@@ -710,6 +775,18 @@ export function RsBoard({
                       <td className={cell}>
                         <ConfirmBadge row={r} />
                       </td>
+
+                      {showRsi && (
+                        <td className={cell}>
+                          {r.rsi === null ? (
+                            <span className="text-term-faint">—</span>
+                          ) : (
+                            <span className={rsiTone(Math.round(r.rsi))}>
+                              {Math.round(r.rsi)}
+                            </span>
+                          )}
+                        </td>
+                      )}
 
                       {showSignal && (
                         <td className={`${cell} text-term-dim`}>

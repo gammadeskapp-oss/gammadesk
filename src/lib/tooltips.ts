@@ -384,6 +384,14 @@ const ENTRIES = {
       'Average daily dollar turnover over 20 sessions. Applied before ranking, so a thin name cannot take a percentile place from a tradeable one.',
   },
 
+  rsRsi: {
+    label: 'RSI (14)',
+    plain:
+      'RSI measures if a stock is overbought or oversold vs its OWN recent moves (0-100). Over 70 = stretched high, maybe due a pullback. Under 30 = stretched low. This is different from RS, which compares the stock to the whole market.',
+    detail:
+      'Wilder’s Relative Strength Index over 14 of the stock’s own trading sessions — the same RSI(14) the /ticker chart draws. A leader can sit above 70 for months in a strong trend, so it is a stretch reading rather than a sell signal.',
+  },
+
   rsSignalScore: {
     label: 'Nine-signal score',
     plain:
@@ -422,6 +430,7 @@ export const TOOLTIP_ORDER: TooltipKey[] = [
   'rsTrend',
   'rsWindows',
   'rsVolume',
+  'rsRsi',
   'rsLiquidity',
   'rsLeaders',
   'rsLaggards',
