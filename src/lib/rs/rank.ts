@@ -284,6 +284,11 @@ export function rankUniverse(
       avgDollarVolume: entry.avgDollarVolume,
       volumeRatio: entry.volumeRatio,
       confirmation: confirmationOf(entry.volumeRatio),
+      // `?? null` rather than a bare read: digests written before the column
+      // existed have no field at all, and `undefined` would cross to the
+      // client as a missing key rather than an honest dash.
+      rsi:
+        entry.rsi14 === null || entry.rsi14 === undefined ? null : round1(entry.rsi14),
       signal: signalOf(entry.symbol) ?? null,
     });
   });
@@ -336,7 +341,7 @@ export function toCsv(rows: RsRow[]): string {
   const header =
     'rank,ticker,rs_score,rs_week_ago,rs_change,trend,pct_1mo,pct_3mo,pct_6mo,' +
     'ret_1mo_pct,ret_3mo_pct,ret_6mo_pct,close,change_pct,avg_dollar_volume,' +
-    'volume_ratio,confirmation,signal_score,sector,groups,as_of';
+    'volume_ratio,confirmation,rsi_14,signal_score,sector,groups,as_of';
 
   const rowsOut = rows.map((r) =>
     [
@@ -357,6 +362,7 @@ export function toCsv(rows: RsRow[]): string {
       Math.round(r.avgDollarVolume),
       r.volumeRatio === null ? '' : r.volumeRatio.toFixed(3),
       r.confirmation ?? '',
+      r.rsi === null ? '' : r.rsi.toFixed(1),
       r.signal?.score ?? '',
       r.sectorName ? `"${r.sectorName}"` : '',
       `"${r.groups.join(' ')}"`,

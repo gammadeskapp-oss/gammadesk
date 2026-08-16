@@ -69,6 +69,19 @@ export const TREND_LOOKBACK = 5;
 export const LIQUIDITY_WINDOW = 20;
 
 /**
+ * Lookback for the RSI column, in sessions.
+ *
+ * Fourteen because that is what everyone else means by "RSI" — the /ticker
+ * chart draws RSI(14), and a board that quietly used a different period would
+ * have the two pages disagreeing about the same stock on the same day.
+ */
+export const RSI_PERIOD = 14;
+
+/** Conventional overbought / oversold marks. */
+export const RSI_OVERBOUGHT = 70;
+export const RSI_OVERSOLD = 30;
+
+/**
  * Volume confirmation windows.
  *
  * The recent leg is the same 21 sessions as the 1-month performance window, so
@@ -112,6 +125,16 @@ export interface DigestEntry {
    * before it. Null when there is not enough history for both legs.
    */
   volumeRatio: number | null;
+  /**
+   * 14-day RSI on the latest bar, 0-100.
+   *
+   * Optional rather than required, and deliberately not guarded by a schema
+   * bump: bumping `RS_SCHEMA` rejects the stored *bar* documents too, which
+   * would throw away years of price history and rebuild it a shard a night for
+   * a column. Digests are recomputed on every refresh, so an older document
+   * simply has no RSI and the column shows a dash until that shard next runs.
+   */
+  rsi14?: number | null;
 }
 
 export interface DigestShard {
@@ -185,6 +208,15 @@ export interface RsRow {
    * defaulting to "unconfirmed" — those are different statements.
    */
   confirmation: Confirmation | null;
+
+  /**
+   * 14-day RSI, 0-100. Null where the shard predates the column or the history
+   * is too short.
+   *
+   * A different axis to the score beside it: RSI measures the stock against its
+   * own recent moves, RS measures it against the rest of the index.
+   */
+  rsi: number | null;
 
   /** The nine-signal score, where one is available. A different question. */
   signal: { score: number; bullish: number; total: number } | null;

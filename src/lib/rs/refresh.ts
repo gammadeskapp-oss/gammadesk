@@ -2,11 +2,13 @@ import 'server-only';
 
 import { createJsonStore } from '../jsonStore';
 import { runScan } from '../scanUniverse';
+import { rsi } from '../ticker/indicators';
 import { addDays, marketToday } from '../time';
 import { fetchBars, type DailyBar } from './history';
 import { getMembership } from './membership';
 import {
   LIQUIDITY_WINDOW,
+  RSI_PERIOD,
   RS_SCHEMA,
   TREND_LOOKBACK,
   VOLUME_BASELINE,
@@ -322,6 +324,15 @@ function digestFor(
     return seen >= (to - from) * 0.6 ? sum / seen : null;
   };
 
+  /*
+   * RSI over the symbol's own sessions, the same series the returns are
+   * measured on — so a halted stock's RSI covers 14 days it actually traded
+   * rather than 14 dates the rest of the index did. The last value is the only
+   * one worth keeping; the rest of the curve belongs to the /ticker chart.
+   */
+  const rsiSeries = rsi(series, RSI_PERIOD);
+  const rsiLast = rsiSeries[last];
+
   const recentFrom = n - VOLUME_RECENT;
   const recent = meanVolume(recentFrom, n);
   const baseline = meanVolume(recentFrom - VOLUME_BASELINE, recentFrom);
@@ -348,6 +359,10 @@ function digestFor(
     avgDollarVolume,
     volumeRatio:
       recent !== null && baseline !== null && baseline > 0 ? recent / baseline : null,
+    rsi14:
+      rsiLast !== null && rsiLast !== undefined && Number.isFinite(rsiLast)
+        ? rsiLast
+        : null,
   };
 }
 
