@@ -39,7 +39,7 @@ export function DataQuality({ meta, contracts }: DataQualityProps) {
         <Stat label="div" value={`q ${(meta.dividendYield * 100).toFixed(1)}%`} />
       </div>
 
-      {modelledPct >= 25 && meta.source !== 'sample' && (
+      {modelledPct >= 25 && (
         <p className="mt-2 border-t border-term-line pt-2 text-flip/80">
           {modelledPct}% of strikes had no usable quoted implied volatility and fall
           back to a modelled volatility surface. Treat the exposure magnitudes as

@@ -5,7 +5,6 @@ import type { ChainSnapshot } from './chainSource';
 import { ChainError } from './chainSource';
 import { config } from './config';
 import { fetchCboeSnapshot } from './cboe';
-import { buildDemoChain } from './demo';
 import { buildPositioning } from './exposure';
 import { fetchPolygonSnapshot } from './polygon';
 import { formatAsOf } from './time';
@@ -14,7 +13,6 @@ import type { DataSource, PositioningData } from './types';
 const SOURCE_LABELS: Record<DataSource, string> = {
   cboe: 'Cboe (delayed)',
   polygon: 'Polygon.io',
-  sample: 'generated sample',
 };
 
 /** What one refresh produces, before it is narrowed to a display window. */
@@ -40,53 +38,18 @@ function viewCacheKey(expirationCount: number): string {
  * costs nothing upstream.
  */
 async function loadSnapshot(): Promise<RawSnapshot> {
-  const mode = config.demoMode;
-
-  const sample = (notes: string[]): RawSnapshot => {
-    const { spot, quoteDate, contracts } = buildDemoChain(
-      config.strikesEachSide,
-      config.maxExpirations,
-    );
-    return {
-      snapshot: { spot, quoteDate, contracts, requests: 0, notes: [] },
-      source: 'sample',
-      notes: [
-        'Showing generated sample data, not market data. Do not trade off these numbers.',
-        ...notes,
-      ],
-    };
-  };
-
-  if (mode === 'always') return sample([]);
-
   if (config.dataSource === 'polygon' && !config.apiKey) {
-    if (mode === 'never') {
-      throw new ChainError(
-        'POLYGON_API_KEY is not set.',
-        0,
-        'Add it to .env.local locally, and to Project Settings -> Environment Variables on Vercel.',
-      );
-    }
-    return sample(['POLYGON_API_KEY is not set, so no live data could be fetched.']);
+    throw new ChainError(
+      'POLYGON_API_KEY is not set.',
+      0,
+      'Add it to .env.local locally, and to Project Settings -> Environment Variables on Vercel.',
+    );
   }
 
-  try {
-    const source = config.dataSource;
-    const snapshot =
-      source === 'polygon' ? await fetchPolygonSnapshot() : await fetchCboeSnapshot();
-    return { snapshot, source, notes: snapshot.notes };
-  } catch (error) {
-    if (mode === 'never') throw error;
-
-    const reason =
-      error instanceof ChainError
-        ? [error.message, error.hint].filter(Boolean).join(' ')
-        : error instanceof Error
-          ? error.message
-          : 'Unknown error.';
-
-    return sample([`Live data unavailable — ${reason}`]);
-  }
+  const source = config.dataSource;
+  const snapshot =
+    source === 'polygon' ? await fetchPolygonSnapshot() : await fetchCboeSnapshot();
+  return { snapshot, source, notes: snapshot.notes };
 }
 
 function cachedSnapshot(): Promise<RawSnapshot> {

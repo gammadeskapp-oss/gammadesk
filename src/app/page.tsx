@@ -32,7 +32,7 @@ export default async function HomePage({ searchParams }: PageProps) {
   const wanted = requested ? normaliseSymbol(requested) : config.symbol;
 
   let data: PositioningData | null = null;
-  let error: { message: string; hint?: string } | null = null;
+  let error: { message: string; hint?: string; upstream?: boolean } | null = null;
 
   if (wanted === null) {
     error = {
@@ -43,10 +43,21 @@ export default async function HomePage({ searchParams }: PageProps) {
     try {
       data = await getPositioningView(wanted);
     } catch (e) {
-      error =
-        e instanceof ChainError
-          ? { message: e.message, hint: e.hint }
-          : { message: `Could not load the ${wanted} option chain.` };
+      if (e instanceof ChainError) {
+        // Status 0 means the request never completed, and 5xx means the CDN
+        // itself is unwell. Neither says anything about the ticker, so the
+        // page must not imply the symbol was the problem.
+        const upstream = e.status === 0 || e.status >= 500;
+        error = {
+          message: upstream
+            ? "Live data unavailable — couldn't reach the quote service."
+            : e.message,
+          hint: upstream ? undefined : e.hint,
+          upstream,
+        };
+      } else {
+        error = { message: `Could not load the ${wanted} option chain.` };
+      }
     }
   }
 
@@ -70,10 +81,9 @@ export default async function HomePage({ searchParams }: PageProps) {
                 <p className="mt-1.5 text-2xs text-term-dim">{error.hint}</p>
               )}
               <p className="mt-3 text-2xs leading-relaxed text-term-faint">
-                Not every listed company has an options chain worth reading, and
-                thinly traded ones can return contracts with no open interest at
-                all. Try a more heavily traded name, or go back to{' '}
-                {config.symbol}.
+                {error.upstream
+                  ? `No positioning is shown because none could be measured. Nothing on this page is estimated or filled in when the feed is down — the numbers are either real or absent. Try again in a few minutes.`
+                  : `Not every listed company has an options chain worth reading, and thinly traded ones can return contracts with no open interest at all. Try a more heavily traded name, or go back to ${config.symbol}.`}
               </p>
             </div>
           )}

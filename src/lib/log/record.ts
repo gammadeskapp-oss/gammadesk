@@ -42,15 +42,9 @@ export async function recordSnapshot(
     return { status: 'already-recorded', date };
   }
 
+  // Throws when the upstream is unreachable, which is the intended outcome:
+  // a missing entry is recoverable, a fabricated one is not.
   const data = await getPositioning();
-
-  if (data.meta.source === 'sample') {
-    return {
-      status: 'skipped',
-      date,
-      reason: 'Upstream data unavailable; refusing to log sample data.',
-    };
-  }
 
   // Guard against a market holiday, when the feed still responds but carries
   // the previous session.

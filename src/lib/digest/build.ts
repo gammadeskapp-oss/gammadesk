@@ -122,9 +122,6 @@ export async function buildDigest(): Promise<Digest> {
   if (ranked.length === 0) {
     notes.push('No group snapshot stored yet, so leaders and laggards are omitted.');
   }
-  if (positioning.meta.source === 'sample') {
-    notes.push('Positioning is running on sample data, not live market data.');
-  }
 
   return {
     date: now.date,

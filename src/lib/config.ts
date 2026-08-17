@@ -11,20 +11,12 @@ function num(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export type DemoMode = 'auto' | 'always' | 'never';
 export type SourceChoice = 'cboe' | 'polygon';
 
 function sourceChoice(): SourceChoice {
   return (process.env.GAMMADESK_DATA_SOURCE ?? 'cboe').trim().toLowerCase() === 'polygon'
     ? 'polygon'
     : 'cboe';
-}
-
-function demoMode(): DemoMode {
-  const raw = (process.env.GAMMADESK_DEMO ?? 'auto').trim().toLowerCase();
-  if (raw === '1' || raw === 'true' || raw === 'always') return 'always';
-  if (raw === '0' || raw === 'false' || raw === 'never') return 'never';
-  return 'auto';
 }
 
 export const config = {
@@ -109,9 +101,6 @@ export const config = {
   },
   get dividendYield(): number {
     return num(process.env.GAMMADESK_DIVIDEND_YIELD, 0.012);
-  },
-  get demoMode(): DemoMode {
-    return demoMode();
   },
 } as const;
 
