@@ -115,13 +115,33 @@ async function fetchSeries(id: string): Promise<Observation[]> {
   return out;
 }
 
-/** Most recent observation on or before `date` — the forward fill. */
-function asOf(series: Observation[], date: string): Observation | null {
+const DAY_MS = 86_400_000;
+
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(to) - Date.parse(from)) / DAY_MS);
+}
+
+/**
+ * Most recent observation on or before `date` — the forward fill.
+ *
+ * Bounded by `maxFillDays`. The fill is there for public holidays, where a
+ * Wednesday has no repo print and the Tuesday value is the honest stand-in.
+ * Unbounded, it silently becomes something else: RRPONTSYD has gaps of months
+ * to years before about 2014, and carrying a 2004 repo figure into a 2007
+ * balance sheet would render a fabricated number in the same type as a real
+ * one. Past the bound the week is dropped instead.
+ */
+function asOf(
+  series: Observation[],
+  date: string,
+  maxFillDays: number,
+): Observation | null {
   let found: Observation | null = null;
   for (const o of series) {
     if (o.date > date) break;
     found = o;
   }
+  if (found && daysBetween(found.date, date) > maxFillDays) return null;
   return found;
 }
 
@@ -146,6 +166,7 @@ export function computeWeeks(
   rrp: Observation[],
   thresholdPct: number,
   historyWeeks: number,
+  maxFillDays: number,
 ): NetLiquidityWeek[] {
   /*
    * WALCL's Wednesdays drive the calendar. A week is only computed when all
@@ -156,8 +177,8 @@ export function computeWeeks(
   const wanted = historyWeeks + 1;
 
   for (const balance of walcl.slice(-wanted)) {
-    const tgaAt = asOf(tga, balance.date);
-    const rrpAt = asOf(rrp, balance.date);
+    const tgaAt = asOf(tga, balance.date, maxFillDays);
+    const rrpAt = asOf(rrp, balance.date, maxFillDays);
     if (!tgaAt || !rrpAt) continue;
 
     const net =
@@ -203,6 +224,7 @@ async function build(): Promise<NetLiquidityResult> {
     rrp,
     threshold,
     config.netLiquidity.historyWeeks,
+    config.netLiquidity.maxFillDays,
   );
 
   if (history.length === 0) {
