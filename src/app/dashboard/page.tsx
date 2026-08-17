@@ -1,7 +1,12 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
+import {
+  NetLiquidityTile,
+  NetLiquidityUnavailable,
+} from '@/components/NetLiquidityTile';
 import { config } from '@/lib/config';
+import { getNetLiquidity } from '@/lib/netLiquidity';
 import { getForecast } from '@/lib/forecast';
 import { riskLabel } from '@/lib/forecast/risk';
 import { peekStoredFlow } from '@/lib/flow';
@@ -122,6 +127,12 @@ export default async function DashboardPage() {
     peekStoredFlow().catch(() => null),
   ]);
 
+  /*
+   * Macro regime context, fetched on its own so a FRED outage cannot affect
+   * anything else on the page. It feeds no score — see lib/netLiquidity.
+   */
+  const netLiquidity = await getNetLiquidity().catch(() => null);
+
   const ranked = groups ? rankTickers(groups) : [];
   const leaders = ranked.slice(0, 5);
   const laggards = ranked.slice(-5).reverse();
@@ -160,6 +171,18 @@ export default async function DashboardPage() {
               : `${config.symbol} · live data unavailable`}
           </p>
         </div>
+
+        {/*
+          Context strip. Regime background that the cards below are read
+          against, not another card in the grid — it is a macro series on a
+          different clock entirely, and putting it in the grid would file it
+          alongside the per-ticker readings it must never influence.
+        */}
+        {netLiquidity ? (
+          <NetLiquidityTile data={netLiquidity} />
+        ) : (
+          <NetLiquidityUnavailable />
+        )}
 
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {/* ---- forecast odds ---- */}
@@ -293,8 +316,14 @@ export default async function DashboardPage() {
             )}
           </Card>
 
-          {/* ---- liquidity ---- */}
-          <Card href="/flow" title={`${config.symbol} liquidity`} tone="neutral">
+          {/*
+            ---- chain depth ----
+            Was titled "liquidity", which now collides with two other things
+            on the site: the US net liquidity tile above and the tradeability
+            panel on /decision. It is neither — it is how much open interest
+            and volume this one chain carries.
+          */}
+          <Card href="/flow" title={`${config.symbol} chain depth`} tone="neutral">
             {summary ? (
               <>
                 <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">

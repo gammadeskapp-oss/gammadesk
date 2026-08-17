@@ -5,6 +5,7 @@ import { cached } from '../cache';
 import { getPositioningForSymbol } from '../positioning';
 import { nearestStrongWall } from '../simple/walls';
 import { normaliseSymbol } from '../ticker/bars';
+import { getTradeability } from '../ticker/liquidity';
 import { buildConviction } from './conviction';
 import type { DecisionContext, DecisionResult, Grade, Verdict, Wall } from './types';
 
@@ -191,9 +192,21 @@ async function build(symbol: string): Promise<DecisionResult> {
 
   const notes: string[] = [];
   let bars: Awaited<ReturnType<typeof getBars>>['bars'] = [];
-  try {
-    bars = (await getBars(symbol, CONVICTION_TF)).bars;
-  } catch {
+
+  /*
+   * Intraday bars and the tradeability assessment are independent of each
+   * other and of everything above, so they go out together. Tradeability
+   * resolves to null on failure rather than throwing — it is a gate on what
+   * the page may show, not a reason to lose the page.
+   */
+  const [intraday, liquidity] = await Promise.all([
+    getBars(symbol, CONVICTION_TF).catch(() => null),
+    getTradeability(symbol),
+  ]);
+
+  if (intraday) {
+    bars = intraday.bars;
+  } else {
     notes.push('Intraday bars were unavailable, so the conviction checks are blank.');
   }
 
@@ -206,6 +219,7 @@ async function build(symbol: string): Promise<DecisionResult> {
     conviction,
     verdict,
     hasOptions: walls.above.length > 0 || walls.below.length > 0,
+    liquidity,
     notes: [...notes, ...positioning.meta.notes],
   };
 }

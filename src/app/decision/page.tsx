@@ -10,8 +10,9 @@ import { PageBar } from '@/components/PageBar';
 import { ReadMode } from '@/components/ReadMode';
 import { SimpleRead } from '@/components/SimpleRead';
 import { config } from '@/lib/config';
+import { TradeabilityPanel } from '@/components/TradeabilityPanel';
 import { DecisionError, getDecision, type DecisionResult } from '@/lib/decision';
-import type { Check, Grade, Wall } from '@/lib/decision/types';
+import { exposureIsReliable, type Check, type Grade, type Wall } from '@/lib/decision/types';
 import { getForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
@@ -135,7 +136,16 @@ function Tile({
   );
 }
 
-function WallRow({ wall, spot }: { wall: Wall; spot: number }) {
+function WallRow({
+  wall,
+  spot,
+  showExposure,
+}: {
+  wall: Wall;
+  spot: number;
+  /** False on thin chains — strength and the dollar figure are both GEX. */
+  showExposure: boolean;
+}) {
   const pct = Math.round(wall.strength * 100);
   return (
     <li className="flex items-center gap-2.5 px-3 py-2 text-xs tabular-nums">
@@ -151,24 +161,32 @@ function WallRow({ wall, spot }: { wall: Wall; spot: number }) {
         {wall.distancePct.toFixed(2)}%
       </span>
 
-      {/* Strength as a bar, relative to the biggest wall on the same side. */}
-      <span className="h-1.5 min-w-0 flex-1 bg-term-line" aria-hidden>
-        <span
-          className={`block h-full ${wall.gex >= 0 ? 'bg-pos' : 'bg-neg'}`}
-          style={{ width: `${Math.max(3, pct)}%` }}
-        />
-      </span>
+      {showExposure ? (
+        <>
+          {/* Strength as a bar, relative to the biggest wall on the same side. */}
+          <span className="h-1.5 min-w-0 flex-1 bg-term-line" aria-hidden>
+            <span
+              className={`block h-full ${wall.gex >= 0 ? 'bg-pos' : 'bg-neg'}`}
+              style={{ width: `${Math.max(3, pct)}%` }}
+            />
+          </span>
 
-      <span className="w-9 shrink-0 text-right text-2xs text-term-dim">{pct}%</span>
-      <span
-        className={`w-20 shrink-0 text-right ${wall.gex >= 0 ? 'text-pos' : 'text-neg'}`}
-      >
-        {formatUsd(wall.gex)}
-      </span>
-      <span className="sr-only">
-        {wall.strike} is {pct} percent as strong as the largest wall on this side,
-        {spot > wall.strike ? ' below' : ' above'} the current price.
-      </span>
+          <span className="w-9 shrink-0 text-right text-2xs text-term-dim">{pct}%</span>
+          <span
+            className={`w-20 shrink-0 text-right ${wall.gex >= 0 ? 'text-pos' : 'text-neg'}`}
+          >
+            {formatUsd(wall.gex)}
+          </span>
+          <span className="sr-only">
+            {wall.strike} is {pct} percent as strong as the largest wall on this side,
+            {spot > wall.strike ? ' below' : ' above'} the current price.
+          </span>
+        </>
+      ) : (
+        <span className="min-w-0 flex-1 text-right text-2xs text-term-faint">
+          exposure suppressed
+        </span>
+      )}
     </li>
   );
 }
@@ -180,12 +198,14 @@ function WallList({
   tone,
   tip,
   spot,
+  showExposure,
 }: {
   title: string;
   list: Wall[];
   tone: 'bull' | 'bear';
   tip: TooltipKey;
   spot: number;
+  showExposure: boolean;
 }) {
   return (
     <div className="border border-term-line">
@@ -198,12 +218,16 @@ function WallList({
         </span>
         <span className="flex items-center gap-2 text-2xs text-term-faint">
           nearest first
-          <span className="flex items-center gap-1">
-            strength <InfoTip for="wallStrength" />
-          </span>
-          <span className="flex items-center gap-1">
-            $ <InfoTip for="wallDollar" />
-          </span>
+          {showExposure && (
+            <>
+              <span className="flex items-center gap-1">
+                strength <InfoTip for="wallStrength" />
+              </span>
+              <span className="flex items-center gap-1">
+                $ <InfoTip for="wallDollar" />
+              </span>
+            </>
+          )}
         </span>
       </div>
       {list.length === 0 ? (
@@ -213,7 +237,12 @@ function WallList({
       ) : (
         <ul className="divide-y divide-term-line/60">
           {list.map((w) => (
-            <WallRow key={w.strike} wall={w} spot={spot} />
+            <WallRow
+              key={w.strike}
+              wall={w}
+              spot={spot}
+              showExposure={showExposure}
+            />
           ))}
         </ul>
       )}
@@ -222,7 +251,15 @@ function WallList({
 }
 
 function Decision({ data }: { data: DecisionResult }) {
-  const { context: c, walls, conviction, verdict } = data;
+  const { context: c, walls, conviction, verdict, liquidity } = data;
+
+  /*
+   * Every dollar exposure figure is open interest times a modelled greek, so
+   * on a chain too thin to trust they are suppressed rather than printed —
+   * the same rule the positioning page applies, read from the same helper so
+   * the two pages cannot disagree.
+   */
+  const showExposure = exposureIsReliable(liquidity);
 
   return (
     <>
@@ -239,11 +276,19 @@ function Decision({ data }: { data: DecisionResult }) {
         step={1}
         title="Context"
         tip={
-          <span className="flex items-baseline gap-2 text-2xs text-term-faint">
+          /*
+            The price carries its own stamp. Every other figure on the page
+            says how old it is; the one number people actually read was the
+            exception, which quietly implied it was live. It is not.
+          */
+          <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-2xs text-term-faint">
             <span className="text-sm font-bold tabular-nums text-term-text">
               {formatPrice(c.spot)}
             </span>
             <span>{c.symbol} spot · from the positioning book</span>
+            <span className="text-term-dim">
+              as of {c.asOfLabel} · delayed 15 min
+            </span>
           </span>
         }
       >
@@ -266,15 +311,39 @@ function Decision({ data }: { data: DecisionResult }) {
             label="Magnet above"
             tip="magnetAbove"
             value={c.magnetAbove ? formatStrike(c.magnetAbove.strike) : '—'}
-            sub={c.magnetAbove ? formatUsd(c.magnetAbove.gex) : 'none nearby'}
-            tone={c.magnetAbove ? (c.magnetAbove.gex >= 0 ? 'pos' : 'neg') : 'neutral'}
+            sub={
+              !c.magnetAbove
+                ? 'none nearby'
+                : showExposure
+                  ? formatUsd(c.magnetAbove.gex)
+                  : 'exposure suppressed'
+            }
+            tone={
+              c.magnetAbove && showExposure
+                ? c.magnetAbove.gex >= 0
+                  ? 'pos'
+                  : 'neg'
+                : 'neutral'
+            }
           />
           <Tile
             label="Magnet below"
             tip="magnetBelow"
             value={c.magnetBelow ? formatStrike(c.magnetBelow.strike) : '—'}
-            sub={c.magnetBelow ? formatUsd(c.magnetBelow.gex) : 'none nearby'}
-            tone={c.magnetBelow ? (c.magnetBelow.gex >= 0 ? 'pos' : 'neg') : 'neutral'}
+            sub={
+              !c.magnetBelow
+                ? 'none nearby'
+                : showExposure
+                  ? formatUsd(c.magnetBelow.gex)
+                  : 'exposure suppressed'
+            }
+            tone={
+              c.magnetBelow && showExposure
+                ? c.magnetBelow.gex >= 0
+                  ? 'pos'
+                  : 'neg'
+                : 'neutral'
+            }
           />
           {/*
             Its own tile now rather than a subtitle under the flip level. Which
@@ -314,6 +383,7 @@ function Decision({ data }: { data: DecisionResult }) {
               tone="bull"
               tip="wallsAbove"
               spot={c.spot}
+              showExposure={showExposure}
             />
             <WallList
               title="Walls below"
@@ -321,75 +391,122 @@ function Decision({ data }: { data: DecisionResult }) {
               tone="bear"
               tip="wallsBelow"
               spot={c.spot}
+              showExposure={showExposure}
             />
-            <p className="flex flex-wrap items-center gap-1.5 px-1 pb-1 text-2xs leading-relaxed text-term-faint">
-              <span>
-                Strength is relative to the largest wall on the same side, not
-                across both — a 100% bar below does not mean the floor is
-                stronger than the ceiling. Amber bars are positive gamma
-                (dealers lean against moves), blue is negative.
-              </span>
-              <InfoTip for="wallColour" />
-            </p>
+            {showExposure ? (
+              <p className="flex flex-wrap items-center gap-1.5 px-1 pb-1 text-2xs leading-relaxed text-term-faint">
+                <span>
+                  Strength is relative to the largest wall on the same side, not
+                  across both — a 100% bar below does not mean the floor is
+                  stronger than the ceiling. Amber bars are positive gamma
+                  (dealers lean against moves), blue is negative.
+                </span>
+                <InfoTip for="wallColour" />
+              </p>
+            ) : (
+              <p className="px-1 pb-1 text-2xs leading-relaxed text-flip">
+                Not enough options liquidity to compute exposure reliably. The
+                strikes are still listed, but their gamma figures and strength
+                bars are suppressed — see Tradeability below.
+              </p>
+            )}
           </div>
         </Section>
 
-        <Section
-          step={3}
-          title="Conviction check"
-          tip={
-            conviction.level !== null ? (
-              <span className="text-2xs text-term-faint">
-                measured against {formatStrike(conviction.level)}, the nearest level{' '}
-                {conviction.side}
-              </span>
-            ) : undefined
-          }
-        >
-          <div className="panel space-y-2 p-2">
-            {conviction.unavailable ? (
-              <div className="border border-term-line px-4 py-6 text-center text-xs text-term-dim">
-                {conviction.note}
-              </div>
-            ) : (
-              conviction.checks.map((check) => (
-                <div
-                  key={check.id}
-                  className={`border border-term-line border-l-2 ${GRADE_EDGE[check.grade]} px-3 py-2.5`}
-                >
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="flex items-center gap-1.5">
-                      <span className="label-xs">{check.label}</span>
-                      <InfoTip for={CHECK_TIP[check.id]} />
-                    </span>
-                    <span className="flex items-baseline gap-2">
-                      <span
-                        className={`text-lg font-bold tabular-nums ${GRADE_TEXT[check.grade]}`}
-                      >
-                        {check.value}
-                      </span>
-                      <span aria-hidden className={`text-sm ${GRADE_TEXT[check.grade]}`}>
-                        {GRADE_MARK[check.grade]}
-                      </span>
-                    </span>
-                  </div>
-                  <p className="mt-1 text-2xs leading-relaxed text-term-faint">
-                    {check.detail}
-                  </p>
-                  <span className="sr-only">Rated {check.grade}.</span>
+        {/*
+          Right column: the conviction checks, and under them the tradeability
+          panel that says whether the numbers in the left column are worth
+          reading at all. It sits here rather than at the top of the page
+          because it is a caveat on the levels, not an introduction to them —
+          and the column had empty space below the third check.
+        */}
+        <div className="space-y-4">
+          <Section
+            step={3}
+            title="Conviction check"
+            tip={
+              conviction.level !== null ? (
+                <span className="text-2xs text-term-faint">
+                  measured against {formatStrike(conviction.level)}, the nearest level{' '}
+                  {conviction.side}
+                </span>
+              ) : undefined
+            }
+          >
+            <div className="panel space-y-2 p-2">
+              {conviction.unavailable ? (
+                <div className="border border-term-line px-4 py-6 text-center text-xs text-term-dim">
+                  {conviction.note}
                 </div>
-              ))
+              ) : (
+                conviction.checks.map((check) => (
+                  <div
+                    key={check.id}
+                    className={`border border-term-line border-l-2 ${GRADE_EDGE[check.grade]} px-3 py-2.5`}
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="flex items-center gap-1.5">
+                        <span className="label-xs">{check.label}</span>
+                        <InfoTip for={CHECK_TIP[check.id]} />
+                      </span>
+                      <span className="flex items-baseline gap-2">
+                        <span
+                          className={`text-lg font-bold tabular-nums ${GRADE_TEXT[check.grade]}`}
+                        >
+                          {check.value}
+                        </span>
+                        <span aria-hidden className={`text-sm ${GRADE_TEXT[check.grade]}`}>
+                          {GRADE_MARK[check.grade]}
+                        </span>
+                      </span>
+                    </div>
+                    <p className="mt-1 text-2xs leading-relaxed text-term-faint">
+                      {check.detail}
+                    </p>
+                    <span className="sr-only">Rated {check.grade}.</span>
+                  </div>
+                ))
+              )}
+              <p className="px-1 pb-1 text-2xs leading-relaxed text-term-faint">
+                These thresholds are conventions, not measured edges. A first
+                touch is widely treated as more reliable than a third, and a move
+                that covers most of the day&rsquo;s range in minutes is widely
+                treated as stretched. Both are beliefs about markets; the page
+                applies them consistently and shows its working so you can
+                disagree with it.
+              </p>
+            </div>
+          </Section>
+
+          {/*
+            4 — TRADEABILITY.
+
+            "Tradeability", never "liquidity": the dashboard carries a US net
+            liquidity tile, which measures money in the financial system and
+            shares nothing with this but the word.
+          */}
+          <Section
+            step={4}
+            title="Tradeability"
+            tip={
+              <span className="text-2xs text-term-faint">
+                can this name be dealt in — shares and options rated separately
+              </span>
+            }
+          >
+            {liquidity ? (
+              <TradeabilityPanel liquidity={liquidity} />
+            ) : (
+              <div className="panel px-4 py-6 text-center text-xs text-term-dim">
+                <p className="text-term-text">Tradeability unavailable.</p>
+                <p className="mx-auto mt-2 max-w-md leading-relaxed">
+                  The daily bars and the listed chain behind this rating could not
+                  be read. No tier is shown rather than a guessed one.
+                </p>
+              </div>
             )}
-            <p className="px-1 pb-1 text-2xs leading-relaxed text-term-faint">
-              These thresholds are conventions, not measured edges. A first
-              touch is widely treated as more reliable than a third, and a move
-              that covers most of the day&rsquo;s range in minutes is widely
-              treated as stretched. Both are beliefs about markets; the page
-              applies them consistently and shows its working so you can
-              disagree with it.
-            </p>
-          </div>
-        </Section>
+          </Section>
+        </div>
       </div>
 
       {/* The one line that reads the two boxes above together. */}
@@ -514,7 +631,7 @@ export default async function DecisionPage({ searchParams }: PageProps) {
         )}
 
         {/*
-          4 — CHART / FORECAST.
+          5 — CHART / FORECAST.
 
           Outside the read-mode toggle and outside the chain failure path on
           purpose. Its bars come from a different source entirely, and losing
@@ -522,15 +639,15 @@ export default async function DecisionPage({ searchParams }: PageProps) {
           the wrong trade.
         */}
         {symbol && (
-          <Section step={4} title="Chart / Forecast">
+          <Section step={5} title="Chart / Forecast">
             <ChartForecastSwitch symbol={symbol} forecast={forecastPanel} />
           </Section>
         )}
 
-        {/* 5 — the working behind the levels above. */}
+        {/* 6 — the working behind the levels above. */}
         {positioning && (
           <Section
-            step={5}
+            step={6}
             title="Exposure tables"
             tip={
               <span className="text-2xs text-term-faint">
@@ -538,7 +655,28 @@ export default async function DecisionPage({ searchParams }: PageProps) {
               </span>
             }
           >
-            <ExposureTables data={positioning} />
+            {exposureIsReliable(data?.liquidity ?? null) ? (
+              <ExposureTables data={positioning} />
+            ) : (
+              /*
+                The whole table is GEX, VEX and CEX. On a chain under the open
+                interest floor there is nothing here to partially render — it
+                is suppressed outright rather than shown with a caveat nobody
+                reads.
+              */
+              <div className="panel border-l-2 border-l-flip/60 px-4 py-6 text-center text-xs">
+                <p className="font-bold text-flip">
+                  Not enough options liquidity to compute exposure reliably.
+                </p>
+                <p className="mx-auto mt-2 max-w-lg leading-relaxed text-term-dim">
+                  Every figure in this table is open interest multiplied by a
+                  modelled greek. This chain holds too little open interest for
+                  that product to mean anything, so the numbers are suppressed
+                  rather than estimated. The open interest actually found is in
+                  the tradeability panel above.
+                </p>
+              </div>
+            )}
           </Section>
         )}
 

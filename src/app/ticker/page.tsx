@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { ConsensusCard } from '@/components/ConsensusCard';
 import { Footer } from '@/components/Footer';
-import { LiquidityCard } from '@/components/LiquidityCard';
 import { SignalTable } from '@/components/SignalTable';
 import { TickerChart } from '@/components/TickerChart';
 import { TickerSearch } from '@/components/TickerSearch';
@@ -12,7 +12,7 @@ import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 export const metadata: Metadata = {
   title: 'Ticker Consensus',
   description:
-    'Nine technical signals vote bullish or bearish on any US ticker, with a liquidity rating.',
+    'Nine technical signals vote bullish or bearish on any US ticker.',
 };
 
 interface PageProps {
@@ -81,8 +81,15 @@ export default async function TickerPage({ searchParams }: PageProps) {
             <p className="text-term-text">Enter a US ticker to see the consensus.</p>
             <p className="mx-auto mt-2 max-w-xl leading-relaxed">
               Nine independent technical signals each vote bullish or bearish on
-              about a year of daily price history, alongside a rating of how
-              easily the name can actually be traded.
+              about a year of daily price history. How easily the name can
+              actually be traded is rated on the{' '}
+              <Link
+                href="/decision"
+                className="text-pos underline decoration-dotted"
+              >
+                decision
+              </Link>{' '}
+              page.
             </p>
           </Panel>
         )}
@@ -97,10 +104,12 @@ export default async function TickerPage({ searchParams }: PageProps) {
               currentPrice={data.price}
             />
 
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-              <ConsensusCard data={data} />
-              <LiquidityCard liquidity={data.liquidity} />
-            </div>
+            {/*
+              Tradeability used to sit beside the consensus here. It now lives
+              on the decision page, where the exposure figures it gates are,
+              so there is exactly one place on the site that rates it.
+            */}
+            <ConsensusCard data={data} />
 
             <SignalTable signals={data.signals} />
 
