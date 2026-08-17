@@ -1,3 +1,5 @@
+import type { Liquidity } from '../ticker/types';
+
 export type Grade = 'green' | 'amber' | 'red';
 
 export interface Wall {
@@ -58,5 +60,28 @@ export interface DecisionResult {
   conviction: Conviction;
   verdict: Verdict;
   hasOptions: boolean;
+  /**
+   * Tradeability for this name — null when its bars could not be read.
+   *
+   * Lives on the result rather than being fetched by the page because it
+   * gates what the page is allowed to show: below the open-interest floor the
+   * exposure figures are suppressed, so the same object that renders the
+   * panel decides that.
+   */
+  liquidity: Liquidity | null;
   notes: string[];
+}
+
+/**
+ * Whether the dollar exposure figures may be shown at all.
+ *
+ * One helper, used by every consumer, so the exposure tables and the walls
+ * can never disagree about whether the chain is deep enough to trust. A
+ * missing assessment is treated as permissive: the tradeability lookup
+ * failing is not evidence that open interest is thin, and blanking a working
+ * SPY page because a secondary fetch timed out would be its own kind of lie.
+ */
+export function exposureIsReliable(liquidity: Liquidity | null): boolean {
+  if (liquidity === null) return true;
+  return liquidity.options.exposureReliable;
 }

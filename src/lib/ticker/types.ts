@@ -40,15 +40,74 @@ export interface Consensus {
 
 export type LiquidityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 
-export interface Liquidity {
-  label: LiquidityLabel;
-  /** 20-session average of close x volume, in dollars. */
+/**
+ * The cutoffs a tier was decided by, carried alongside the tier itself.
+ *
+ * Shipped in the payload rather than duplicated in the component so the
+ * tooltip can only ever state the thresholds that were actually applied.
+ */
+export interface TierCutoffs {
+  high: number;
+  medium: number;
+}
+
+/** Can I get in and out of the shares? */
+export interface EquityLiquidity {
+  tier: LiquidityLabel;
+  /** Rolling average of close x volume, in dollars. */
   avgDollarVolume: number;
   avgShareVolume: number;
-  /** Total contracts traded across the listed chain, or null when none. */
-  optionsVolume: number | null;
-  optionsOpenInterest: number | null;
-  hasOptions: boolean;
+  /**
+   * Quoted bid-ask spread as a percentage of the mid, from the underlying
+   * quote. Null when the venue is not quoting two sides — never approximated
+   * from volume or range, which measure something else entirely.
+   */
+  spreadPct: number | null;
+  cutoffs: TierCutoffs;
+  /** Sessions averaged, so the panel can say so. */
+  sessions: number;
+}
+
+/** Are the contracts tradeable, and is the exposure maths worth trusting? */
+export interface OptionsLiquidity {
+  /** False when the symbol has no listed chain at all. */
+  listed: boolean;
+  /** Null only when nothing is listed. */
+  tier: LiquidityLabel | null;
+  /** Contracts traded across the whole chain. */
+  volume: number | null;
+  openInterest: number | null;
+  /**
+   * Volume-weighted quoted spread across two-sided contracts that actually
+   * traded, as a percentage of the option's own mid — not of the share price,
+   * which would make every cheap contract look catastrophic.
+   */
+  spreadPct: number | null;
+  /** Contracts behind `spreadPct`, so a thin sample can be labelled as one. */
+  spreadSample: number;
+  /**
+   * False when open interest sits under the configured floor. Every exposure
+   * figure is open interest times a modelled greek, so below the floor the
+   * GEX/VEX/CEX numbers are suppressed rather than shown.
+   */
+  exposureReliable: boolean;
+  volumeCutoffs: TierCutoffs;
+  openInterestCutoffs: TierCutoffs;
+  minOpenInterestForExposure: number;
+}
+
+/**
+ * "Tradeability" — how easily this one name can be dealt in.
+ *
+ * Named apart from US net liquidity (`lib/netLiquidity`), which is a
+ * macro measure of money in the system and shares nothing with this but the
+ * English word. Keeping the two labels distinct on screen is deliberate.
+ */
+export interface Liquidity {
+  equity: EquityLiquidity;
+  options: OptionsLiquidity;
+  /** Quote timestamp from the options feed, when it supplied one. */
+  asOfLabel: string | null;
   notes: string[];
 }
 

@@ -102,6 +102,83 @@ export const config = {
   get dividendYield(): number {
     return num(process.env.GAMMADESK_DIVIDEND_YIELD, 0.012);
   },
+
+  /**
+   * Tradeability tiers — the cutoffs behind the HIGH/MEDIUM/LOW words on the
+   * decision page.
+   *
+   * These live here, and are carried into the rendered payload, so the label
+   * can state its own basis. A tier the reader cannot check is a tier they
+   * have no reason to believe: "HIGH" on its own is an assertion, "HIGH —
+   * at or above $250M a day" is a claim they can disagree with.
+   *
+   * Equity and options are rated separately and never blended. A name can
+   * have a deep cash market and a chain that barely prints, and one number
+   * covering both would hide exactly the case that matters.
+   */
+  get tradeability() {
+    return {
+      /** Average daily dollar volume over the sample window, in dollars. */
+      equityDollarVolume: {
+        high: num(process.env.GAMMADESK_LIQ_EQUITY_DV_HIGH, 250_000_000),
+        medium: num(process.env.GAMMADESK_LIQ_EQUITY_DV_MEDIUM, 25_000_000),
+      },
+      /** Contracts traded per day across the whole listed chain. */
+      optionsVolume: {
+        high: num(process.env.GAMMADESK_LIQ_OPT_VOL_HIGH, 50_000),
+        medium: num(process.env.GAMMADESK_LIQ_OPT_VOL_MEDIUM, 5_000),
+      },
+      /** Contracts of open interest across the whole listed chain. */
+      optionsOpenInterest: {
+        high: num(process.env.GAMMADESK_LIQ_OPT_OI_HIGH, 250_000),
+        medium: num(process.env.GAMMADESK_LIQ_OPT_OI_MEDIUM, 25_000),
+      },
+      /**
+       * Open interest below which GEX/VEX/CEX are suppressed rather than
+       * shown.
+       *
+       * Every exposure figure on this site is open interest multiplied by a
+       * modelled greek. When the open interest is a few hundred contracts the
+       * product is arithmetic on noise — it will still render a confident
+       * dollar figure, which is worse than rendering nothing.
+       */
+      minOpenInterestForExposure: num(
+        process.env.GAMMADESK_LIQ_MIN_OI_FOR_EXPOSURE,
+        10_000,
+      ),
+      /** Sessions of daily bars averaged for the equity figures. */
+      sampleSessions: 20,
+    };
+  },
+
+  /**
+   * US net liquidity (WALCL − WTREGEN − RRPONTSYD).
+   *
+   * Regime context only. Nothing here may reach a score — see
+   * `lib/netLiquidity`.
+   */
+  get netLiquidity() {
+    return {
+      /**
+       * Weekly change, in percent, that a move must clear before it is called
+       * rising or falling. Below it the tile says Flat.
+       *
+       * Two of the three series are weekly Wednesday prints revised after the
+       * fact, so sub-percent wobble is measurement noise. Naming a 0.1% drift
+       * "falling liquidity" invents a signal.
+       */
+      flatThresholdPct: Math.max(
+        0,
+        num(process.env.GAMMADESK_NETLIQ_FLAT_PCT, 0.25),
+      ),
+      /** Weeks of history kept for the sparkline and the expanded table. */
+      historyWeeks: Math.max(4, num(process.env.GAMMADESK_NETLIQ_WEEKS, 13)),
+      get cacheSeconds(): number {
+        // Weekly data. An hour is already far finer than the series moves.
+        return Math.max(600, num(process.env.GAMMADESK_NETLIQ_CACHE_SECONDS, 3600));
+      },
+    };
+  },
 } as const;
 
 /**

@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { TOOLTIPS, type TooltipKey } from '@/lib/tooltips';
+import { TOOLTIPS, type Tooltip, type TooltipKey } from '@/lib/tooltips';
 
 /**
  * The small `?` beside a number, and the bubble it opens.
@@ -45,10 +45,21 @@ function useMounted(): boolean {
 
 export function InfoTip({
   for: key,
+  tip: inline,
   className = '',
   children,
 }: {
-  for: TooltipKey;
+  /** Key into the shared wording file. Omit when passing `tip`. */
+  for?: TooltipKey;
+  /**
+   * Wording supplied directly, for bubbles whose text is computed rather than
+   * fixed — the tradeability tiers state the cutoffs they were actually
+   * decided by, and those live in config.
+   *
+   * Everything with static wording should still use `for`, so it stays
+   * editable in one file.
+   */
+  tip?: Tooltip;
   className?: string;
   /**
    * Custom trigger content, in place of the `?` circle.
@@ -60,7 +71,7 @@ export function InfoTip({
    */
   children?: ReactNode;
 }) {
-  const tip = TOOLTIPS[key];
+  const tip = inline ?? (key ? TOOLTIPS[key] : undefined);
   const id = useId();
   const mounted = useMounted();
 
@@ -142,6 +153,9 @@ export function InfoTip({
     // the second tap would appear to do nothing.
     if (!next) setHovered(false);
   };
+
+  // After every hook, so the early return cannot change the hook order.
+  if (!tip) return null;
 
   return (
     <>
