@@ -148,6 +148,22 @@ export const config = {
       ),
       /** Sessions of daily bars averaged for the equity figures. */
       sampleSessions: 20,
+      /**
+       * The near-money window the option spread is measured over.
+       *
+       * Strikes each side of spot rather than a percentage band, because a
+       * count adapts to strike spacing on its own — the same band is four
+       * strikes wide on one name and forty on another.
+       */
+      nearMoneyStrikesEachSide: num(process.env.GAMMADESK_LIQ_NEAR_STRIKES, 10),
+      /** Monthly expiries, nearest first, the spread is drawn from. */
+      nearMoneyExpiries: num(process.env.GAMMADESK_LIQ_NEAR_EXPIRIES, 2),
+      /**
+       * Strikes that must survive the filter before a spread is reported.
+       * Under this the panel says so rather than printing a figure from a
+       * sample too thin to mean anything.
+       */
+      minNearMoneyStrikes: num(process.env.GAMMADESK_LIQ_MIN_NEAR_STRIKES, 5),
     };
   },
 

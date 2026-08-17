@@ -213,14 +213,18 @@ function Options({ options }: { options: OptionsLiquidity }) {
         }}
       />
       <Row
-        label="avg option spread"
-        value={formatPct(options.spreadPct)}
+        label="near-money option spread"
+        value={
+          options.spreadPct === null
+            ? 'too few tradeable contracts to measure'
+            : formatPct(options.spreadPct)
+        }
         muted={options.spreadPct === null}
         tip={{
-          label: 'Average option spread',
+          label: 'Near-money option spread',
           plain:
-            "The typical bid-ask gap on the contracts that actually traded today, as a percentage of the option's own price. Wide here means entering and exiting the option costs real money.",
-          detail: `Volume-weighted across the ${options.spreadSample.toLocaleString('en-US')} two-sided contracts with volume today. Weighted rather than averaged flat, because most of a chain is far-dated strikes quoted a dollar wide on a five-cent option — those describe a book nobody trades.`,
+            "The typical bid-ask gap on the contracts a person would actually trade — near the current price, in the nearest monthly expiries — as a percentage of the option's own price. Wide here means entering and exiting the option costs real money.",
+          detail: `Open-interest-weighted across the ${options.spreadSample.toLocaleString('en-US')} two-sided contracts within ${options.spreadStrikesEachSide} strikes either side of spot in the nearest ${options.spreadExpiries} monthly expiries. Restricted that way because the rest of a chain is far-dated, far-out-of-the-money strikes quoted a dollar wide on a five-cent option — averaging those in described a book nobody trades. Under ${options.minSpreadStrikes} surviving strikes nothing is reported rather than a figure from a thin sample.`,
         }}
       />
 
@@ -253,7 +257,13 @@ export function TradeabilityPanel({ liquidity }: { liquidity: Liquidity }) {
         Share figures are averaged over the last {liquidity.equity.sessions}{' '}
         sessions of daily bars. Options figures and both spreads come from the
         listed chain and are delayed
-        {liquidity.asOfLabel ? `, quoted ${liquidity.asOfLabel}` : ''}. A name
+        {liquidity.asOfLabel ? `, quoted ${liquidity.asOfLabel}` : ''}. The
+        option spread covers only the{' '}
+        {liquidity.options.spreadStrikesEachSide} strikes above and below the
+        current price in the nearest {liquidity.options.spreadExpiries} monthly
+        expiries, weighted by
+        open interest, so it reflects the contracts people actually trade
+        rather than the whole chain. A name
         can rate highly on one block and poorly on the other — that gap is the
         reason they are shown apart.
       </p>
