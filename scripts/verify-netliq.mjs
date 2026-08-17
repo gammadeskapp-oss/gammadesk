@@ -25,6 +25,17 @@
  * Run: npm run verify:netliq
  */
 
+/*
+ * Some sandboxes block Node's outbound fetch while leaving curl working. Set
+ * NETLIQ_CSV_DIR to a directory of `<SERIES>.csv` files fetched by other means
+ * to run the last section against them.
+ *
+ * The label changes with the source and is never called "live" for a local
+ * copy: a file on disk cannot tell you the upstream is still up, or that its
+ * schema has not moved, which is half of what that section is for.
+ */
+const CSV_DIR = process.env.NETLIQ_CSV_DIR;
+
 let failures = 0;
 let checks = 0;
 let skipped = 0;
@@ -49,12 +60,16 @@ function near(label, actual, expected, tolerance = 1e-6) {
 const MILLIONS = 1e6;
 const BILLIONS = 1e9;
 
-function asOf(series, date) {
+const DAY_MS = 86_400_000;
+const daysBetween = (from, to) => Math.round((Date.parse(to) - Date.parse(from)) / DAY_MS);
+
+function asOf(series, date, maxFillDays) {
   let found = null;
   for (const o of series) {
     if (o.date > date) break;
     found = o;
   }
+  if (found && daysBetween(found.date, date) > maxFillDays) return null;
   return found;
 }
 
@@ -63,11 +78,11 @@ function directionOf(changePct, thresholdPct) {
   return changePct > 0 ? 'rising' : 'falling';
 }
 
-function computeWeeks(walcl, tga, rrp, thresholdPct, historyWeeks) {
+function computeWeeks(walcl, tga, rrp, thresholdPct, historyWeeks, maxFillDays = 8) {
   const weeks = [];
   for (const balance of walcl.slice(-(historyWeeks + 1))) {
-    const tgaAt = asOf(tga, balance.date);
-    const rrpAt = asOf(rrp, balance.date);
+    const tgaAt = asOf(tga, balance.date, maxFillDays);
+    const rrpAt = asOf(rrp, balance.date, maxFillDays);
     if (!tgaAt || !rrpAt) continue;
 
     weeks.push({
@@ -178,10 +193,39 @@ console.log('\nweekly cadence');
 
 {
   // Forward fill: no repo print on the Wednesday falls back to the last one.
-  const sparse = [{ date: '2026-08-03', value: 2 }];
+  // 2026-08-03 is a Monday, so this is the holiday shape — two days stale.
+  const sparse = [{ date: '2026-08-10', value: 2 }];
   const weeks = computeWeeks(WALCL, TGA, sparse, 0.25, 10);
   const latest = weeks[weeks.length - 1];
-  near('a missing repo print forward-fills', latest.rrp, 2 * BILLIONS, 1);
+  near('a missing repo print forward-fills over a holiday', latest.rrp, 2 * BILLIONS, 1);
+}
+
+{
+  /*
+   * Regression, found against the live series rather than a fixture.
+   *
+   * RRPONTSYD has gaps of months to years before about 2014 — the real one
+   * below ran from 2004-01-09 to 2007-05-02. An unbounded forward fill paired
+   * that stale repo figure with every intervening balance sheet and rendered
+   * the result as a genuine weekly print. Past the bound the week is dropped.
+   */
+  const stale = [{ date: '2026-01-09', value: 2 }];
+  const weeks = computeWeeks(WALCL, TGA, stale, 0.25, 10);
+  ok(
+    'a repo print months stale is refused, not carried forward',
+    weeks.length === 0,
+    `expected no weeks, got ${weeks.map((w) => w.weekOf).join(',')}`,
+  );
+
+  // The bound must not be so tight that an ordinary holiday is rejected.
+  const holiday = [{ date: '2026-08-11', value: 2 }];
+  ok(
+    'a one-day holiday fill still computes',
+    computeWeeks(WALCL, TGA, holiday, 0.25, 10).length > 0,
+  );
+
+  ok('exactly at the bound is accepted', asOf(stale, '2026-01-17', 8) !== null);
+  ok('one day past the bound is refused', asOf(stale, '2026-01-18', 8) === null);
 }
 
 {
@@ -209,7 +253,12 @@ console.log('\ndirection threshold');
     { date: '2026-08-05', value: 0 },
     { date: '2026-08-12', value: 0 },
   ];
-  const noRepo = [{ date: '2026-08-01', value: 0 }];
+  // Within the fill bound of both Wednesdays, so the bound is not what is
+  // under test here — the threshold is.
+  const noRepo = [
+    { date: '2026-08-05', value: 0 },
+    { date: '2026-08-12', value: 0 },
+  ];
 
   const weeks = computeWeeks(flat, zeroed, noRepo, 0.25, 10);
   const latest = weeks[weeks.length - 1];
@@ -234,9 +283,15 @@ console.log('\ndirection threshold');
 
 // ---- 4. the real series ----------------------------------------------------
 
-console.log('\nlive FRED series');
+console.log(
+  CSV_DIR ? `\nFRED series (local CSV copies in ${CSV_DIR})` : '\nlive FRED series',
+);
 
 async function series(id) {
+  if (CSV_DIR) {
+    const { readFileSync } = await import('node:fs');
+    return parseCsv(readFileSync(`${CSV_DIR}/${id}.csv`, 'utf8'));
+  }
   const res = await fetch(
     `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}`,
     { headers: { Accept: 'text/csv' }, signal: AbortSignal.timeout(15_000) },
@@ -275,6 +330,35 @@ try {
     'live net liquidity is a plausible multi-trillion figure',
     latest.net > 3e12 && latest.net < 1e13,
     `got ${latest.net}`,
+  );
+
+  /*
+   * Date alignment on the real calendar — the check fixtures cannot make.
+   * Every component must be read as of the week's own Wednesday, never a
+   * later daily print, or the series moves on days nothing happened.
+   */
+  for (const w of weeks) {
+    const day = new Date(`${w.weekOf}T12:00:00Z`).getUTCDay();
+    ok(`week ${w.weekOf} is bucketed on a Wednesday`, day === 3, `day ${day}`);
+  }
+
+  const contaminated = weeks.filter((w) => {
+    const picked = asOf(rrp, w.weekOf, 8);
+    return picked === null || picked.date > w.weekOf;
+  });
+  ok(
+    'no week reads a repo print from after its Wednesday',
+    contaminated.length === 0,
+    contaminated.map((w) => w.weekOf).join(','),
+  );
+
+  const stalest = Math.max(
+    ...weeks.map((w) => daysBetween(asOf(rrp, w.weekOf, 8).date, w.weekOf)),
+  );
+  ok(
+    'the stalest repo fill in the shown window is within a holiday gap',
+    stalest <= 4,
+    `${stalest} days`,
   );
   console.log(
     `  note  week of ${latest.weekOf}: $${(latest.net / 1e12).toFixed(3)}T` +

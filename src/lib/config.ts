@@ -173,6 +173,19 @@ export const config = {
       ),
       /** Weeks of history kept for the sparkline and the expanded table. */
       historyWeeks: Math.max(4, num(process.env.GAMMADESK_NETLIQ_WEEKS, 13)),
+      /**
+       * Oldest a forward-filled print may be before its week is dropped.
+       *
+       * The fill exists for public holidays, where a Wednesday has no repo
+       * print and the Tuesday value is the honest stand-in. It is not a
+       * licence to carry a number forward indefinitely: RRPONTSYD has gaps of
+       * months to years before about 2014, and an unbounded fill would pair a
+       * 2004 repo figure with a 2007 balance sheet and render the result as a
+       * real weekly print.
+       *
+       * Eight days clears any holiday run while rejecting anything staler.
+       */
+      maxFillDays: Math.max(1, num(process.env.GAMMADESK_NETLIQ_MAX_FILL_DAYS, 8)),
       get cacheSeconds(): number {
         // Weekly data. An hour is already far finer than the series moves.
         return Math.max(600, num(process.env.GAMMADESK_NETLIQ_CACHE_SECONDS, 3600));
