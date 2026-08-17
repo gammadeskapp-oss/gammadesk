@@ -98,9 +98,25 @@ function Missing({ what, where }: { what: string; where: string }) {
   );
 }
 
+/**
+ * Shown in place of any positioning-derived figure when the chain could not be
+ * fetched. Deliberately distinct from `Missing`, which means "not computed
+ * yet": this one means the upstream is down, and nothing is substituted for it.
+ */
+function Unavailable() {
+  return (
+    <>
+      <div className="text-lg font-bold text-term-faint">—</div>
+      <Sub>Live data unavailable — couldn&apos;t reach the quote service.</Sub>
+    </>
+  );
+}
+
 export default async function DashboardPage() {
   const [positioning, forecast, groups, flow] = await Promise.all([
-    getPositioning(),
+    // Null rather than fatal: one dead upstream should blank the cards it feeds,
+    // not take down the leaders, laggards and consensus alongside them.
+    getPositioning().catch(() => null),
     getForecast().catch(() => null),
     peekStoredGroups().catch(() => null),
     peekStoredFlow().catch(() => null),
@@ -124,7 +140,7 @@ export default async function DashboardPage() {
   const risk = forecast ? riskLabel(forecast.crashPct) : null;
   const spyFlow = flow?.symbols.find((s) => s.symbol === config.symbol) ?? null;
 
-  const summary = positioning.summary;
+  const summary = positioning?.summary ?? null;
 
   return (
     <>
@@ -139,7 +155,9 @@ export default async function DashboardPage() {
             </p>
           </div>
           <p className="text-2xs text-term-faint">
-            {config.symbol} {formatPrice(positioning.spot)} · {positioning.meta.asOfLabel}
+            {positioning
+              ? `${config.symbol} ${formatPrice(positioning.spot)} · ${positioning.meta.asOfLabel}`
+              : `${config.symbol} · live data unavailable`}
           </p>
         </div>
 
@@ -215,21 +233,27 @@ export default async function DashboardPage() {
           <Card
             href="/"
             title="Gamma regime"
-            tone={summary.regime === 'positive' ? 'pos' : 'neg'}
+            tone={!summary ? 'neutral' : summary.regime === 'positive' ? 'pos' : 'neg'}
           >
-            <div className="flex items-baseline gap-3">
-              <Big
-                value={summary.regime === 'positive' ? 'POSITIVE' : 'NEGATIVE'}
-                tone={summary.regime === 'positive' ? 'pos' : 'neg'}
-              />
-            </div>
-            <Sub>
-              net GEX {formatUsd(summary.netGex)} · flip{' '}
-              {summary.flipLevel === null ? '—' : formatPrice(summary.flipLevel)} ·{' '}
-              {summary.regime === 'positive'
-                ? 'dealers dampen moves'
-                : 'dealers amplify moves'}
-            </Sub>
+            {summary ? (
+              <>
+                <div className="flex items-baseline gap-3">
+                  <Big
+                    value={summary.regime === 'positive' ? 'POSITIVE' : 'NEGATIVE'}
+                    tone={summary.regime === 'positive' ? 'pos' : 'neg'}
+                  />
+                </div>
+                <Sub>
+                  net GEX {formatUsd(summary.netGex)} · flip{' '}
+                  {summary.flipLevel === null ? '—' : formatPrice(summary.flipLevel)} ·{' '}
+                  {summary.regime === 'positive'
+                    ? 'dealers dampen moves'
+                    : 'dealers amplify moves'}
+                </Sub>
+              </>
+            ) : (
+              <Unavailable />
+            )}
           </Card>
 
           {/* ---- model consensus ---- */}
@@ -271,26 +295,32 @@ export default async function DashboardPage() {
 
           {/* ---- liquidity ---- */}
           <Card href="/flow" title={`${config.symbol} liquidity`} tone="neutral">
-            <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
-              <div>
-                <Big value={formatContracts(summary.totalCallOi + summary.totalPutOi)} />
-                <span className="ml-1 text-2xs text-term-faint">open interest</span>
-              </div>
-              {spyFlow && (
-                <div>
-                  <span className="text-xl font-bold tabular-nums text-term-dim">
-                    {formatContracts(spyFlow.totalVolume)}
-                  </span>
-                  <span className="ml-1 text-2xs text-term-faint">chain volume</span>
+            {summary ? (
+              <>
+                <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+                  <div>
+                    <Big value={formatContracts(summary.totalCallOi + summary.totalPutOi)} />
+                    <span className="ml-1 text-2xs text-term-faint">open interest</span>
+                  </div>
+                  {spyFlow && (
+                    <div>
+                      <span className="text-xl font-bold tabular-nums text-term-dim">
+                        {formatContracts(spyFlow.totalVolume)}
+                      </span>
+                      <span className="ml-1 text-2xs text-term-faint">chain volume</span>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <Sub>
-              put/call OI {formatRatio(summary.putCallOiRatio)}
-              {spyFlow?.putCallVolume != null &&
-                ` · put/call volume ${spyFlow.putCallVolume.toFixed(2)}`}
-              {!spyFlow && ' · chain volume appears once /flow has run'}
-            </Sub>
+                <Sub>
+                  put/call OI {formatRatio(summary.putCallOiRatio)}
+                  {spyFlow?.putCallVolume != null &&
+                    ` · put/call volume ${spyFlow.putCallVolume.toFixed(2)}`}
+                  {!spyFlow && ' · chain volume appears once /flow has run'}
+                </Sub>
+              </>
+            ) : (
+              <Unavailable />
+            )}
           </Card>
 
           {/* ---- leaders ---- */}
@@ -339,33 +369,45 @@ export default async function DashboardPage() {
 
           {/* ---- magnets ---- */}
           <Card href="/" title="Magnet strikes" tone="flip">
-            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
-              <div>
-                <span className="text-xl font-bold tabular-nums text-term-text">
-                  {summary.magnetAbove ? summary.magnetAbove.strike : '—'}
-                </span>
-                <span className="ml-1 text-2xs text-term-faint">above</span>
-              </div>
-              <div>
-                <span className="text-xl font-bold tabular-nums text-term-text">
-                  {summary.magnetBelow ? summary.magnetBelow.strike : '—'}
-                </span>
-                <span className="ml-1 text-2xs text-term-faint">below</span>
-              </div>
-            </div>
-            <Sub>
-              largest absolute gamma either side of {formatPrice(positioning.spot)}
-            </Sub>
+            {summary && positioning ? (
+              <>
+                <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                  <div>
+                    <span className="text-xl font-bold tabular-nums text-term-text">
+                      {summary.magnetAbove ? summary.magnetAbove.strike : '—'}
+                    </span>
+                    <span className="ml-1 text-2xs text-term-faint">above</span>
+                  </div>
+                  <div>
+                    <span className="text-xl font-bold tabular-nums text-term-text">
+                      {summary.magnetBelow ? summary.magnetBelow.strike : '—'}
+                    </span>
+                    <span className="ml-1 text-2xs text-term-faint">below</span>
+                  </div>
+                </div>
+                <Sub>
+                  largest absolute gamma either side of {formatPrice(positioning.spot)}
+                </Sub>
+              </>
+            ) : (
+              <Unavailable />
+            )}
           </Card>
 
           {/* ---- digest ---- */}
           <Card href="/daily" title="Today in one line" tone="neutral">
-            <p className="text-xs leading-relaxed text-term-dim">
-              {summary.regime === 'positive'
-                ? 'Dealers are long gamma, so their hedging leans against moves — chop and mean reversion.'
-                : 'Dealers are short gamma, so their hedging leans with moves — faster, trendier action.'}
-            </p>
-            <Sub>the full summary in plain words, and how it gets scored</Sub>
+            {summary ? (
+              <>
+                <p className="text-xs leading-relaxed text-term-dim">
+                  {summary.regime === 'positive'
+                    ? 'Dealers are long gamma, so their hedging leans against moves — chop and mean reversion.'
+                    : 'Dealers are short gamma, so their hedging leans with moves — faster, trendier action.'}
+                </p>
+                <Sub>the full summary in plain words, and how it gets scored</Sub>
+              </>
+            ) : (
+              <Unavailable />
+            )}
           </Card>
         </div>
 

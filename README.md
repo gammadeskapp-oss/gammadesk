@@ -675,10 +675,11 @@ self-heals on the next pass rather than leaving a permanent hole. If no Polygon
 key is set it falls back to Cboe's own session OHLC, which can only settle the
 current day.
 
-The snapshot job refuses to record when the market is shut, when the feed is
-still showing the previous session (a holiday guard), or when the dashboard is
-on sample data — a snapshot taken against the wrong chain would quietly poison
-the very record the page exists to keep honest.
+The snapshot job refuses to record when the market is shut or when the feed is
+still showing the previous session (a holiday guard) — a snapshot taken against
+the wrong chain would quietly poison the very record the page exists to keep
+honest. If the upstream is unreachable the job fails rather than recording
+anything: a missing entry is recoverable, a fabricated one is not.
 
 ### Setup
 
@@ -800,7 +801,6 @@ Every setting is optional except the API key. Full list in `.env.example`.
 | `GAMMADESK_STRIKES_EACH_SIDE` | `30` | Strike rows above and below spot. |
 | `GAMMADESK_RISK_FREE_RATE` | `0.043` | Annualised, for Black-Scholes. |
 | `GAMMADESK_DIVIDEND_YIELD` | `0.012` | Annualised, for Black-Scholes. |
-| `GAMMADESK_DEMO` | `auto` | `auto` / `1` (always sample) / `0` (never). |
 | `GAMMADESK_REFRESH_TOKEN` | unset | Enables forced refresh on the API route. |
 | `CRON_SECRET` | unset | **Required for the cron jobs.** Bearer token for `/api/log/*`, `/api/groups/refresh` and `/api/digest`. |
 | `DISCORD_WEBHOOK_URL` | unset | Where the daily digest is posted. Leave unset to generate it without delivering. |
@@ -891,7 +891,6 @@ src/
     cache.ts                TTL cache with single-flight
     rateLimit.ts            sliding-window limiter
     volSurface.ts           fallback IV surface
-    demo.ts                 deterministic sample chain
     time.ts                 New York market clock, DST-correct
     metrics.ts              tab definitions and plain-English copy
     format.ts               display formatting
@@ -918,5 +917,6 @@ Worth knowing before you read anything into the numbers:
   not reflect today's flow.
 - **One IV per strike.** Taken from the out-of-the-money side; see above. Where
   no quote is usable it falls back to a model, and the page tells you how often.
-- **The Cboe endpoint is undocumented.** No SLA. If it changes, the dashboard
-  falls back to sample data rather than showing wrong numbers.
+- **The Cboe endpoint is undocumented.** No SLA. If it goes down or changes
+  shape, the dashboard says so and shows nothing — it never substitutes
+  synthetic numbers for market data.

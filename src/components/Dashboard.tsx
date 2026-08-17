@@ -67,7 +67,6 @@ export function Dashboard({ data }: DashboardProps) {
         title={mode === 'simple' ? `${data.symbol} Today` : `${data.symbol} Dealer Positioning`}
         description={PAGE_DESCRIPTIONS['/']}
         asOfLabel={data.meta.asOfLabel}
-        source={data.meta.source}
       />
 
       <PositioningSearch initial={data.symbol} />

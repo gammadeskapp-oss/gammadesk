@@ -5,8 +5,14 @@ export type MetricKey = 'gex' | 'vex' | 'cex' | 'oi';
 /** Where the implied vol used for a contract came from. */
 export type IvSource = 'quoted' | 'solved' | 'model';
 
-/** Upstream provider a snapshot came from. */
-export type DataSource = 'cboe' | 'polygon' | 'sample';
+/**
+ * Upstream provider a snapshot came from.
+ *
+ * Live providers only. There is deliberately no synthetic member: a snapshot
+ * either carries real market data or it does not exist, and an upstream failure
+ * propagates as a `ChainError` rather than degrading into fabricated numbers.
+ */
+export type DataSource = 'cboe' | 'polygon';
 
 /** One options contract, normalised out of whatever Polygon returned. */
 export interface NormalisedContract {
