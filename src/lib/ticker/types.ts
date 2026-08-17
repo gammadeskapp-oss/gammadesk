@@ -78,13 +78,23 @@ export interface OptionsLiquidity {
   volume: number | null;
   openInterest: number | null;
   /**
-   * Volume-weighted quoted spread across two-sided contracts that actually
-   * traded, as a percentage of the option's own mid — not of the share price,
-   * which would make every cheap contract look catastrophic.
+   * Open-interest-weighted quoted spread across the near-money contracts — a
+   * few strikes each side of spot in the nearest monthly expiries — as a
+   * percentage of the option's own mid, not of the share price, which would
+   * make every cheap contract look catastrophic.
+   *
+   * Null when too few strikes survive that filter to measure anything.
    */
   spreadPct: number | null;
   /** Contracts behind `spreadPct`, so a thin sample can be labelled as one. */
   spreadSample: number;
+  /** Distinct near-money strikes quoted, against `minSpreadStrikes`. */
+  spreadStrikes: number;
+  /** Strikes required before a spread is reported at all. */
+  minSpreadStrikes: number;
+  /** The near-money window `spreadPct` was measured over, for the footnote. */
+  spreadStrikesEachSide: number;
+  spreadExpiries: number;
   /**
    * False when open interest sits under the configured floor. Every exposure
    * figure is open interest times a modelled greek, so below the floor the

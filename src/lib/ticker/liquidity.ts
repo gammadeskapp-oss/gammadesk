@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { cached } from '@/lib/cache';
+import { parseOccSymbol } from '@/lib/cboe';
 import { config } from '@/lib/config';
 import { formatAsOf } from '@/lib/time';
 import { fetchBars, normaliseSymbol } from './bars';
@@ -36,6 +37,8 @@ const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
 interface CboeContract {
+  /** OCC symbol — the only place strike and expiry appear in this feed. */
+  option?: string;
   bid?: number;
   ask?: number;
   volume?: number;
@@ -55,9 +58,14 @@ interface CboeChain {
 interface ChainActivity {
   volume: number;
   openInterest: number;
-  /** Volume-weighted quoted spread, as a fraction of the contract's mid. */
+  /**
+   * Open-interest-weighted quoted spread across the near-money window, as a
+   * fraction of the contract's mid.
+   */
   spreadPct: number | null;
   spreadSample: number;
+  /** Distinct strikes behind `spreadPct`. */
+  spreadStrikes: number;
   /** Underlying quoted spread as a fraction of mid, when two-sided. */
   underlyingSpreadPct: number | null;
   asOfLabel: string | null;
@@ -83,6 +91,57 @@ function quotedSpreadPct(bid?: number, ask?: number): number | null {
   const mid = (bid + ask) / 2;
   if (!(mid > 0)) return null;
   return (ask - bid) / mid;
+}
+
+/**
+ * A standard monthly expiry — the third Friday of its month.
+ *
+ * Read off the date rather than from any feed field, because the chain
+ * carries none. The third Friday is the only Friday that can fall on the
+ * 15th through the 21st, so the range test is exact.
+ */
+function isMonthlyExpiry(iso: string): boolean {
+  const d = new Date(`${iso}T00:00:00Z`);
+  const day = d.getUTCDate();
+  return d.getUTCDay() === 5 && day >= 15 && day <= 21;
+}
+
+/**
+ * The contracts a user would realistically trade: the nearest few strikes
+ * either side of spot, in the nearest monthly expiries.
+ *
+ * Filtered by strike count, not by delta. The chain carries no delta field
+ * and this file will not model one — a Black-Scholes delta needs an implied
+ * vol per contract, and inventing that to draw a liquidity boundary would put
+ * a modelled assumption underneath a figure meant to describe observed quotes.
+ */
+function nearMoneyContracts(
+  contracts: CboeContract[],
+  spot: number,
+): { c: CboeContract; strike: number }[] {
+  const tuning = config.tradeability;
+
+  const parsed = contracts.flatMap((c) => {
+    const p = c.option ? parseOccSymbol(c.option) : null;
+    return p ? [{ c, strike: p.strike, expiration: p.expiration }] : [];
+  });
+
+  const today = new Date().toISOString().slice(0, 10);
+  const expiries = new Set(
+    [...new Set(parsed.map((p) => p.expiration))]
+      .filter((e) => e >= today && isMonthlyExpiry(e))
+      .sort()
+      .slice(0, tuning.nearMoneyExpiries),
+  );
+
+  const inExpiry = parsed.filter((p) => expiries.has(p.expiration));
+  const allStrikes = [...new Set(inExpiry.map((p) => p.strike))].sort((a, b) => a - b);
+  const keep = new Set([
+    ...allStrikes.filter((s) => s <= spot).slice(-tuning.nearMoneyStrikesEachSide),
+    ...allStrikes.filter((s) => s > spot).slice(0, tuning.nearMoneyStrikesEachSide),
+  ]);
+
+  return inExpiry.filter((p) => keep.has(p.strike));
 }
 
 /**
@@ -112,34 +171,49 @@ async function fetchChainActivity(symbol: string): Promise<ChainActivity | null>
     let volume = 0;
     let openInterest = 0;
 
-    /*
-     * Spread is weighted by volume and drawn only from contracts that traded.
-     * The chain is mostly far-dated, far-out-of-the-money strikes quoted a
-     * dollar wide on a five-cent option; averaging those in unweighted would
-     * describe a book nobody is trading rather than the one they are.
-     */
-    let spreadWeighted = 0;
-    let spreadWeight = 0;
-    let spreadSample = 0;
-
     for (const c of contracts) {
       const contractVolume = typeof c.volume === 'number' ? c.volume : 0;
       if (contractVolume > 0) volume += contractVolume;
       if (typeof c.open_interest === 'number') openInterest += c.open_interest;
+    }
 
-      const spread = quotedSpreadPct(c.bid, c.ask);
-      if (spread !== null && contractVolume > 0) {
-        spreadWeighted += spread * contractVolume;
-        spreadWeight += contractVolume;
-        spreadSample += 1;
+    /*
+     * Spread is measured only over the near-money window, and weighted by
+     * open interest inside it. Averaged across the whole chain it described a
+     * book nobody trades — far-dated, far-out-of-the-money strikes quoted a
+     * dollar wide on a five-cent option — and made almost every name look
+     * untradeable. Weighting by open interest keeps a dead strike holding one
+     * contract from counting as much as a busy one beside it.
+     */
+    const spot = body.data?.current_price;
+    let spreadWeighted = 0;
+    let spreadWeight = 0;
+    let spreadSample = 0;
+    const spreadStrikes = new Set<number>();
+
+    if (typeof spot === 'number' && spot > 0) {
+      for (const { c, strike } of nearMoneyContracts(contracts, spot)) {
+        const oi = typeof c.open_interest === 'number' ? c.open_interest : 0;
+        const spread = quotedSpreadPct(c.bid, c.ask);
+        if (spread !== null && oi > 0) {
+          spreadWeighted += spread * oi;
+          spreadWeight += oi;
+          spreadSample += 1;
+          spreadStrikes.add(strike);
+        }
       }
     }
+
+    const enoughStrikes =
+      spreadStrikes.size >= config.tradeability.minNearMoneyStrikes;
 
     return {
       volume,
       openInterest,
-      spreadPct: spreadWeight > 0 ? spreadWeighted / spreadWeight : null,
-      spreadSample,
+      spreadPct:
+        enoughStrikes && spreadWeight > 0 ? spreadWeighted / spreadWeight : null,
+      spreadSample: enoughStrikes ? spreadSample : 0,
+      spreadStrikes: spreadStrikes.size,
       underlyingSpreadPct: quotedSpreadPct(body.data?.bid, body.data?.ask),
       // The feed stamps its own snapshot; parsed as ET, which is what it is.
       asOfLabel: body.timestamp
@@ -191,6 +265,10 @@ export async function assessLiquidity(
       openInterest: null,
       spreadPct: null,
       spreadSample: 0,
+      spreadStrikes: 0,
+      minSpreadStrikes: tuning.minNearMoneyStrikes,
+      spreadStrikesEachSide: tuning.nearMoneyStrikesEachSide,
+      spreadExpiries: tuning.nearMoneyExpiries,
       exposureReliable: false,
       volumeCutoffs: tuning.optionsVolume,
       openInterestCutoffs: tuning.optionsOpenInterest,
@@ -212,6 +290,10 @@ export async function assessLiquidity(
       openInterest: chain.openInterest,
       spreadPct: chain.spreadPct,
       spreadSample: chain.spreadSample,
+      spreadStrikes: chain.spreadStrikes,
+      minSpreadStrikes: tuning.minNearMoneyStrikes,
+      spreadStrikesEachSide: tuning.nearMoneyStrikesEachSide,
+      spreadExpiries: tuning.nearMoneyExpiries,
       exposureReliable: chain.openInterest >= tuning.minOpenInterestForExposure,
       volumeCutoffs: tuning.optionsVolume,
       openInterestCutoffs: tuning.optionsOpenInterest,
