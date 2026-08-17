@@ -41,12 +41,28 @@ function Card({
   children,
   tone = 'neutral',
   span,
+  linksInside = false,
 }: {
   href: string;
   title: string;
   children: React.ReactNode;
   tone?: 'neutral' | 'pos' | 'neg' | 'bull' | 'bear' | 'flip';
   span?: boolean;
+  /**
+   * Set when the body contains its own links.
+   *
+   * The card is normally one big anchor, which is the nicer target. That
+   * cannot hold once the body has links of its own: an `<a>` inside an `<a>`
+   * is invalid, so the browser hoists the inner one out during parsing, the
+   * client tree no longer matches the server tree, and React discards and
+   * re-renders the whole subtree on every load. The leaders and laggards
+   * lists hit exactly this.
+   *
+   * With this set, the card becomes a plain section and "open →" in the
+   * header carries the link instead — one anchor per destination, and the
+   * per-ticker links inside keep working.
+   */
+  linksInside?: boolean;
 }) {
   const edge = {
     neutral: 'border-l-term-line',
@@ -57,19 +73,40 @@ function Card({
     flip: 'border-l-flip/60',
   }[tone];
 
-  return (
-    <Link
-      href={href}
-      className={`panel group border-l-2 ${edge} p-4 transition-colors hover:bg-term-raised/60 ${
-        span ? 'sm:col-span-2' : ''
-      }`}
-    >
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="label-xs">{title}</h2>
+  const shell = `panel group border-l-2 ${edge} p-4 transition-colors ${
+    span ? 'sm:col-span-2' : ''
+  }`;
+
+  const header = (
+    <div className="flex items-baseline justify-between gap-2">
+      <h2 className="label-xs">{title}</h2>
+      {linksInside ? (
+        <Link
+          href={href}
+          className="text-2xs text-term-faint underline decoration-dotted underline-offset-2 transition-colors hover:text-pos"
+        >
+          open →
+        </Link>
+      ) : (
         <span className="text-2xs text-term-faint transition-colors group-hover:text-term-dim">
           open →
         </span>
-      </div>
+      )}
+    </div>
+  );
+
+  if (linksInside) {
+    return (
+      <section className={shell}>
+        {header}
+        <div className="mt-2">{children}</div>
+      </section>
+    );
+  }
+
+  return (
+    <Link href={href} className={`${shell} hover:bg-term-raised/60`}>
+      {header}
       <div className="mt-2">{children}</div>
     </Link>
   );
@@ -353,7 +390,7 @@ export default async function DashboardPage() {
           </Card>
 
           {/* ---- leaders ---- */}
-          <Card href="/strength" title="Leaders" tone="bull">
+          <Card href="/strength" title="Leaders" tone="bull" linksInside>
             {leaders.length > 0 ? (
               <>
                 <ul className="space-y-1">
@@ -375,7 +412,7 @@ export default async function DashboardPage() {
           </Card>
 
           {/* ---- laggards ---- */}
-          <Card href="/strength" title="Laggards" tone="bear">
+          <Card href="/strength" title="Laggards" tone="bear" linksInside>
             {laggards.length > 0 ? (
               <>
                 <ul className="space-y-1">
