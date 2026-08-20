@@ -228,6 +228,8 @@ only take effect on a new build.
 
 | Job | UTC | EDT (summer) | EST (winter) |
 |-----|-----|--------------|--------------|
+| `/api/scanner/gamma` — refresh gamma for scanner candidates | 12:30 **and** 13:30 | 08:30 | 08:30 |
+| `/api/scanner/run` — run the morning scan | 13:35 **and** 14:35 | 09:35 | 09:35 |
 | `/api/log/snapshot` — record the day's flip level and magnets | 14:45 | 10:45 | 09:45 |
 | `/api/log/settle` — score it against the session's high and low | 21:15 | 17:15 | **16:15** |
 | `/api/flow/refresh` — rescan chains for unusual activity | 21:40 | 17:40 | 16:40 |
@@ -256,6 +258,34 @@ matters. Anything earlier would fire *before* the close during winter.
 
 Both times were picked to sit inside the trading session in **both** summer and
 winter, since Vercel cron schedules are UTC and New York is not.
+
+### Why the two scanner jobs are registered twice
+
+The scanner has no such slack. 08:30 ET is chosen because open interest has
+just published, and 09:35 ET because it is five minutes after the open — an
+hour of winter drift would run the scan *before the market opened*.
+
+So each scanner job is registered at **both** candidate UTC times, and both
+entries carry `?when=scheduled`. The route checks the actual New York clock and
+runs only when it reads the configured time; the other entry fires, sees the
+wrong hour, and returns without spending a single upstream request. The whole
+year is covered without either job drifting.
+
+The same guard refuses a run delayed past twenty minutes rather than running it
+late — a scan that ran at 10:30 but published under a 09:35 heading would be a
+false statement about when its VWAP readings were taken. On Vercel's free plan
+crons can be delayed by up to an hour, so **the scanner wants the Pro plan** or
+it will regularly refuse. Either way you can re-run a missed morning by hand:
+
+```
+curl "https://your-site/api/scanner/gamma?token=$CRON_SECRET&format=text"
+curl "https://your-site/api/scanner/run?token=$CRON_SECRET&format=text"
+```
+
+Both return a single readable line — `Refreshed 51 chains, 2 failed. SPY gamma
+positive.` — which is the point of `format=text`. Neither is linked anywhere in
+the UI, and both need `CRON_SECRET`. Run the gamma job first; the scan reads
+what it stored.
 
 You do not need to do anything else. The first row appears on the next weekday
 run, and the running percentages become meaningful after a couple of weeks.

@@ -188,7 +188,24 @@ export async function fetchCboeSnapshot(
   const quotes: RawQuote[] = [];
   let unparsed = 0;
 
+  /*
+   * Summed over every listed contract, before the window trim below and
+   * before the zero-open-interest skip — these totals describe the whole
+   * book, which is what the tradeability cutoffs are calibrated against.
+   * Carried on the snapshot so a caller needing both exposure and liquidity
+   * spends one chain request rather than two.
+   */
+  let chainVolume = 0;
+  let chainOpenInterest = 0;
+
   for (const c of raw) {
+    const contractVolume = Number(c.volume ?? 0);
+    if (Number.isFinite(contractVolume) && contractVolume > 0) {
+      chainVolume += contractVolume;
+    }
+    const contractOi = Number(c.open_interest ?? 0);
+    if (Number.isFinite(contractOi) && contractOi > 0) chainOpenInterest += contractOi;
+
     if (!c.option) continue;
     const parsed = parseOccSymbol(c.option);
     if (!parsed) {
@@ -246,6 +263,7 @@ export async function fetchCboeSnapshot(
     quoteDate: parseTimestamp(payload.timestamp),
     contracts,
     requests: 1,
+    activity: { volume: chainVolume, openInterest: chainOpenInterest },
     notes,
   };
 }
