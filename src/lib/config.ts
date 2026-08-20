@@ -6,6 +6,8 @@
 
 import 'server-only';
 
+import type { VwapAnchor } from './scanner/types';
+
 function num(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -208,6 +210,141 @@ export const config = {
       },
     };
   },
+  /**
+   * The morning scanner — /scanner.
+   *
+   * Everything the scan can be argued about lives here, because most of it
+   * will be. The scan time, the strictness, and above all the
+   * Nadaraya-Watson settings are meant to be moved without a code change:
+   * the NW reading is only useful if it agrees with the chart the reader is
+   * actually looking at, and that means matching their TradingView inputs.
+   */
+  get scanner() {
+    return {
+      /**
+       * Composite RS score a name must clear to be a candidate.
+       *
+       * This is the gate for the whole pipeline — nothing downstream ever sees
+       * a name below it, including the near-miss list. Raising it shrinks the
+       * gamma refresh proportionally, which is the constraint that matters:
+       * see `gammaRefreshBudget` below.
+       */
+      rsMin: num(process.env.GAMMADESK_SCAN_RS_MIN, 82),
+
+      /**
+       * When the scan runs, as New York wall-clock `HH:MM`.
+       *
+       * Displayed on the page and used for nothing else — the actual trigger
+       * is the cron entry in `vercel.json`, which cannot read this. Moving the
+       * scan means editing both, and the page states the time it was told
+       * about rather than the time it ran, so a mismatch is visible.
+       *
+       * 9:35 is deliberately early and deliberately noisy. Five minutes of
+       * session VWAP is five minutes of the day's worst tape; a name can sit
+       * above VWAP at 9:35 and below it at 9:40. The page says so.
+       */
+      scanTimeEt: (process.env.GAMMADESK_SCAN_TIME_ET ?? '09:35').trim(),
+      /** When the candidate gamma refresh runs, same caveat. */
+      gammaTimeEt: (process.env.GAMMADESK_SCAN_GAMMA_TIME_ET ?? '08:30').trim(),
+
+      /**
+       * Chains the 8:30 job may request in one run.
+       *
+       * Cboe answers roughly sixty per window and then refuses — a quota, not
+       * a rate, so slowing down buys nothing (see `scanUniverse.ts`). At the
+       * default RS floor of 82 the candidate list is about fifty names, and
+       * SPY is always fetched first because filter 5 gates the entire scan.
+       *
+       * Note how little headroom that leaves. The floor and this budget are
+       * coupled: the composite score concentrates hard toward the middle — a
+       * weighted mean of three weakly-correlated percentiles is not itself a
+       * percentile — so the candidate count climbs steeply as the floor comes
+       * down. 90 gives 27 names, 82 gives 50, 80 gives 58, which is already
+       * over the Cboe window. Check with `?dry=1` on the gamma endpoint before
+       * lowering it further; that reports the count without spending a chain.
+       *
+       * If the candidate list ever exceeds this, the run stops at the budget
+       * and reports what it did not reach rather than filling the tail with
+       * failures.
+       */
+      gammaRefreshBudget: Math.min(
+        60,
+        Math.max(5, num(process.env.GAMMADESK_SCAN_GAMMA_BUDGET, 55)),
+      ),
+
+      /**
+       * Which VWAP anchor each timeframe uses.
+       *
+       * A session anchor on a daily bar series is meaningless — every bar is
+       * its own session, so VWAP would equal the typical price and the filter
+       * would be a coin toss. The week anchor gives 4H and daily something to
+       * actually measure against. Stated in the UI, not just here.
+       */
+      vwapAnchor: {
+        '1h': (process.env.GAMMADESK_SCAN_VWAP_1H ?? 'session') as VwapAnchor,
+        '4h': (process.env.GAMMADESK_SCAN_VWAP_4H ?? 'week') as VwapAnchor,
+        '1D': (process.env.GAMMADESK_SCAN_VWAP_1D ?? 'week') as VwapAnchor,
+      },
+
+      /** Trend EMA the price must sit above for filter 7. */
+      trendEmaPeriod: Math.max(
+        5,
+        num(process.env.GAMMADESK_SCAN_TREND_EMA, 200),
+      ),
+
+      /**
+       * Nadaraya-Watson inputs, matching the LuxAlgo envelope defaults.
+       *
+       * These exist to be tuned to the reader's own chart. The scanner and the
+       * chart have to be able to agree on whether a name is above its band; if
+       * they cannot, the column is worse than absent.
+       *
+       * `bandwidth` is the Gaussian h, `lookback` the number of bars the
+       * estimator and the band width are computed over, `mult` the multiple of
+       * mean absolute error the envelope sits at.
+       */
+      nw: {
+        bandwidth: Math.max(0.5, num(process.env.GAMMADESK_SCAN_NW_H, 8)),
+        lookback: Math.max(
+          20,
+          Math.round(num(process.env.GAMMADESK_SCAN_NW_LOOKBACK, 499)),
+        ),
+        mult: Math.max(0.1, num(process.env.GAMMADESK_SCAN_NW_MULT, 3)),
+        /**
+         * Fewest bars that will produce a reading at all.
+         *
+         * Below this the band is marked unknown and the ticker is excluded,
+         * rather than being failed — "we could not tell" and "it is below the
+         * band" are different statements and the page keeps them apart.
+         */
+        minBars: Math.max(
+          30,
+          Math.round(num(process.env.GAMMADESK_SCAN_NW_MIN_BARS, 120)),
+        ),
+      },
+
+      /** Days of finished scans kept, so a missed morning is still readable. */
+      keepDays: Math.max(1, num(process.env.GAMMADESK_SCAN_KEEP_DAYS, 5)),
+
+      /**
+       * Bar series fetched at once during a scan.
+       *
+       * Three timeframes per candidate against Yahoo, which publishes no
+       * quota; six in flight measured comfortably under a minute for a full
+       * candidate list and has not drawn a throttle.
+       */
+      barConcurrency: Math.max(
+        1,
+        num(process.env.GAMMADESK_SCAN_BAR_CONCURRENCY, 6),
+      ),
+      /** Wall-clock backstop for the bar phase, leaving room to store. */
+      barBudgetMs: Math.max(
+        10_000,
+        num(process.env.GAMMADESK_SCAN_BAR_BUDGET_MS, 220_000),
+      ),
+    };
+  },
+
 } as const;
 
 /**

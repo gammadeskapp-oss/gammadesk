@@ -20,6 +20,29 @@ export class ChainError extends Error {
   }
 }
 
+/**
+ * Whole-chain traded activity, summed before any trimming.
+ *
+ * Across every listed contract rather than the displayed window, because that
+ * is what the tradeability tiers in `config.tradeability` are calibrated
+ * against — the same totals `ticker/liquidity.ts` computes from its own fetch.
+ *
+ * It rides along on the snapshot so a caller that already has the chain in
+ * hand does not have to request it a second time to learn how liquid it is.
+ * That is the difference between the morning scanner fitting inside Cboe's
+ * ~60-chain window and needing two of them.
+ *
+ * Optional, because only the Cboe adapter can fill it in: Tradier serves one
+ * expiration per request and never sees the whole book, so it reports nothing
+ * here rather than a total covering a slice.
+ */
+export interface ChainActivityTotals {
+  /** Contracts traded today across the whole listed chain. */
+  volume: number;
+  /** Contracts of open interest across the whole listed chain. */
+  openInterest: number;
+}
+
 export interface ChainSnapshot {
   spot: number;
   /** Timestamp the upstream data itself refers to. */
@@ -27,6 +50,8 @@ export interface ChainSnapshot {
   contracts: NormalisedContract[];
   /** Upstream HTTP requests spent on this refresh. */
   requests: number;
+  /** Whole-chain volume and open interest, where the adapter can see them. */
+  activity?: ChainActivityTotals;
   notes: string[];
 }
 

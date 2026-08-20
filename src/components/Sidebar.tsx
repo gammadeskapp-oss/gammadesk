@@ -41,6 +41,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: '◎' },
   { href: '/strength', label: 'Strength', icon: '⇅' },
+  { href: '/scanner', label: 'Scanner', icon: '⌕' },
   // `/` and `/ticker` both land a symbol here, so they light the same item.
   { href: '/decision', label: 'Decision', icon: '◈' },
   { href: '/watchlist', label: 'Watchlist', icon: '★' },
