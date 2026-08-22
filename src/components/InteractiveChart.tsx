@@ -3,6 +3,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { isTimeframe, TIMEFRAMES, type Timeframe } from '@/lib/bars/types';
 import { ema, rsi } from '@/lib/ticker/indicators';
+import {
+  VolumeProfilePrimitive,
+  type VolumeProfileColours,
+} from './volumeProfileOverlay';
+import { DEFAULT_BUCKET_COUNT } from '@/lib/profile';
 
 /**
  * Candlesticks with toggleable overlays and an RSI pane.
@@ -32,6 +37,25 @@ const COLOR = {
   crosshair: '#5a687d',
   band: '#2f3a52',
 };
+
+/*
+ * The profile is context, not signal, so its buckets sit back in a cool
+ * neutral and only the POC is allowed to be loud.
+ *
+ * The overlay draws beneath the candles, so these no longer have to be faint
+ * enough to read price through — but they are still translucent, because the
+ * grid and the moving averages pass behind the histogram as well, and a solid
+ * block there would read as a hole punched in the chart.
+ */
+const PROFILE_COLOURS: VolumeProfileColours = {
+  bucket: 'rgba(96, 118, 150, 0.38)',
+  valueArea: 'rgba(140, 172, 214, 0.5)',
+  valueAreaFill: 'rgba(96, 118, 150, 0.1)',
+  poc: 'rgba(224, 95, 158, 0.85)',
+};
+
+/** Legend swatch for the POC line, matching what the canvas draws. */
+const POC_SWATCH = '#e05f9e';
 
 // --- overlay preferences -----------------------------------------------------
 
@@ -66,6 +90,7 @@ const DEFAULT_OVERLAYS: OverlayState = {
 
 const OVERLAY_KEY = 'gammadesk.chart.overlays';
 const TF_KEY = 'gammadesk.chart.timeframe';
+const PROFILE_KEY = 'gammadesk.chart.volumeProfile';
 const STORE_EVENT = 'gammadesk:chart';
 
 /*
@@ -151,6 +176,35 @@ function writeTimeframe(value: Timeframe): void {
   window.dispatchEvent(new CustomEvent(STORE_EVENT));
 }
 
+/**
+ * The volume profile toggle, held for the session rather than for good.
+ *
+ * `sessionStorage`, not `localStorage`, and the difference is deliberate. The
+ * requirement is that the choice survives switching tickers — it is a render
+ * toggle over bars already in hand, so having it reset on every symbol change
+ * would be pure friction. It is *not* a standing preference like the moving
+ * averages are: the profile is a heavy overlay that covers a fifth of the
+ * pane, and the sensible state to come back to tomorrow is off.
+ *
+ * Same event bus as the overlays, so one subscription serves all three stores.
+ */
+function readProfileEnabled(): boolean {
+  try {
+    return window.sessionStorage.getItem(PROFILE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeProfileEnabled(value: boolean): void {
+  try {
+    window.sessionStorage.setItem(PROFILE_KEY, value ? '1' : '0');
+  } catch {
+    // Storage can be unavailable; the event still syncs this session.
+  }
+  window.dispatchEvent(new CustomEvent(STORE_EVENT));
+}
+
 // --- indicator maths ---------------------------------------------------------
 
 interface Bar {
@@ -217,9 +271,15 @@ interface SeriesResponse {
 export function InteractiveChart({
   symbol,
   initialTimeframe = '5m',
+  profileBuckets = DEFAULT_BUCKET_COUNT,
+  profileLookback = null,
 }: {
   symbol: string;
   initialTimeframe?: Timeframe;
+  /** Price levels the volume profile is divided into. */
+  profileBuckets?: number;
+  /** Bars to profile, counting back from the newest in view. Null = the view. */
+  profileLookback?: number | null;
 }) {
   const overlays = useSyncExternalStore(
     subscribeStore,
@@ -233,11 +293,18 @@ export function InteractiveChart({
     () => initialTimeframe,
   );
 
+  const profileOn = useSyncExternalStore(
+    subscribeStore,
+    readProfileEnabled,
+    () => false,
+  );
+
   const [data, setData] = useState<SeriesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const seriesRef = useRef<Partial<Record<OverlayKey, { applyOptions: (o: object) => void }>>>({});
+  const profileRef = useRef<VolumeProfilePrimitive | null>(null);
 
   /*
    * Derived, not tracked. Setting a `loading` flag at the top of the fetch
@@ -347,6 +414,28 @@ export function InteractiveChart({
           })),
         );
 
+        /*
+         * Volume profile, attached to the candles as a series primitive.
+         *
+         * Attached unconditionally and drawn only when enabled: the profile
+         * needs the series' price scale to place its buckets, and attaching
+         * and detaching on every toggle would mean tearing that binding down
+         * and rebuilding it for something that is purely a question of whether
+         * to paint. Disabled, it returns no renderer and costs nothing —
+         * the buckets are not even computed.
+         *
+         * Read from the store rather than from React state for the same reason
+         * the overlays are: this effect must not depend on the toggle, or
+         * ticking the box would rebuild the entire chart. Bucket count and
+         * lookback are applied by the effect below for the same reason, which
+         * runs on this `data` before the browser paints.
+         */
+        const profile = new VolumeProfilePrimitive(PROFILE_COLOURS);
+        profile.setBars(bars);
+        profile.setEnabled(readProfileEnabled());
+        candles.attachPrimitive(profile);
+        profileRef.current = profile;
+
         const closes = bars.map((b) => b.c);
         // Read straight from the store rather than through a ref: this effect
         // must not depend on overlay state, or every toggle would rebuild the
@@ -429,6 +518,8 @@ export function InteractiveChart({
         chart.timeScale().fitContent();
         cleanup = () => {
           seriesRef.current = {};
+          profileRef.current = null;
+          // `chart.remove()` disposes attached primitives with the series.
           chart.remove();
         };
       } catch {
@@ -451,6 +542,15 @@ export function InteractiveChart({
       series.applyOptions({ visible: usable && overlays[overlay.key] });
     }
   }, [overlays, data]);
+
+  // --- volume profile, likewise without rebuilding ---
+  useEffect(() => {
+    profileRef.current?.setOptions({
+      bucketCount: profileBuckets,
+      lookback: profileLookback,
+    });
+    profileRef.current?.setEnabled(profileOn);
+  }, [profileOn, profileBuckets, profileLookback, data]);
 
   const toggle = (key: OverlayKey) => {
     writeOverlays({ ...overlays, [key]: !overlays[key] });
@@ -524,6 +624,43 @@ export function InteractiveChart({
               </label>
             );
           })}
+
+          {/*
+            Separated from the moving averages because it is a different kind
+            of thing: not a line derived per bar, but a histogram over the
+            whole visible window.
+          */}
+          <label
+            className="flex cursor-pointer items-center gap-1.5 border-l border-term-line py-1 pl-3 text-2xs tracking-[0.08em] text-term-dim"
+            title="Volume by price, estimated from the bars already loaded. Toggling only changes what is drawn — nothing is refetched."
+          >
+            <input
+              type="checkbox"
+              checked={profileOn}
+              onChange={() => writeProfileEnabled(!profileOn)}
+              className="h-3.5 w-3.5 shrink-0 accent-[#f0a500]"
+            />
+            <span
+              aria-hidden
+              className="h-2.5 w-3.5 shrink-0"
+              style={{
+                background: PROFILE_COLOURS.valueArea,
+                opacity: profileOn ? 1 : 0.3,
+              }}
+            />
+            Volume profile
+          </label>
+
+          {profileOn && (
+            <span className="flex items-center gap-1.5 py-1 text-2xs text-term-faint">
+              <span
+                aria-hidden
+                className="h-0.5 w-3.5 shrink-0 border-t border-dashed"
+                style={{ borderColor: POC_SWATCH }}
+              />
+              POC
+            </span>
+          )}
         </div>
       </figcaption>
 
@@ -534,7 +671,9 @@ export function InteractiveChart({
           ref={containerRef}
           className="h-[420px] w-full sm:h-[520px]"
           role="img"
-          aria-label={`${symbol} ${timeframe} candlestick chart with moving averages and an RSI panel.`}
+          aria-label={`${symbol} ${timeframe} candlestick chart with moving averages and an RSI panel${
+            profileOn ? ', and an estimated volume-by-price profile on the right edge' : ''
+          }.`}
         />
       )}
 
@@ -545,6 +684,27 @@ export function InteractiveChart({
         </span>
         {data && <span className="tabular-nums">last bar {data.asOfLabel}</span>}
       </div>
+
+      {/*
+        Stated on the page, not just in the source. Someone reading a POC off
+        this chart is reading a number that came out of an assumption, and they
+        should be told which one before they trade against it.
+      */}
+      {profileOn && (
+        <p className="border-t border-term-line px-3 py-2 text-2xs leading-relaxed text-term-faint">
+          <span className="text-flip">Volume profile is an estimate.</span> These
+          bars record only a high, a low and a session total — not the price each
+          share actually traded at. Each bar&rsquo;s volume is therefore spread
+          evenly across its range, so all the detail inside a bar comes from that
+          rule rather than from the tape, and the shape leans toward wherever bars
+          overlapped. It is closest to the truth on the fastest timeframes, where
+          bars are narrow and the rule has little left to invent. Built from{' '}
+          {profileLookback === null ? 'the visible range' : `${profileLookback} bars`}
+          {' '}in {profileBuckets} price levels. No delta and no bid/ask split:
+          bars cannot tell buying from selling, and a made-up number is worse than
+          a missing one.
+        </p>
+      )}
     </figure>
   );
 }
