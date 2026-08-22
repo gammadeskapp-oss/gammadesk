@@ -19,7 +19,8 @@
     "verify:rs": "node scripts/verify-rs.js",
     "verify:netliq": "node scripts/verify-netliq.mjs",
     "verify:nw": "node scripts/verify-nw.mjs",
-    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw"
+    "verify:profile": "node scripts/verify-profile.mjs",
+    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile"
   },
   "dependencies": {
     "@vercel/blob": "^2.7.0",
