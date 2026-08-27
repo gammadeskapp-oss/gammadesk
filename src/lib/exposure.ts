@@ -250,6 +250,28 @@ export function buildPositioning(
   // --- summary ------------------------------------------------------------
   const flipLevel = findGammaFlip(inScope, params);
 
+  /*
+   * The nearest expiration's flip, priced from that expiration alone.
+   *
+   * Worth its own number because short-dated gamma dominates the next few
+   * sessions and decays out of the book fastest, so the front week's crossing
+   * routinely sits on the other side of spot from the full chain's. Blending
+   * them would hide exactly the disagreement that matters.
+   *
+   * This re-prices a strictly smaller contract set over the same grid, so it
+   * costs a fraction of the full-chain pass that just ran. Only meaningful
+   * when there is more than one expiration in scope — with one, it would
+   * simply restate `flipLevel`.
+   */
+  const frontExpiration = expirations.length > 1 ? expirations[0] : null;
+  const frontFlipLevel =
+    frontExpiration === null
+      ? null
+      : findGammaFlip(
+          inScope.filter((c) => c.expiration === frontExpiration),
+          params,
+        );
+
   let magnetAbove: Summary['magnetAbove'] = null;
   let magnetBelow: Summary['magnetBelow'] = null;
 
@@ -271,6 +293,8 @@ export function buildPositioning(
     netGex: grandTotal.gex,
     regime: grandTotal.gex >= 0 ? 'positive' : 'negative',
     flipLevel,
+    frontFlipLevel,
+    frontExpiration,
     magnetAbove,
     magnetBelow,
     totalCallOi: grandTotal.callOi,

@@ -6,13 +6,14 @@ import { ExposureTables } from '@/components/ExposureTables';
 import { Footer } from '@/components/Footer';
 import { ForecastChart } from '@/components/ForecastChart';
 import { InfoTip } from '@/components/InfoTip';
+import { LevelsPanel } from '@/components/LevelsPanel';
 import { PageBar } from '@/components/PageBar';
 import { ReadMode } from '@/components/ReadMode';
 import { SimpleRead } from '@/components/SimpleRead';
 import { config } from '@/lib/config';
 import { TradeabilityPanel } from '@/components/TradeabilityPanel';
 import { DecisionError, getDecision, type DecisionResult } from '@/lib/decision';
-import { exposureIsReliable, type Check, type Grade, type Wall } from '@/lib/decision/types';
+import { exposureIsReliable, type Check, type Grade } from '@/lib/decision/types';
 import { getForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
@@ -132,120 +133,6 @@ function Tile({
       </div>
       <div className={`mt-1 text-lg font-bold tabular-nums ${colour}`}>{value}</div>
       {sub && <div className="mt-0.5 text-2xs text-term-faint">{sub}</div>}
-    </div>
-  );
-}
-
-function WallRow({
-  wall,
-  spot,
-  showExposure,
-}: {
-  wall: Wall;
-  spot: number;
-  /** False on thin chains — strength and the dollar figure are both GEX. */
-  showExposure: boolean;
-}) {
-  const pct = Math.round(wall.strength * 100);
-  return (
-    <li className="flex items-center gap-2.5 px-3 py-2 text-xs tabular-nums">
-      <span className="w-14 shrink-0 font-bold text-term-text">
-        {formatStrike(wall.strike)}
-      </span>
-      <span
-        className={`w-14 shrink-0 text-2xs ${
-          Math.abs(wall.distancePct) < 0.5 ? 'text-flip' : 'text-term-faint'
-        }`}
-      >
-        {wall.distancePct >= 0 ? '+' : ''}
-        {wall.distancePct.toFixed(2)}%
-      </span>
-
-      {showExposure ? (
-        <>
-          {/* Strength as a bar, relative to the biggest wall on the same side. */}
-          <span className="h-1.5 min-w-0 flex-1 bg-term-line" aria-hidden>
-            <span
-              className={`block h-full ${wall.gex >= 0 ? 'bg-pos' : 'bg-neg'}`}
-              style={{ width: `${Math.max(3, pct)}%` }}
-            />
-          </span>
-
-          <span className="w-9 shrink-0 text-right text-2xs text-term-dim">{pct}%</span>
-          <span
-            className={`w-20 shrink-0 text-right ${wall.gex >= 0 ? 'text-pos' : 'text-neg'}`}
-          >
-            {formatUsd(wall.gex)}
-          </span>
-          <span className="sr-only">
-            {wall.strike} is {pct} percent as strong as the largest wall on this side,
-            {spot > wall.strike ? ' below' : ' above'} the current price.
-          </span>
-        </>
-      ) : (
-        <span className="min-w-0 flex-1 text-right text-2xs text-term-faint">
-          exposure suppressed
-        </span>
-      )}
-    </li>
-  );
-}
-
-/** One of the two wall lists inside the Levels box. */
-function WallList({
-  title,
-  list,
-  tone,
-  tip,
-  spot,
-  showExposure,
-}: {
-  title: string;
-  list: Wall[];
-  tone: 'bull' | 'bear';
-  tip: TooltipKey;
-  spot: number;
-  showExposure: boolean;
-}) {
-  return (
-    <div className="border border-term-line">
-      <div className="flex items-baseline justify-between gap-2 border-b border-term-line px-3 py-2">
-        <span className="flex items-center gap-1.5">
-          <h4 className={`label-xs ${tone === 'bull' ? 'text-bull' : 'text-bear'}`}>
-            {title}
-          </h4>
-          <InfoTip for={tip} />
-        </span>
-        <span className="flex items-center gap-2 text-2xs text-term-faint">
-          nearest first
-          {showExposure && (
-            <>
-              <span className="flex items-center gap-1">
-                strength <InfoTip for="wallStrength" />
-              </span>
-              <span className="flex items-center gap-1">
-                $ <InfoTip for="wallDollar" />
-              </span>
-            </>
-          )}
-        </span>
-      </div>
-      {list.length === 0 ? (
-        <p className="px-3 py-6 text-center text-xs text-term-dim">
-          No meaningful gamma on this side.
-        </p>
-      ) : (
-        <ul className="divide-y divide-term-line/60">
-          {list.map((w) => (
-            <WallRow
-              key={w.strike}
-              wall={w}
-              spot={spot}
-              showExposure={showExposure}
-            />
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
@@ -375,43 +262,13 @@ function Decision({ data }: { data: DecisionResult }) {
         missed.
       */}
       <div className="grid gap-4 xl:grid-cols-2">
-        <Section step={2} title="Levels">
-          <div className="panel space-y-2 p-2">
-            <WallList
-              title="Walls above"
-              list={walls.above}
-              tone="bull"
-              tip="wallsAbove"
-              spot={c.spot}
-              showExposure={showExposure}
-            />
-            <WallList
-              title="Walls below"
-              list={walls.below}
-              tone="bear"
-              tip="wallsBelow"
-              spot={c.spot}
-              showExposure={showExposure}
-            />
-            {showExposure ? (
-              <p className="flex flex-wrap items-center gap-1.5 px-1 pb-1 text-2xs leading-relaxed text-term-faint">
-                <span>
-                  Strength is relative to the largest wall on the same side, not
-                  across both — a 100% bar below does not mean the floor is
-                  stronger than the ceiling. Amber bars are positive gamma
-                  (dealers lean against moves), blue is negative.
-                </span>
-                <InfoTip for="wallColour" />
-              </p>
-            ) : (
-              <p className="px-1 pb-1 text-2xs leading-relaxed text-flip">
-                Not enough options liquidity to compute exposure reliably. The
-                strikes are still listed, but their gamma figures and strength
-                bars are suppressed — see Tradeability below.
-              </p>
-            )}
-          </div>
-        </Section>
+        <LevelsPanel
+          walls={walls}
+          levelMap={data.levelMap}
+          spot={c.spot}
+          asOfLabel={c.asOfLabel}
+          showExposure={showExposure}
+        />
 
         {/*
           Right column: the conviction checks, and under them the tradeability

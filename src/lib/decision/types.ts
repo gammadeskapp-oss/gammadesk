@@ -1,3 +1,4 @@
+import type { LevelMap } from './levelMap';
 import type { Liquidity } from '../ticker/types';
 
 export type Grade = 'green' | 'amber' | 'red';
@@ -57,6 +58,13 @@ export interface Verdict {
 export interface DecisionResult {
   context: DecisionContext;
   walls: { above: Wall[]; below: Wall[] };
+  /**
+   * The same levels arranged as one ladder, for the level map view.
+   *
+   * Always built — the toggle between the two views is a client-side switch,
+   * so both have to be present in the payload the server sends.
+   */
+  levelMap: LevelMap;
   conviction: Conviction;
   verdict: Verdict;
   hasOptions: boolean;
