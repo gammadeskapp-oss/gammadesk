@@ -18,11 +18,17 @@ export interface StrikeGex {
   gex: number;
 }
 
-/** Strikes considered on each side before distance stops mattering. */
-const NEIGHBOURHOOD = 8;
+/**
+ * Strikes considered on each side before distance stops mattering.
+ *
+ * Exported so the level map can state the rule it is applying rather than
+ * describing it from memory — a tooltip that quotes a number this file no
+ * longer uses is worse than no tooltip.
+ */
+export const NEIGHBOURHOOD = 8;
 
 /** Share of the neighbourhood's biggest wall that counts as "strong". */
-const STRONG_ENOUGH = 0.4;
+export const STRONG_ENOUGH = 0.4;
 
 export function nearestStrongWall(
   rows: StrikeGex[],

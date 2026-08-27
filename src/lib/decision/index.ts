@@ -7,6 +7,7 @@ import { nearestStrongWall } from '../simple/walls';
 import { normaliseSymbol } from '../ticker/bars';
 import { getTradeability } from '../ticker/liquidity';
 import { buildConviction } from './conviction';
+import { buildLevelMap } from './levelMap';
 import type { DecisionContext, DecisionResult, Grade, Verdict, Wall } from './types';
 
 export type { DecisionResult } from './types';
@@ -216,6 +217,9 @@ async function build(symbol: string): Promise<DecisionResult> {
   return {
     context,
     walls,
+    // Built from the same rows and the same wall rule as the lists above, so
+    // the two views of section 2 cannot contradict each other.
+    levelMap: buildLevelMap(strikeGex, spot, summary),
     conviction,
     verdict,
     hasOptions: walls.above.length > 0 || walls.below.length > 0,

@@ -58,6 +58,20 @@ export interface Summary {
   regime: 'positive' | 'negative';
   /** Spot level at which net dealer gamma crosses zero, or null if none found. */
   flipLevel: number | null;
+  /**
+   * The nearest expiration's own flip level, computed from that expiration's
+   * contracts alone. Null when the chain has only one expiration, or when that
+   * expiration never crosses zero within the search band.
+   *
+   * The front week can sit on the other side of spot from the full chain —
+   * short-dated gamma is concentrated and decays fast, so it moves the
+   * crossing around far more than the back months do. Kept separate rather
+   * than blended because the two answer different questions: the full chain
+   * says where the book flips, the front week says where it flips this week.
+   */
+  frontFlipLevel: number | null;
+  /** Expiration `frontFlipLevel` was computed from, or null when there is none. */
+  frontExpiration: string | null;
   magnetAbove: { strike: number; gex: number } | null;
   magnetBelow: { strike: number; gex: number } | null;
   totalCallOi: number;

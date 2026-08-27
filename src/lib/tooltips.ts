@@ -252,6 +252,78 @@ const ENTRIES = {
       'Amber = calm (dealers push back against moves). Blue = wild (dealers speed moves up).',
   },
 
+  // --- level map ------------------------------------------------------------
+
+  levelMap: {
+    label: 'Level map',
+    plain:
+      'Every level worth knowing about, stacked highest to lowest with the current price in the middle.',
+    detail:
+      'The rungs are evenly spaced so the labels stay readable, which means the gaps on screen are NOT to scale. The right-hand % column carries the true distance from spot — read that, not the spacing.',
+  },
+
+  levelWall: {
+    label: 'Wall',
+    plain:
+      'A strike with enough gamma that dealers have to hedge around it, so price tends to stall there.',
+    detail:
+      'The test: among the 8 nearest strikes on its own side of spot, this one carries at least 40% of the gamma of the biggest strike in that group. Measured per side, so a wall below is not being compared with a wall above.',
+  },
+
+  levelHeaviest: {
+    label: 'Heaviest wall',
+    plain:
+      'The single biggest strike on the whole chain — the one level dealers have the most hedging to do at.',
+    detail:
+      'Largest absolute dollar gamma across every strike in scope, not just the nearby ones. It can sit well away from spot, and it is not automatically the level price is heading into next — the ceiling and floor are the near ones.',
+  },
+
+  levelCeiling: {
+    label: 'Ceiling',
+    plain: 'The nearest strong wall above the current price.',
+    detail:
+      'Nearest first, then strong enough: the closest strike above spot that clears the wall test. Deliberately not the biggest wall above — a huge one 5% away matters less to the next hour than a solid one just overhead. Same rule the rest of the site uses, so the pages cannot disagree.',
+  },
+
+  levelFloor: {
+    label: 'Floor',
+    plain: 'The nearest strong wall below the current price.',
+    detail:
+      'The mirror of the ceiling: the closest strike at or below spot that clears the wall test.',
+  },
+
+  levelFlip: {
+    label: 'Gamma flip',
+    plain:
+      'The price where dealer gamma changes sign. Above it dealers damp moves; below it they amplify them.',
+    detail:
+      'Solved by re-pricing the entire book across a grid of hypothetical spot prices, holding implied vol and time to expiry fixed, and interpolating the sign change nearest to spot. It is not a strike, so it has no gamma figure of its own. Blank when the book never crosses zero within 15% of spot.',
+  },
+
+  levelFrontFlip: {
+    label: 'Front-week flip',
+    plain:
+      'Where gamma flips if you count only the nearest expiry, which is what drives the next few sessions.',
+    detail:
+      'Same solve, run on the nearest expiration alone. It appears only when it lands somewhere different from the full-chain flip. When the two disagree, the front week is the one the next few days are being traded against, and it moves fastest as that expiry decays out of the book.',
+  },
+
+  levelDistance: {
+    label: '% from spot',
+    plain:
+      'How far this level actually is from the current price, as a percentage.',
+    detail:
+      'The honest distance, because the ladder spacing is not. Rungs are evenly spaced for legibility, so two rungs that look adjacent may be 0.2% or 4% apart — this column is the one that tells you which.',
+  },
+
+  levelNaiveGex: {
+    label: 'How this gamma is estimated',
+    plain:
+      'Every dealer is assumed to be short calls and long puts. That is a rule of thumb, not a measurement of what dealers actually hold.',
+    detail:
+      'The standard fixed-assumption convention: customers are taken to buy puts for protection and sell calls for yield, so the dealer on the other side is long calls and short puts, applied uniformly to every contract on the chain. Real dealer books are not uniform and nobody outside them can see the true positioning. When the assumption is wrong for a name, the levels shift with it.',
+  },
+
   convFirstTouch: {
     label: 'First touch',
     plain:
