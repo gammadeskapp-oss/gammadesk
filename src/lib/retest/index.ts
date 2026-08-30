@@ -16,8 +16,6 @@ import {
   step,
   volumeAboveAverage,
   ATR_PERIOD,
-  EVENT_COOLDOWN_MINUTES,
-  RETEST_TIMEOUT_MINUTES,
   type Bar,
 } from './machine';
 import { readRetestDoc, writeRetestDoc, type RetestDoc } from './store';

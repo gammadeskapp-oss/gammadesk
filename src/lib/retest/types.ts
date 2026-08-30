@@ -93,6 +93,16 @@ export interface LevelState {
    */
   retestExtreme: number | null;
   /**
+   * Whether a first bar has established which side of the level price is on.
+   *
+   * Until it has, there is no "original side" for a break to be a break from.
+   * Without this, the first bar of the session reports every level it happens
+   * to sit beyond as having been broken at 09:30 — on a real session that was
+   * eight of twenty-two events, all describing the opening print rather than
+   * anything price did.
+   */
+  armed: boolean;
+  /**
    * Whether the current break has already produced a confirmed outcome.
    *
    * A break gets named once. Without this, a level that broke and stayed

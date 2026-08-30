@@ -132,6 +132,9 @@ export function initialState(level: MonitoredLevel, lastBarTime = 0): LevelState
     volumeAboveAverage: false,
     retestedAt: null,
     retestExtreme: null,
+    // A fresh level has not yet seen a bar, so it does not know which side of
+    // itself price is on. The first bar establishes that and emits nothing.
+    armed: false,
     settled: false,
     lastBarTime,
     lastEventAt: null,
@@ -149,6 +152,9 @@ function reset(state: LevelState, price: number, barTime: number): LevelState {
     volumeAboveAverage: false,
     retestedAt: null,
     retestExtreme: null,
+    // Already established — a reset re-arms rather than waiting for another
+    // bar, because the side price is on is known by now.
+    armed: true,
     settled: false,
     lastBarTime: barTime,
     lastEventAt: state.lastEventAt,
@@ -209,6 +215,18 @@ export function step(
 ): StepResult {
   const next: LevelState = { ...state, price: level, lastBarTime: bar.t };
   const at = iso(bar.t);
+
+  /*
+   * The first bar only establishes which side of the level price is on.
+   *
+   * A level the session opens well above was not "lost" at 09:30 — price was
+   * simply never on the other side of it. Treating the opening bar as a break
+   * filled a real session's feed with eight 09:30 events that described the
+   * opening print and nothing else.
+   */
+  if (!state.armed) {
+    return { state: { ...next, armed: true }, event: null };
+  }
 
   if (state.status === 'holding') {
     /*

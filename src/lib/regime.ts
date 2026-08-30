@@ -79,6 +79,58 @@ export function regimeTone(regime: Regime): 'pos' | 'neg' {
 }
 
 /**
+ * Everything the /decision regime tile shows, from one function.
+ *
+ * ## Why this exists rather than three calls at the call site
+ *
+ * That tile has two inputs, not one. The option chain says which side of the
+ * flip spot sits on right now; the level feed says which crossing of it was
+ * last confirmed on one-minute bars. They normally agree. When the chain has
+ * just been re-solved they can disagree for a refresh or two, and the tile has
+ * to say so rather than silently picking a winner.
+ *
+ * Composing that at the call site would mean the page deciding some of the
+ * wording and this file deciding the rest — which is exactly the split that
+ * let the dashboard and the decision page drift to NEGATIVE and WILD in the
+ * first place. So the disagreement state is a parameter here, and the page
+ * renders what it is given.
+ *
+ * @param chain     What the option chain says, which is the current reading.
+ * @param observed  What the level feed last confirmed, or null when there is
+ *   no feed reading to compare against. Passing the same value as `chain` is
+ *   agreement, not disagreement.
+ */
+export interface RegimeDisplay {
+  /** The headline. Always the chain's reading — it is the live one. */
+  value: string;
+  /** The line under it. */
+  sub: string;
+  /** Amber when the two sources disagree, so the conflict is visible. */
+  tone: 'pos' | 'neg' | 'flip';
+  /** Whether the two sources disagree, for anything that needs to branch. */
+  disagrees: boolean;
+}
+
+export function regimeDisplay(
+  chain: Regime,
+  observed: Regime | null = null,
+): RegimeDisplay {
+  const disagrees = observed !== null && observed !== chain;
+
+  return {
+    // The chain is what the tile reports either way. The feed's reading is a
+    // caveat on it, not a replacement for it: the feed describes a crossing
+    // that has already happened, the chain describes where spot sits now.
+    value: regimeLabel(chain),
+    sub: disagrees
+      ? `Level feed last saw a flip to ${regimeWord(observed)}. The two readings disagree.`
+      : regimeSubLine(chain),
+    tone: disagrees ? 'flip' : regimeTone(chain),
+    disagrees,
+  };
+}
+
+/**
  * The regime behind a `calm`/`wild` mood, for payloads that carry the mood.
  *
  * Only safe where the mood was derived from the regime alone — which is true

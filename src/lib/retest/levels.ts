@@ -68,7 +68,7 @@ export function buildLevels(
       id: priceId('ceiling', wall.strike),
       kind: 'ceiling',
       price: wall.strike,
-      label: `${wall.strike} wall`,
+      label: 'wall',
     });
   }
 
@@ -77,7 +77,7 @@ export function buildLevels(
       id: priceId('floor', wall.strike),
       kind: 'floor',
       price: wall.strike,
-      label: `${wall.strike} wall`,
+      label: 'wall',
     });
   }
 

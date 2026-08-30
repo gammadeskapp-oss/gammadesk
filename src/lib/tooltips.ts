@@ -486,6 +486,114 @@ const ENTRIES = {
       'Filtering only hides rows. The order stays as it was — biggest dollar move first — and no number changes. The search and the group filter are both kept in the web address, so a filtered view can be shared or reloaded.',
   },
 
+  // --- breadth --------------------------------------------------------------
+
+  breadth: {
+    label: 'Breadth',
+    plain:
+      'How many companies are joining in. Imagine a class of 500 students sitting a test. The class average can look fine because a few top students did brilliantly. Breadth tells you how the rest of the class did.',
+    detail:
+      'The share of S&P 500 companies trading above yesterday’s closing price, counted from the constituents themselves. It describes how many are taking part. It says nothing about which way price goes next.',
+  },
+
+  breadthSpread: {
+    label: 'Average company vs the index',
+    plain:
+      'A second way to ask the same question, using two funds. One counts every company equally. The other counts big companies more. When they move apart, a few large companies are doing the work.',
+    detail:
+      'RSP is the Invesco S&P 500 Equal Weight ETF — an exchange-traded fund holding all 500 companies in equal amounts, so it follows the average company. SPY holds the same 500 weighted by company size. The figure is the RSP day change minus the SPY day change.',
+  },
+
+  breadthGreen15: {
+    label: 'Higher than 15 minutes ago',
+    plain:
+      'The share of companies trading above where they were a quarter of an hour ago. It shows whether participation is improving or fading right now.',
+    detail:
+      'Compared against this site’s own price snapshot from at least fifteen minutes earlier. The exact gap used is stated on the card.',
+  },
+
+  breadthAverage: {
+    label: 'Above their average price today',
+    plain:
+      'The share of companies trading above their own average price so far today.',
+    detail:
+      'A plain average of the session’s prices, not a volume-weighted average price (VWAP), which weights each price by how much traded there. Neither batch price source carries the volume a real VWAP needs. Only available on the backup price feed.',
+  },
+
+  // --- the level event feed ---------------------------------------------------
+
+  retestFeed: {
+    label: 'What happened at the levels',
+    plain:
+      'A running note of how price behaved when it met an important price. One candle through a level means little. A level that breaks, gets checked again and pushes price away is worth naming.',
+    detail:
+      'Built from one-minute bars. Each line says what happened and when. None of it is a forecast, and no line is a reason to buy or sell.',
+  },
+
+  retestFailed: {
+    label: 'Rejected / Held',
+    plain:
+      'Price broke through a level, came back to check if it could get back in, and was pushed away. Like being locked out after the door shuts. The same thing upwards means the breakout stuck.',
+    detail:
+      'The break must close beyond the level, price must return to touch it, fail to close back on its original side, and then extend further away. Wicks through a level do not count.',
+  },
+
+  retestFake: {
+    label: 'Fake break',
+    plain:
+      'Price pushed through a level and then closed straight back where it started. The break did not stick.',
+    detail:
+      'A close back on the original side before the break was ever confirmed by a rejection. The level is treated as unbroken again from that point.',
+  },
+
+  retestLeft: {
+    label: 'Broke and left',
+    plain:
+      'Price went through the level and simply kept going. It never came back to check, so there is nothing more to say about it.',
+    detail:
+      'No return to the level within thirty minutes of the break. The level stays broken and is not reported again unless price actually comes back.',
+  },
+
+  retestBuffer: {
+    label: 'The wiggle room',
+    plain:
+      'Prices wobble constantly. A small cushion is added around each level so ordinary noise does not count as a break.',
+    detail:
+      'The larger of a tenth of a percent of the level and a quarter of the average true range (ATR) over 14 one-minute bars. ATR is the average distance a bar travels. The size of this cushion is a judgement call, not a rule — a different cushion produces different events.',
+  },
+
+  retestVolume: {
+    label: 'Busy or quiet',
+    plain:
+      'Whether more shares than usual changed hands on the bar that broke the level. A move on quiet trading involved fewer people.',
+    detail:
+      'The breaking bar’s volume against the average of the previous twenty one-minute bars.',
+  },
+
+  retestRegimeFlip: {
+    label: 'Regime flip',
+    plain:
+      'The gamma flip is the line between a calm market and a jumpy one. Crossing it and staying across changes how every other level behaves, so it gets its own line.',
+    detail:
+      'Emitted only when a flip break is confirmed by a rejection, never on a fake break — a fake break across the flip is exactly the case where the regime did not change.',
+  },
+
+  levelVwap: {
+    label: 'Average price today',
+    plain:
+      'The average price the stock has traded at so far today, counting each price by how much changed hands there. Many traders watch it.',
+    detail:
+      'Volume-weighted average price (VWAP), anchored to the 09:30 New York open and computed from one-minute bars.',
+  },
+
+  levelPriorDay: {
+    label: 'Yesterday’s high and low',
+    plain:
+      'The highest and lowest prices of the previous trading day. They are watched simply because many people can see them.',
+    detail:
+      'From the previous completed daily bar. Regular trading hours only.',
+  },
+
   rsSignalScore: {
     label: 'Nine-signal score',
     plain:
@@ -531,4 +639,17 @@ export const TOOLTIP_ORDER: TooltipKey[] = [
   'rsColour',
   'rsSectorColour',
   'velocitySearch',
+  'breadth',
+  'breadthSpread',
+  'breadthGreen15',
+  'breadthAverage',
+  'retestFeed',
+  'retestFailed',
+  'retestFake',
+  'retestLeft',
+  'retestBuffer',
+  'retestVolume',
+  'retestRegimeFlip',
+  'levelVwap',
+  'levelPriorDay',
 ];

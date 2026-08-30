@@ -103,11 +103,23 @@ function mirror(b) {
   };
 }
 
+/**
+ * A bar sitting exactly on the level, one minute before the fixture starts.
+ *
+ * The first bar a level ever sees only establishes which side price is on, so
+ * every fixture needs one before its own first bar can be a break. Prepended
+ * here rather than written into each fixture, so the minute numbers inside the
+ * fixtures still read as written.
+ */
+function armingBar(level) {
+  return { t: START - 60, o: level, h: level, l: level, c: level, v: 1000 };
+}
+
 /** Drive a whole sequence through the machine, collecting what it emitted. */
 function run(bars, { level = LEVEL, buffer = BUFFER, volumeFlag = true } = {}) {
   let state = initialState({ id: 'test', price: level }, 0);
   const events = [];
-  for (const b of bars) {
+  for (const b of [armingBar(level), ...bars]) {
     const result = step(state, b, level, buffer, volumeFlag);
     state = result.state;
     if (result.event) events.push(result.event);
@@ -175,6 +187,32 @@ section('Buffer and its inputs');
   ok('volume below the recent average is flagged false', !volumeAboveAverage(bars, 2));
   ok('volume above it is flagged true', volumeAboveAverage(bars, 3));
   ok('the first bar has no history to compare against', !volumeAboveAverage(bars, 0));
+}
+
+// --- the opening bar establishes a side, it does not break -------------------
+
+section('The first bar establishes a side');
+
+{
+  /*
+   * A level the session opens well below. Price was never above it, so nothing
+   * was lost — but a machine that treats its first bar as a break reports one
+   * at the open. On a real session that produced eight 09:30 events out of
+   * twenty-two, every one of them describing the opening print.
+   */
+  let state = initialState({ id: 'opened-above', price: LEVEL }, 0);
+  const opening = bar(0, { o: 105, h: 105.2, l: 104.8, c: 105 });
+  const first = step(state, opening, LEVEL, BUFFER, true);
+
+  ok('the opening bar emits nothing', first.event === null);
+  ok('and leaves the level holding', first.state.status === 'holding');
+  ok('but does arm it', first.state.armed === true);
+
+  // From there, a genuine crossing back down through the level IS a break.
+  state = first.state;
+  const crossing = step(state, bar(1, { o: 105, h: 105, l: 99.4, c: 99.5 }), LEVEL, BUFFER, true);
+  ok('a later genuine crossing still breaks', crossing.state.status === 'broken');
+  ok('and it is recorded as lost', crossing.state.direction === 'down');
 }
 
 // --- a break is a close, never a wick ---------------------------------------
@@ -484,6 +522,107 @@ section('A level that moves is a different level');
   ok('a hair of drift is tolerated', !levelMovedAway(state, 100.05));
   ok('a real move discards it', levelMovedAway(state, 100.5));
   ok('and so does a move the other way', levelMovedAway(state, 99.5));
+}
+
+// --- the words the feed prints -----------------------------------------------
+
+section('Wording');
+
+const W = await import('../src/lib/retest/wording.ts');
+
+/** A finished event, as the machine would hand one over. */
+function evt(over = {}) {
+  return {
+    id: 'x',
+    levelId: 'l',
+    kind: 'ceiling',
+    levelPrice: 770,
+    label: 'wall',
+    direction: 'down',
+    outcome: 'failed-retest',
+    brokenAt: '2026-08-28T13:52:00.000Z',
+    retestedAt: '2026-08-28T13:58:00.000Z',
+    firedAt: '2026-08-28T14:00:00.000Z',
+    etClock: '10:00',
+    volumeAboveAverage: true,
+    breadthPct: 34,
+    regime: null,
+    ...over,
+  };
+}
+
+{
+  /*
+   * The price is composed in one place. A label that also carried the price
+   * produced lines reading "770.00 770 wall lost", which is how this check
+   * came to exist.
+   */
+  ok('a whole-number level drops its decimals', W.levelWords(evt()) === '770 wall', W.levelWords(evt()));
+  ok(
+    'a solved level keeps the decimals it has',
+    W.levelWords(evt({ levelPrice: 771.11, label: 'gamma flip' })) === '771.11 gamma flip',
+    W.levelWords(evt({ levelPrice: 771.11, label: 'gamma flip' })),
+  );
+  ok(
+    'and one trailing zero goes',
+    W.levelWords(evt({ levelPrice: 772.5 })) === '772.5 wall',
+    W.levelWords(evt({ levelPrice: 772.5 })),
+  );
+  ok(
+    'no line repeats the price',
+    !/770.*770/.test(W.eventLine(evt())),
+    W.eventLine(evt()),
+  );
+}
+
+{
+  // The mirrored wording, which is the whole "upside is not an afterthought"
+  // requirement expressed in words rather than in logic.
+  ok('a downward rejection reads REJECTED', W.outcomeWord(evt()) === 'REJECTED');
+  ok(
+    'the same event upward reads HELD',
+    W.outcomeWord(evt({ direction: 'up' })) === 'HELD',
+  );
+  ok('a downward break was lost', W.breakWord('down') === 'lost');
+  ok('an upward break was taken', W.breakWord('up') === 'taken');
+  ok(
+    'a fake break reads the same both ways',
+    W.outcomeWord(evt({ outcome: 'fake-break' })) ===
+      W.outcomeWord(evt({ outcome: 'fake-break', direction: 'up' })),
+  );
+}
+
+{
+  const line = W.eventLine(evt());
+  ok('the line carries the break time', line.includes('lost 9:52'), line);
+  ok('the retest time', line.includes('retested 9:58'), line);
+  ok('the volume flag', line.includes('above-average volume'), line);
+  ok('and the breadth reading at the time', line.includes('breadth 34%'), line);
+
+  const noBreadth = W.eventLine(evt({ breadthPct: null }));
+  ok('breadth is omitted rather than guessed', !noBreadth.includes('breadth'), noBreadth);
+
+  const noRetest = W.eventLine(evt({ outcome: 'broke-and-left', retestedAt: null }));
+  ok('a level never retested says so by omission', !noRetest.includes('retested'), noRetest);
+}
+
+{
+  // Nothing in the feed may describe the future.
+  const forbidden = /(will|should|expect|likely|target|buy|sell|bullish|bearish)/i;
+  const samples = [
+    W.eventLine(evt()),
+    W.eventSentence(evt()),
+    W.eventSentence(evt({ direction: 'up' })),
+    W.eventSentence(evt({ outcome: 'fake-break' })),
+    W.eventSentence(evt({ outcome: 'broke-and-left' })),
+    W.regimeSentence(evt({ kind: 'flip', regime: 'calm' })),
+    W.regimeSentence(evt({ kind: 'flip', regime: 'wild', direction: 'up' })),
+  ];
+  for (const text of samples) {
+    ok(`no forecast wording: "${String(text).slice(0, 40)}..."`, !forbidden.test(String(text)));
+  }
+
+  ok('a non-flip event has no regime line', W.regimeSentence(evt()) === null);
 }
 
 // --- result ------------------------------------------------------------------

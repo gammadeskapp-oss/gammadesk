@@ -2,6 +2,9 @@ import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { ScannerBoard } from '@/components/ScannerBoard';
+import { InfoTip } from '@/components/InfoTip';
+import { getBreadth } from '@/lib/breadth';
+import { breadthSentence } from '@/lib/breadth/wording';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { getScannerView, storeStatus } from '@/lib/scanner';
 import { formatEtClock } from '@/lib/scanner/schedule';
@@ -17,6 +20,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function ScannerPage() {
   const view = await getScannerView();
+  // Reads a stored document, so it costs the scan nothing.
+  const breadth = await getBreadth().catch(() => null);
   const store = storeStatus();
   const { scan, latest, gamma, schedule } = view;
 
@@ -34,6 +39,29 @@ export default async function ScannerPage() {
                 : 'Not yet run'
           }
         />
+
+        {/*
+          One read-only line of market-wide context.
+
+          It is here because it explains the shape of the list — a morning
+          where almost nothing is participating produces few candidates, and
+          knowing that is different from concluding the scan is broken. It is
+          deliberately NOT a filter: nothing downstream reads it, no row is
+          included or excluded by it, and the seven filters are still seven.
+        */}
+        {breadth?.computed && (
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-2xs text-term-faint">
+            <span className="label-xs">Breadth</span>
+            <InfoTip for="breadth" />
+            <span className="font-bold tabular-nums text-term-text">
+              {Math.round(breadth.computed.pctAbovePriorClose)}%
+            </span>
+            <span>{breadthSentence(breadth.computed)}</span>
+            <span className="text-term-dim">
+              Context only — it is not one of the filters.
+            </span>
+          </p>
+        )}
 
         {/*
           Above the list, because it changes how every row on it reads. The
