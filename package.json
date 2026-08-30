@@ -21,8 +21,9 @@
     "verify:nw": "node scripts/verify-nw.mjs",
     "verify:profile": "node scripts/verify-profile.mjs",
     "verify:levelmap": "node scripts/verify-levelmap.mjs",
+    "verify:regime": "node scripts/verify-regime.mjs",
     "verify:retests": "node scripts/verify-retests.mjs",
-    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:retests"
+    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:regime && npm run verify:retests"
   },
   "dependencies": {
     "@vercel/blob": "^2.7.0",
