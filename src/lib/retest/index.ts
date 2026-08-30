@@ -69,6 +69,10 @@ function sessionOpenSeconds(date: string): number {
  * Only a confirmed outcome counts. A fake break across the flip is precisely
  * the case where the regime did NOT change, and calling it a regime flip would
  * be the most misleading line the feed could print.
+ *
+ * The front-week flip deliberately does NOT produce one of these. It is the
+ * nearest expiry's own crossing, so it moves around far more and says
+ * something weaker; its breaks appear in the feed as ordinary level events.
  */
 function regimeFor(event: {
   outcome: string;

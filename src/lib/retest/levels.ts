@@ -1,5 +1,6 @@
 import 'server-only';
 
+import type { LevelKind as MapLabel } from '../decision/levelMap';
 import type { DecisionResult } from '../decision/types';
 import type { MonitoredLevel } from './types';
 
@@ -15,13 +16,17 @@ import type { MonitoredLevel } from './types';
  * Taken from the previous session's bars rather than from the chain, because
  * they are facts about price, not about options.
  *
- * ## What is not here
+ * ## The front-week flip
  *
- * The brief also asks for the front-week flip — the gamma flip computed from
- * the nearest expiry alone. This branch has no such level: `lib/exposure.ts`
- * solves one flip across the whole book in scope, and the front-week variant
- * lives on a different branch. Rather than invent a second flip that would not
- * match anything on screen, it is left out and the honesty box says so.
+ * Taken from the level map's own `frontFlip` rung rather than re-solved here,
+ * so the price the feed names is character-for-character the price the ladder
+ * above it shows.
+ *
+ * That rung only exists when the front week actually disagrees with the full
+ * chain — when the near expiry drives the whole crossing, both solve to the
+ * same place and the map drops the duplicate. Watching it only when it is
+ * present is therefore the correct behaviour, not a gap: two levels a few
+ * cents apart would produce two near-identical events about one crossing.
  */
 
 /** Walls each side that are worth watching. Nearest first, as the page lists. */
@@ -54,6 +59,24 @@ export function buildLevels(
       kind: 'flip',
       price: context.flipLevel,
       label: 'gamma flip',
+    });
+  }
+
+  /*
+   * The front week's own crossing, when the level map says it is a distinct
+   * price. Same value, same rounding, same rung the reader can see above.
+   */
+  const frontFlip = decision.levelMap.rungs.find((rung) =>
+    rung.labels.includes('frontFlip' satisfies MapLabel),
+  );
+  if (frontFlip && frontFlip.price > 0) {
+    levels.push({
+      // Keyed by kind for the same reason as the full flip: it is re-solved
+      // whenever the chain updates, so its price is not a stable identity.
+      id: 'front-flip',
+      kind: 'frontFlip',
+      price: frontFlip.price,
+      label: 'front-week flip',
     });
   }
 

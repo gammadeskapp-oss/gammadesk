@@ -197,6 +197,12 @@ export function RetestFeed({
                 <span className="text-term-text">BROKE AND LEFT</span> — it went
                 through and never came back to check.
               </li>
+              <li>
+                <span className="text-term-text">front-week flip</span> — the
+                same calm/jumpy line worked out from the nearest expiry date
+                alone, which can sit somewhere different from the whole-book
+                one.
+              </li>
             </ul>
           </div>
 
@@ -226,9 +232,11 @@ export function RetestFeed({
               <InfoTip for="retestBuffer" className="mt-px" />
             </p>
             <p className="mt-1.5">
-              <span className="text-term-dim">The front-week flip is missing. </span>
-              This page computes one gamma flip across the whole book, not a
-              separate one for the nearest expiry, so that level is not watched.
+              <span className="text-term-dim">Two flip levels, sometimes. </span>
+              The nearest expiry has its own crossing, and it is watched
+              separately — but only when it sits somewhere different from the
+              whole-book one. When both solve to the same price there is one
+              level, not two.
             </p>
             <p className="mt-1.5">
               Every line says what happened. None of them says what happens next,

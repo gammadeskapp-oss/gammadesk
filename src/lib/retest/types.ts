@@ -8,7 +8,14 @@
  */
 
 /** What kind of price this is, which decides how an event is worded. */
-export type LevelKind = 'flip' | 'ceiling' | 'floor' | 'vwap' | 'priorHigh' | 'priorLow';
+export type LevelKind =
+  | 'flip'
+  | 'frontFlip'
+  | 'ceiling'
+  | 'floor'
+  | 'vwap'
+  | 'priorHigh'
+  | 'priorLow';
 
 export interface MonitoredLevel {
   /**
