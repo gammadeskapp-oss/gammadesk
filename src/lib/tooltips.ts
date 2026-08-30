@@ -478,6 +478,14 @@ const ENTRIES = {
       'Wilder’s Relative Strength Index over 14 of the stock’s own trading sessions — the same RSI(14) the /ticker chart draws. A leader can sit above 70 for months in a strong trend, so it is a stretch reading rather than a sell signal.',
   },
 
+  velocitySearch: {
+    label: 'Search',
+    plain:
+      'Type part of a ticker or a company name to narrow the table. NVDA and “nvidia” both work.',
+    detail:
+      'Filtering only hides rows. The order stays as it was — biggest dollar move first — and no number changes. The search and the group filter are both kept in the web address, so a filtered view can be shared or reloaded.',
+  },
+
   rsSignalScore: {
     label: 'Nine-signal score',
     plain:
@@ -522,4 +530,5 @@ export const TOOLTIP_ORDER: TooltipKey[] = [
   'rsLaggards',
   'rsColour',
   'rsSectorColour',
+  'velocitySearch',
 ];

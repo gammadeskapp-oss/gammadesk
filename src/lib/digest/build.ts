@@ -66,9 +66,14 @@ export async function buildDigest(): Promise<Digest> {
   // --- the readable part ----------------------------------------------------
   const lines: string[] = [];
 
+  /*
+   * Reads as a sentence, not as a label dropped into one. "dealers in WILD
+   * (positive gamma)" is what you get from substituting the shared label into
+   * the old wording, and it is not English.
+   */
   lines.push(
-    `${positioning.symbol} is at ${formatPrice(spot)} with dealers in ` +
-      `${regimeLabel(regime)} — their hedging ${
+    `${positioning.symbol} is at ${formatPrice(spot)} and the day reads ` +
+      `${regimeLabel(regime)}. Dealer hedging ${
         regime === 'positive'
           ? 'leans against moves, which tends to mean chop and mean reversion'
           : 'leans with moves, which tends to mean faster, trendier action'

@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import { Footer } from '@/components/Footer';
-import { formatStrike, formatUsd } from '@/lib/format';
+import { VelocityBoard, type SymbolMeta } from '@/components/VelocityBoard';
 import { formatAsOf } from '@/lib/time';
+import { getMembership } from '@/lib/rs/membership';
+import { getSymbolDirectory } from '@/lib/symbols/directory';
 import { getVelocity, storeStatus } from '@/lib/velocity';
-import type { RollOffReason, VelocityRow, VelocityTag } from '@/lib/velocity/types';
-import { TickerLink } from '@/components/TickerLink';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
@@ -15,118 +16,44 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-const TAG: Record<VelocityTag, string> = {
-  GREW: 'text-bull border-bull/40',
-  SHRANK: 'text-bear border-bear/40',
-  NEW: 'text-flip border-flip/40',
-};
-
-/** Plain-language reason a row is not repositioning. */
-const ROLL_OFF: Record<RollOffReason, string> = {
-  expired: 'Expired — contract is gone',
-  'left-window': 'No longer tracked',
-  'entered-window': 'Newly tracked',
-};
-
-const head =
-  'sticky top-0 z-10 whitespace-nowrap border-b border-term-edge bg-term-raised px-2.5 py-2 text-2xs font-bold uppercase tracking-[0.1em] text-term-dim';
-const cell = 'border-b border-term-line/60 px-2.5 py-1.5';
-
-/**
- * Shared by both tables. The rolled-off one swaps the Tag column for a reason,
- * because GREW/SHRANK is exactly the reading those rows should not invite.
- */
-function VelocityTable({
-  rows,
-  caption,
-  reasons = false,
-}: {
-  rows: VelocityRow[];
-  caption: string;
-  reasons?: boolean;
-}) {
-  return (
-    <div className="scroll-term max-h-[70vh] overflow-auto">
-      <table className="w-full border-separate border-spacing-0 text-right text-xs tabular-nums">
-        <caption className="sr-only">{caption}</caption>
-        <thead>
-          <tr>
-            <th scope="col" className={`${head} text-left`}>Ticker</th>
-            <th scope="col" className={head}>Expiry</th>
-            <th scope="col" className={head}>Strike</th>
-            <th scope="col" className={head}>vs spot</th>
-            <th scope="col" className={head}>Gamma was</th>
-            <th scope="col" className={head}>Gamma now</th>
-            <th scope="col" className={head}>Change</th>
-            <th scope="col" className={head}>%</th>
-            <th scope="col" className={`${head} text-left`}>
-              {reasons ? 'Why' : 'Tag'}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={`${r.symbol}-${r.expiration}-${r.strike}`}>
-              <th scope="row" className={`${cell} text-left font-bold text-term-text`}>
-                <TickerLink symbol={r.symbol} />
-              </th>
-              <td className={`${cell} text-term-dim`}>{r.expiryLabel}</td>
-              <td className={`${cell} text-term-text`}>{formatStrike(r.strike)}</td>
-              <td
-                className={`${cell} ${
-                  Math.abs(r.distancePct) < 1 ? 'text-flip' : 'text-term-faint'
-                }`}
-              >
-                {r.distancePct >= 0 ? '+' : ''}
-                {r.distancePct.toFixed(1)}%
-              </td>
-              <td className={`${cell} ${r.was >= 0 ? 'text-pos' : 'text-neg'}`}>
-                {r.was === 0 ? '—' : formatUsd(r.was)}
-              </td>
-              <td className={`${cell} ${r.now >= 0 ? 'text-pos' : 'text-neg'}`}>
-                {r.now === 0 ? '—' : formatUsd(r.now)}
-              </td>
-              <td
-                className={`${cell} font-bold ${
-                  reasons
-                    ? 'text-term-faint'
-                    : r.change >= 0
-                      ? 'text-bull'
-                      : 'text-bear'
-                }`}
-              >
-                {r.change >= 0 ? '+' : '−'}
-                {formatUsd(Math.abs(r.change))}
-              </td>
-              <td className={`${cell} text-term-dim`}>
-                {r.changePct === null
-                  ? '—'
-                  : `${r.changePct >= 0 ? '+' : ''}${r.changePct.toFixed(0)}%`}
-              </td>
-              <td className={`${cell} text-left`}>
-                {reasons ? (
-                  <span className="whitespace-nowrap border border-term-line px-1.5 py-0.5 text-2xs tracking-[0.08em] text-term-faint">
-                    {r.rollOff ? ROLL_OFF[r.rollOff] : '—'}
-                  </span>
-                ) : (
-                  <span
-                    className={`border px-1.5 py-0.5 text-2xs font-bold tracking-[0.1em] ${TAG[r.tag]}`}
-                  >
-                    {r.tag}
-                  </span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 export default async function VelocityPage() {
-  const data = await getVelocity();
+  /*
+   * Names and sectors for the filter, fetched alongside the velocity data.
+   *
+   * Both are allowed to fail. The directory is a cached lookup that already
+   * falls back to a built-in stub, and membership is a stored document — but
+   * neither is the reason anyone opened this page, so a failure costs the
+   * search its company names or the chips their sectors rather than costing
+   * the table.
+   */
+  const [data, directory, membership] = await Promise.all([
+    getVelocity(),
+    getSymbolDirectory().catch(() => null),
+    getMembership().catch(() => null),
+  ]);
   const store = storeStatus();
+
+  /*
+   * Only the symbols actually on this page. Building metadata for the whole
+   * directory would ship thousands of unused names to the client for a table
+   * that holds a few dozen.
+   */
+  const present = new Set(
+    [...data.rows, ...data.rolledOff].map((r) => r.symbol),
+  );
+
+  const names = new Map(directory?.entries.map((e) => [e.s, e.n]) ?? []);
+  const sectors = new Map(
+    membership?.members.map((m) => [m.symbol, m.sector]) ?? [],
+  );
+
+  const meta: SymbolMeta[] = [...present].sort().map((symbol) => ({
+    symbol,
+    // Falls back to the symbol, so a name the directory does not carry still
+    // matches on what the reader can see in the table.
+    name: names.get(symbol) ?? symbol,
+    sector: sectors.get(symbol) ?? null,
+  }));
 
   return (
     <>
@@ -202,94 +129,29 @@ export default async function VelocityPage() {
             </p>
           </div>
         ) : (
-          <>
-            {data.rows.length === 0 ? (
+          /*
+            The search box, the group filter and both tables. A client
+            component so filtering never round-trips to the server — this route
+            is force-dynamic, and a navigation per keystroke would re-read
+            storage each time. Suspense because it reads the query string.
+          */
+          <Suspense
+            fallback={
               <div className="panel px-4 py-10 text-center text-xs text-term-dim">
-                <p className="text-term-text">No material repositioning.</p>
-                <p className="mx-auto mt-2 max-w-xl leading-relaxed">
-                  No live strike moved more than $2M in dollar gamma between{' '}
-                  {data.previousDate} and {data.currentDate}. A quiet book is an
-                  ordinary result.
-                  {data.rolledOffTotal > 0 && (
-                    <>
-                      {' '}
-                      {data.rolledOffTotal} row
-                      {data.rolledOffTotal === 1 ? '' : 's'} changed only because
-                      the contracts rolled off; those are below.
-                    </>
-                  )}
-                </p>
+                Loading…
               </div>
-            ) : (
-              <section className="panel">
-                <VelocityTable
-                  rows={data.rows}
-                  caption="Largest day-over-day changes in per-strike dollar gamma at live expirations."
-                />
-              </section>
-            )}
-
-            {/*
-              Collapsed, and deliberately not merged into the list above. These
-              rows carry the largest numbers on the page and none of them are
-              positioning — showing them inline taught the opposite of what the
-              page is for.
-            */}
-            {data.rolledOff.length > 0 && (
-              <details className="panel group">
-                <summary className="flex cursor-pointer list-none items-center gap-2 px-3.5 py-3 text-xs text-term-dim transition-colors hover:text-term-text [&::-webkit-details-marker]:hidden">
-                  <span
-                    aria-hidden
-                    className="text-flip transition-transform group-open:rotate-90"
-                  >
-                    ▸
-                  </span>
-                  <span className="font-bold uppercase tracking-[0.14em] text-flip">
-                    Expired &amp; rolled off
-                  </span>
-                  <span className="text-term-faint">
-                    {data.rolledOffTotal} row{data.rolledOffTotal === 1 ? '' : 's'}
-                    {data.expiredTotal > 0 && ` · ${data.expiredTotal} expired`} —
-                    not repositioning
-                  </span>
-                </summary>
-
-                <div className="border-t border-term-line px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
-                  <p>
-                    <span className="text-term-dim">
-                      Nobody closed these positions.{' '}
-                    </span>
-                    A strike can only be compared when its expiry was tracked on
-                    both days. When it was not, the missing day counts as zero
-                    and the row shows a huge change that never happened.
-                  </p>
-                  <ul className="mt-2 space-y-1">
-                    <li>
-                      <span className="text-term-dim">Expired</span> — the expiry
-                      date has passed, so the contract no longer exists. Its
-                      gamma did not shrink; it stopped being a thing.
-                    </li>
-                    <li>
-                      <span className="text-term-dim">No longer tracked</span> —
-                      still live, but it fell outside the nearest five
-                      expirations we store.
-                    </li>
-                    <li>
-                      <span className="text-term-dim">Newly tracked</span> — just
-                      came inside those five, with open interest already built up
-                      on it. New to this page, not new to the market.
-                    </li>
-                  </ul>
-                </div>
-
-                <VelocityTable
-                  rows={data.rolledOff}
-                  caption="Strikes whose gamma changed because the contract rolled off, not because anyone repositioned."
-                  reasons
-                />
-              </details>
-            )}
-          </>
+            }
+          >
+            <VelocityBoard
+              rows={data.rows}
+              rolledOff={data.rolledOff}
+              rolledOffTotal={data.rolledOffTotal}
+              expiredTotal={data.expiredTotal}
+              meta={meta}
+              previousDate={data.previousDate}
+              currentDate={data.currentDate}
+            />
+          </Suspense>
         )}
 
         <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
