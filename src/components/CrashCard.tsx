@@ -1,3 +1,4 @@
+import { regimeLabel } from '@/lib/regime';
 import { formatPrice } from '@/lib/format';
 import { riskLabel, type RiskLabel } from '@/lib/forecast/risk';
 import type { ForecastResult } from '@/lib/forecast/types';
@@ -74,11 +75,7 @@ export function CrashCard({ forecast }: { forecast: ForecastResult }) {
                   : 'text-neg'
             }
           >
-            {forecast.regime === null
-              ? 'n/a'
-              : forecast.regime === 'positive'
-                ? 'POSITIVE'
-                : 'NEGATIVE'}
+            {forecast.regime === null ? 'n/a' : regimeLabel(forecast.regime)}
           </span>
         </div>
         <div>

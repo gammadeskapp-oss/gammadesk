@@ -144,10 +144,10 @@ export default function GuidePage() {
                 Flip</strong>.
               </p>
               <p>
-                POSITIVE means the market has padding today. Pushes get absorbed,
-                and price tends to drift back to where it came from. NEGATIVE
-                means the padding is off. A push keeps going, and moves feed on
-                themselves.
+                CALM (positive gamma) means the market has padding today. Pushes
+                get absorbed, and price tends to drift back to where it came
+                from. WILD (negative gamma) means the padding is off. A push
+                keeps going, and moves feed on themselves.
               </p>
               <p>
                 It is the difference between a car with working suspension and one

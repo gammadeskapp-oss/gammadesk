@@ -1,3 +1,4 @@
+import { regimeLabel, regimeSubLine, regimeTone } from '@/lib/regime';
 import { InfoTip } from './InfoTip';
 import { formatPrice, formatRatio, formatStrike, formatUsd } from '@/lib/format';
 import type { TooltipKey } from '@/lib/tooltips';
@@ -82,13 +83,9 @@ export function SummaryStrip({ summary, symbol }: SummaryStripProps) {
 
       <Tile
         label="Gamma regime"
-        value={regime === 'positive' ? 'POSITIVE' : 'NEGATIVE'}
-        sub={
-          regime === 'positive'
-            ? 'dealers dampen moves'
-            : 'dealers amplify moves'
-        }
-        tone={regime === 'positive' ? 'pos' : 'neg'}
+        value={regimeLabel(regime)}
+        sub={regimeSubLine(regime)}
+        tone={regimeTone(regime)}
         tip="regime"
       />
 

@@ -1,3 +1,4 @@
+import { regimeLabel } from '../regime';
 import 'server-only';
 
 import { getForecast } from '../forecast';
@@ -67,7 +68,7 @@ export async function buildDigest(): Promise<Digest> {
 
   lines.push(
     `${positioning.symbol} is at ${formatPrice(spot)} with dealers in ` +
-      `${regime} gamma — their hedging ${
+      `${regimeLabel(regime)} — their hedging ${
         regime === 'positive'
           ? 'leans against moves, which tends to mean chop and mean reversion'
           : 'leans with moves, which tends to mean faster, trendier action'
@@ -158,7 +159,7 @@ export function toDiscordMessage(digest: Digest): string {
   const flip =
     digest.flipLevel === null ? 'flip n/a' : `flip ${formatPrice(digest.flipLevel)}`;
   parts.push(
-    `${digest.symbol} ${formatPrice(digest.spot)} · gamma **${digest.regime.toUpperCase()}** ` +
+    `${digest.symbol} ${formatPrice(digest.spot)} · gamma **${regimeLabel(digest.regime)}** ` +
       `(${usdCompact(digest.netGex)}) · ${flip}`,
   );
 

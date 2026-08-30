@@ -10,6 +10,7 @@ import { LevelsPanel } from '@/components/LevelsPanel';
 import { PageBar } from '@/components/PageBar';
 import { ReadMode } from '@/components/ReadMode';
 import { SimpleRead } from '@/components/SimpleRead';
+import { regimeLabel, regimeSubLine, regimeTone } from '@/lib/regime';
 import { config } from '@/lib/config';
 import { TradeabilityPanel } from '@/components/TradeabilityPanel';
 import { DecisionError, getDecision, type DecisionResult } from '@/lib/decision';
@@ -182,9 +183,9 @@ function Decision({ data }: { data: DecisionResult }) {
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
           <Tile
             label="Gamma regime"
-            value={c.mood === 'calm' ? 'CALM' : 'WILD'}
-            sub={c.mood === 'calm' ? 'moves tend to fade' : 'moves tend to run'}
-            tone={c.mood === 'calm' ? 'pos' : 'neg'}
+            value={regimeLabel(c.regime)}
+            sub={regimeSubLine(c.regime)}
+            tone={regimeTone(c.regime)}
             tip="regime"
           />
           <Tile

@@ -42,9 +42,9 @@ const ENTRIES = {
   regime: {
     label: 'Gamma regime',
     plain:
-      'Plain word for the mood. POSITIVE = calm day, moves fade. NEGATIVE = wild day, moves snowball.',
+      'What kind of day it is. CALM means pushes get absorbed and fade. WILD means a push keeps going.',
     detail:
-      'Positive means dealer hedging leans against price moves; negative means it leans with them.',
+      '"Positive gamma" and "negative gamma" are the technical names for the same two states. Positive means dealer hedging leans against price moves and dampens them; negative means it leans with them and amplifies them. The site says CALM (positive gamma) and WILD (negative gamma) everywhere, so one state never appears under two names.',
   },
 
   flip: {
