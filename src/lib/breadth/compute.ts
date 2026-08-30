@@ -22,13 +22,21 @@ export const FLAT_BAND_PCT = 0.15;
 /** Minutes of look-back behind the "higher than they were" reading. */
 export const GREEN_LOOKBACK_MINUTES = 15;
 
-/** One symbol's session, reduced to what the counting needs. */
+/** One symbol, reduced to what the counting needs. */
 export interface SymbolSession {
-  /** Session prices so far, oldest first. */
-  closes: number[];
-  /** Bar spacing in seconds. */
-  granularity: number;
+  symbol: string;
+  /** Latest traded price. */
+  last: number;
+  /** Yesterday's closing price. */
   previousClose: number;
+  /**
+   * Prices earlier in the session, oldest first, latest last.
+   *
+   * Only the Yahoo fallback carries these; the Tradier quote path is a
+   * snapshot and supplies none. Everything that needs them treats an empty
+   * array as "not measurable" rather than substituting the latest price.
+   */
+  closes?: number[];
 }
 
 function pct(part: number, whole: number): number {
@@ -39,39 +47,37 @@ function pct(part: number, whole: number): number {
  * Share of a session's own prices the latest one sits above.
  *
  * NOT a volume-weighted average price, and not named as though it were. A
- * volume-weighted average needs volume per bar, and the only multi-symbol
- * endpoint that still answers returns none (see `spark.ts`). The plain mean of
- * the session's prices answers a similar question — is this stock above where
- * it has spent the day — without pretending to be the other measure.
+ * volume-weighted average needs the volume traded at each price, and neither
+ * batch source carries it — Tradier quotes are a snapshot with no VWAP field,
+ * and Yahoo's spark payload has no volume at all. Fetching it per symbol would
+ * be five hundred requests a minute, which is the cost this whole design
+ * exists to avoid.
+ *
+ * The plain mean of the session's prices answers a similar question — is this
+ * company above where it has spent the day — without pretending to be the
+ * other measure.
  */
-function aboveSessionAverage(closes: number[]): boolean {
+function aboveSessionAverage(closes: number[], last: number): boolean {
   const mean = closes.reduce((sum, c) => sum + c, 0) / closes.length;
-  return closes[closes.length - 1] > mean;
-}
-
-/** Whether the latest price is above the one `minutes` ago, or null if the
- *  session is not yet that long. */
-function higherThanMinutesAgo(
-  closes: number[],
-  granularity: number,
-  minutes: number,
-): boolean | null {
-  const bars = Math.round((minutes * 60) / Math.max(1, granularity));
-  if (bars < 1 || closes.length <= bars) return null;
-  return closes[closes.length - 1] > closes[closes.length - 1 - bars];
+  return last > mean;
 }
 
 /**
  * Count a universe into one sample.
  *
- * Symbols with no usable session are not counted at all — they are absent from
- * `measured`, so they cannot quietly land on either side of the ledger. A
- * percentage is always taken over the symbols that actually answered.
+ * @param priorPrices  What each symbol was trading at roughly fifteen minutes
+ *   ago, from this project's own stored snapshots. Symbols absent from it are
+ *   left out of that percentage rather than counted as unchanged.
+ *
+ * Symbols with no usable price are not counted at all — they are absent from
+ * `measured`, so they cannot quietly land on either side of the ledger, and
+ * every percentage is taken over the symbols that actually answered.
  */
 export function computeSample(
   sessions: Iterable<SymbolSession>,
   at: Date,
   etClock: string,
+  priorPrices: Map<string, number> = new Map(),
 ): BreadthSample {
   const counts: BreadthCounts = {
     measured: 0,
@@ -86,26 +92,23 @@ export function computeSample(
   let greenMeasured = 0;
 
   for (const session of sessions) {
-    const { closes, previousClose } = session;
-    if (closes.length === 0 || !(previousClose > 0)) continue;
+    const { last, previousClose } = session;
+    if (!(last > 0) || !(previousClose > 0)) continue;
 
     counts.measured += 1;
-    const last = closes[closes.length - 1];
     if (last > previousClose) counts.advancers += 1;
     else if (last < previousClose) counts.decliners += 1;
     else counts.unchanged += 1;
 
-    averageMeasured += 1;
-    if (aboveSessionAverage(closes)) aboveAverage += 1;
+    if (session.closes && session.closes.length > 0) {
+      averageMeasured += 1;
+      if (aboveSessionAverage(session.closes, last)) aboveAverage += 1;
+    }
 
-    const higher = higherThanMinutesAgo(
-      closes,
-      session.granularity,
-      GREEN_LOOKBACK_MINUTES,
-    );
-    if (higher !== null) {
+    const prior = priorPrices.get(session.symbol);
+    if (typeof prior === 'number' && prior > 0) {
       greenMeasured += 1;
-      if (higher) green += 1;
+      if (last > prior) green += 1;
     }
   }
 

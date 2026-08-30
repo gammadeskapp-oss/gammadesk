@@ -62,6 +62,8 @@ export interface EqualWeightSpread {
 export interface BreadthReading {
   /** Method A. Null when the constituent sweep has not produced a sample yet. */
   computed: BreadthSample | null;
+  /** Which price feed produced the latest sample. */
+  source: 'tradier' | 'yahoo' | null;
   /** Method B. Null only when the two-symbol fetch itself failed. */
   spread: EqualWeightSpread | null;
   /** Earlier samples from today, oldest first, for the sparkline. */
