@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { FacetChips, chipClass } from '@/components/FacetChips';
 import { useSearchParams } from 'next/navigation';
 import { InfoTip } from './InfoTip';
 import { StarButton } from './StarButton';
@@ -570,12 +571,9 @@ export function RsBoard({
     percents.m3 !== DEFAULT_PERCENTS.m3 ||
     percents.m6 !== DEFAULT_PERCENTS.m6;
 
-  const chip = (on: boolean) =>
-    `border px-2.5 py-1.5 text-2xs font-bold uppercase tracking-[0.1em] transition-colors ${
-      on
-        ? 'border-pos/60 bg-pos/15 text-pos'
-        : 'border-term-line bg-term-panel/60 text-term-faint hover:border-term-edge hover:text-term-dim'
-    }`;
+  // The same class the shared facet chips use, so every filter control on the
+  // page matches the ones in FacetChips above it.
+  const chip = chipClass;
 
   /*
    * The RSI toggle wears amber rather than the green every other control uses,
@@ -616,32 +614,17 @@ export function RsBoard({
               </>
             )}
           </span>
-          <div
-            role="group"
-            aria-label="Group or sector"
-            className="mt-1 flex flex-wrap gap-1"
-          >
-            {facets.map((f) => {
+          {/* Shared with /velocity — see components/FacetChips.tsx. The tone
+              callback is what this page adds: sector momentum colouring. */}
+          <FacetChips
+            facets={facets}
+            activeId={facetId}
+            onChange={setFacetId}
+            toneFor={(f) => {
               const tone = sectorTone(pulseById.get(f.id));
-              return (
-                <button
-                  key={f.id}
-                  type="button"
-                  aria-pressed={f.id === active?.id}
-                  onClick={() => setFacetId(f.id)}
-                  className={chip(f.id === active?.id)}
-                >
-                  {/*
-                    Only the name is coloured. The chip's border and fill are
-                    already saying which one is selected, and tinting the whole
-                    box would leave those two facts fighting over one control.
-                  */}
-                  <span className={tone ? SECTOR_TEXT[tone] : ''}>{f.label}</span>
-                  <span className="ml-1 font-normal opacity-70">{f.count}</span>
-                </button>
-              );
-            })}
-          </div>
+              return tone ? SECTOR_TEXT[tone] : null;
+            }}
+          />
 
           {/* The detail for whichever sector is selected. Absent for All and
               for the themed groups, which have no sector reading of their

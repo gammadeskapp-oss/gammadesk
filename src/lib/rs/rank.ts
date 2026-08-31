@@ -401,7 +401,14 @@ export interface Facet {
  * the whole index up front, so narrowing to SEMI shows those names carrying
  * the ranks they earned against all five hundred.
  */
-export function facetsFor(rows: RsRow[]): Facet[] {
+export function facetsFor(
+  /*
+   * Widened from `RsRow[]` to just the two fields it reads, so /velocity can
+   * build the same filter from its own rows without being forced to fabricate
+   * a full ranking row it has no scores for.
+   */
+  rows: Array<{ symbol: string; sector: Gics | null }>,
+): Facet[] {
   const present = new Set(rows.map((r) => r.symbol));
 
   const facets: Facet[] = [

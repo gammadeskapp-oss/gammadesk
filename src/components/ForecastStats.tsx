@@ -1,3 +1,4 @@
+import { regimeLabel, regimeTone } from '@/lib/regime';
 import { InfoTip } from './InfoTip';
 import { formatPrice, formatUsd } from '@/lib/format';
 import type { ForecastResult } from '@/lib/forecast/types';
@@ -72,15 +73,13 @@ export function ForecastStats({ data }: { data: ForecastResult }) {
 
       <Tile
         label="Gamma regime"
-        value={
-          data.regime === null ? '—' : data.regime === 'positive' ? 'POSITIVE' : 'NEGATIVE'
-        }
+        value={data.regime === null ? '—' : regimeLabel(data.regime)}
         sub={
           data.regime === null
             ? 'no listed options'
             : formatUsd(data.netGex ?? 0)
         }
-        tone={data.regime === null ? 'neutral' : data.regime === 'positive' ? 'pos' : 'neg'}
+        tone={data.regime === null ? 'neutral' : regimeTone(data.regime)}
         tip="regime"
       />
 

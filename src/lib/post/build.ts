@@ -3,6 +3,7 @@ import 'server-only';
 import { formatStrike } from '../format';
 import { getPositioning } from '../positioning';
 import { marketToday } from '../time';
+import { regimeLabel, type Regime } from '../regime';
 import type { Digest } from '../digest/types';
 import type { MorningPost } from './types';
 
@@ -64,19 +65,22 @@ function plainEnglish(args: {
 
 function compose(args: {
   symbol: string;
+  regime: Regime;
   mood: 'calm' | 'jumpy';
   wallAbove: number | null;
   floorBelow: number | null;
   flipLevel: number | null;
   plain: string;
 }): string {
-  const { symbol, mood, wallAbove, floorBelow, flipLevel, plain } = args;
+  const { symbol, regime, mood, wallAbove, floorBelow, flipLevel, plain } = args;
   const dash = '—';
   const strike = (v: number | null) => (v === null ? dash : formatStrike(v));
 
   return [
     `$${symbol} this morning ${mood === 'calm' ? '🟡' : '🔴'}`,
-    `Mood: ${mood}`,
+    // The same words the site uses. A reader who arrives here from a post
+    // should not meet a third vocabulary for the state they just read about.
+    `Mood: ${regimeLabel(regime)}`,
     `Wall above: ${strike(wallAbove)} · Floor below: ${strike(floorBelow)}`,
     `Gets wild only under: ${flipLevel === null ? dash : formatStrike(flipLevel)}`,
     `What this means: ${plain}`,
@@ -103,6 +107,7 @@ export async function buildMorningPost(): Promise<MorningPost> {
 
   const text = compose({
     symbol: data.symbol,
+    regime,
     mood,
     wallAbove,
     floorBelow,
@@ -143,14 +148,15 @@ function headerDate(date: string): string {
 /**
  * The Discord version, formatted like the daily digest.
  *
- * Two halves on purpose. The top is written for someone reading the channel:
- * bold values, one idea per line, the same shape the digest uses so the two
- * daily messages look like they come from the same place.
+ * Written for someone reading the channel: bold values, one idea per line, the
+ * same shape the digest uses so the two daily messages look like they come
+ * from the same place.
  *
- * The bottom keeps the post verbatim inside a code fence, because the whole
- * point of this message is that it can be copied to X unchanged — Markdown
- * would otherwise eat the `·` separators, and a reader on a phone gets a
- * one-tap copy of exactly the characters that go out.
+ * It used to carry a second half — the post verbatim in a code fence under a
+ * "Copy for X:" heading — so a reader could copy it to X unchanged. That was
+ * removed deliberately. The consequence is worth stating plainly: the six-line
+ * post text no longer reaches Discord at all, and the only place to copy it
+ * from is the Copy button on /daily.
  */
 export function toDiscordMessage(
   post: MorningPost,
@@ -166,7 +172,13 @@ export function toDiscordMessage(
 ): string {
   const dash = '—';
   const strike = (v: number | null) => (v === null ? dash : formatStrike(v));
-  const mood = post.mood === 'calm' ? '🟡 **CALM**' : '🔴 **JUMPY**';
+  /*
+   * Same words as every screen, through the same helper — the Discord message
+   * and the site were the two places most likely to drift apart, because
+   * nobody reads them side by side.
+   */
+  const emoji = post.mood === 'calm' ? '🟡' : '🔴';
+  const mood = `${emoji} **${regimeLabel(post.regime)}**`;
 
   const lines = [
     `**GammaDesk morning post ${dash} ${headerDate(post.date)}**`,
@@ -185,14 +197,7 @@ export function toDiscordMessage(
 
   for (const note of digest?.notes ?? []) lines.push(`⚠ ${note}`);
 
-  lines.push(
-    `_15-min delayed · not advice · gammadesk.app_`,
-    '',
-    'Copy for X:',
-    '```',
-    post.text,
-    '```',
-  );
+  lines.push(`_15-min delayed · not advice · gammadesk.app_`);
 
   return lines.join('\n');
 }

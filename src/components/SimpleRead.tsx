@@ -5,6 +5,21 @@ import { buildSimpleRead, type SimpleInput } from '@/lib/simple/translate';
  *
  * All wording comes from `lib/simple/translate.ts` — nothing here composes a
  * sentence, so the no-jargon promise has one place to be checked.
+ *
+ * ## Why this says "Wild" and not "WILD (negative gamma)"
+ *
+ * Every other surface routes its regime wording through `lib/regime.ts`, so
+ * one state cannot appear under two names. This one deliberately does not, for
+ * two reasons.
+ *
+ * First, it would be wrong. The mood here is not the regime: `translate.ts`
+ * calls a day wild when gamma is negative OR when price is below the flip, so
+ * a positive-gamma day under its flip reads as wild. Printing
+ * "(negative gamma)" beside it would be a false statement about the book.
+ *
+ * Second, this is the no-jargon view. A parenthetical naming the very term the
+ * view exists to avoid would undo its whole purpose. The reader who wants that
+ * gloss is one tap away, in the advanced view, where it is on every tile.
  */
 export function SimpleRead({ input }: { input: SimpleInput }) {
   const read = buildSimpleRead(input);

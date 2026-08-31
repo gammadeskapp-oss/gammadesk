@@ -287,6 +287,37 @@ positive.` — which is the point of `format=text`. Neither is linked anywhere i
 the UI, and both need `CRON_SECRET`. Run the gamma job first; the scan reads
 what it stored.
 
+### Why the breadth and level-feed jobs are registered differently
+
+`/api/breadth/refresh` and `/api/retest/refresh` run **every minute while the
+market is open**, which is a different problem from the fixed-time jobs above.
+There is no single clock time for them to land on, so the dual-registration
+trick does not apply and neither carries a drift guard — a sample that arrives
+two minutes late is still a perfectly good sample, and it stamps itself with
+the time it was actually taken rather than the time it was due.
+
+What they do share is the New York clock check. Each is registered once over
+`13-21` UTC, a span wide enough to contain 09:30–16:00 New York under either
+daylight-saving offset, and the route decides which of those firings are really
+inside the session. Everything outside returns immediately without spending an
+upstream request.
+
+The level feed is also safe to miss. Each level's state is stored and advanced
+bar by bar, so a run that skips five minutes simply folds in the five minutes
+of bars it had not seen. Nothing is lost and nothing is double-counted.
+
+Both need `TRADIER_TOKEN` to be at their cheapest — see `.env.example`. Without
+it they fall back to Yahoo and still work, using more requests. You can run
+either by hand:
+
+```
+curl "https://your-site/api/breadth/refresh?token=$CRON_SECRET&force=1"
+curl "https://your-site/api/retest/refresh?token=$CRON_SECRET&force=1"
+```
+
+`force=1` bypasses the market-hours check, which is how you test them out of
+session.
+
 You do not need to do anything else. The first row appears on the next weekday
 run, and the running percentages become meaningful after a couple of weeks.
 

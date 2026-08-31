@@ -1,3 +1,4 @@
+import { regimeLabel, regimeSubLine, regimeTone } from '@/lib/regime';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
@@ -299,16 +300,14 @@ export default async function DashboardPage() {
               <>
                 <div className="flex items-baseline gap-3">
                   <Big
-                    value={summary.regime === 'positive' ? 'POSITIVE' : 'NEGATIVE'}
-                    tone={summary.regime === 'positive' ? 'pos' : 'neg'}
+                    value={regimeLabel(summary.regime)}
+                    tone={regimeTone(summary.regime)}
                   />
                 </div>
                 <Sub>
                   net GEX {formatUsd(summary.netGex)} · flip{' '}
                   {summary.flipLevel === null ? '—' : formatPrice(summary.flipLevel)} ·{' '}
-                  {summary.regime === 'positive'
-                    ? 'dealers dampen moves'
-                    : 'dealers amplify moves'}
+                  {regimeSubLine(summary.regime)}
                 </Sub>
               </>
             ) : (

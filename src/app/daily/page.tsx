@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
+import { regimeLabel, regimeTone } from '@/lib/regime';
 import { PostActions } from '@/components/PostActions';
 import { TickerLink } from '@/components/TickerLink';
 import { getDigest, storeStatus as digestStoreStatus } from '@/lib/digest';
@@ -100,8 +101,8 @@ export default async function DailyPage() {
               <Chip label="Spot" value={formatPrice(digest.spot)} />
               <Chip
                 label="Gamma regime"
-                value={digest.regime === 'positive' ? 'POSITIVE' : 'NEGATIVE'}
-                tone={digest.regime === 'positive' ? 'pos' : 'neg'}
+                value={regimeLabel(digest.regime)}
+                tone={regimeTone(digest.regime)}
               />
               <Chip
                 label="Net GEX"
@@ -248,7 +249,7 @@ export default async function DailyPage() {
               <div className="flex justify-between gap-3">
                 <dt className="text-term-faint">Gamma regime</dt>
                 <dd className={post.regime === 'positive' ? 'text-pos' : 'text-neg'}>
-                  {post.regime === 'positive' ? 'POSITIVE — calm' : 'NEGATIVE — jumpy'}
+                  {regimeLabel(post.regime)}
                 </dd>
               </div>
               <div className="flex justify-between gap-3">

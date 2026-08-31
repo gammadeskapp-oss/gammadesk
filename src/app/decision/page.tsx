@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { BreadthCard } from '@/components/BreadthCard';
 import { ChartForecastSwitch } from '@/components/ChartForecastSwitch';
 import { DecisionSearch } from '@/components/DecisionSearch';
 import { ExposureTables } from '@/components/ExposureTables';
@@ -9,7 +10,11 @@ import { InfoTip } from '@/components/InfoTip';
 import { LevelsPanel } from '@/components/LevelsPanel';
 import { PageBar } from '@/components/PageBar';
 import { ReadMode } from '@/components/ReadMode';
+import { RetestFeed } from '@/components/RetestFeed';
 import { SimpleRead } from '@/components/SimpleRead';
+import { getBreadth } from '@/lib/breadth';
+import type { BreadthReading } from '@/lib/breadth/types';
+import { regimeDisplay, regimeOfMood } from '@/lib/regime';
 import { config } from '@/lib/config';
 import { TradeabilityPanel } from '@/components/TradeabilityPanel';
 import { DecisionError, getDecision, type DecisionResult } from '@/lib/decision';
@@ -18,6 +23,7 @@ import { getForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
 import { getPositioningView } from '@/lib/positioning';
+import { getRetests, type RetestFeed as RetestFeedData } from '@/lib/retest';
 import { normaliseSymbol } from '@/lib/ticker/bars';
 import type { PositioningData } from '@/lib/types';
 import type { TooltipKey } from '@/lib/tooltips';
@@ -137,8 +143,36 @@ function Tile({
   );
 }
 
-function Decision({ data }: { data: DecisionResult }) {
+function Decision({
+  data,
+  breadth,
+  retests,
+}: {
+  data: DecisionResult;
+  breadth: BreadthReading | null;
+  retests: RetestFeedData | null;
+}) {
   const { context: c, walls, conviction, verdict, liquidity } = data;
+
+  /*
+   * The regime tile, decided in one place.
+   *
+   * Two sources feed it: the option chain says where spot sits relative to the
+   * flip right now, and the level feed says which crossing of it was last
+   * confirmed on one-minute bars. They are normally the same; when the chain
+   * has just been re-solved they can disagree for a refresh or two.
+   *
+   * Nothing is composed here. `regimeDisplay` owns the wording, the colour and
+   * the disagreement case together, so this tile cannot drift from the way
+   * every other surface says the same thing — see lib/regime.ts.
+   *
+   * The feed reports a mood, so it is converted to a regime before comparison;
+   * that keeps a single vocabulary crossing the boundary.
+   */
+  const regime = regimeDisplay(
+    c.regime,
+    retests?.regime ? regimeOfMood(retests.regime) : null,
+  );
 
   /*
    * Every dollar exposure figure is open interest times a modelled greek, so
@@ -179,12 +213,12 @@ function Decision({ data }: { data: DecisionResult }) {
           </span>
         }
       >
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
           <Tile
             label="Gamma regime"
-            value={c.mood === 'calm' ? 'CALM' : 'WILD'}
-            sub={c.mood === 'calm' ? 'moves tend to fade' : 'moves tend to run'}
-            tone={c.mood === 'calm' ? 'pos' : 'neg'}
+            value={regime.value}
+            sub={regime.sub}
+            tone={regime.tone}
             tip="regime"
           />
           <Tile
@@ -250,6 +284,14 @@ function Decision({ data }: { data: DecisionResult }) {
             }
             tone={c.aboveFlip === null ? 'neutral' : c.aboveFlip ? 'pos' : 'neg'}
           />
+
+          {/*
+            Market-wide context, so it belongs beside the regime rather than
+            down with the levels: everything else in this row is about this one
+            ticker, and this is the reading that says whether the rest of the
+            market is doing the same thing.
+          */}
+          {breadth && <BreadthCard reading={breadth} />}
         </div>
       </Section>
 
@@ -420,12 +462,19 @@ export default async function DecisionPage({ searchParams }: PageProps) {
    * are allowed to fail on their own: a name with a readable chain but no
    * simulation still gets everything else.
    */
-  const [forecast, positioning] = symbol
+  const [forecast, positioning, breadth, retests] = symbol
     ? await Promise.all([
         getForecast(symbol).catch((): ForecastResult | null => null),
         getPositioningView(symbol).catch((): PositioningData | null => null),
+        /*
+         * Both read stored documents only — the upstream work happens on a
+         * cron. So they cost a storage read, never an API call, and a page
+         * view can neither advance the event feed nor spend quota.
+         */
+        getBreadth().catch((): BreadthReading | null => null),
+        getRetests(symbol).catch((): RetestFeedData | null => null),
       ])
-    : [null, null];
+    : [null, null, null, null];
 
   const forecastPanel = forecast ? (
     <ForecastChart data={forecast} />
@@ -483,7 +532,9 @@ export default async function DecisionPage({ searchParams }: PageProps) {
                 }}
               />
             }
-            advanced={<Decision data={data} />}
+            advanced={
+              <Decision data={data} breadth={breadth} retests={retests} />
+            }
           />
         )}
 
@@ -498,6 +549,19 @@ export default async function DecisionPage({ searchParams }: PageProps) {
         {symbol && (
           <Section step={5} title="Chart / Forecast">
             <ChartForecastSwitch symbol={symbol} forecast={forecastPanel} />
+
+            {/*
+              Directly beneath the chart, in the same column, because it is a
+              running commentary on the candles above it rather than a separate
+              subject. Outside the read-mode toggle for the same reason the
+              chart is: its bars come from the price feed, so it survives the
+              option chain being unavailable.
+            */}
+            {retests && (
+              <div className="pt-4">
+                <RetestFeed events={retests.events} symbol={retests.symbol} />
+              </div>
+            )}
           </Section>
         )}
 
