@@ -37,6 +37,15 @@ interface DashboardProps {
    * the numbers above it.
    */
   methodology: Methodology;
+  /*
+   * Rendered on the server and passed through as a node.
+   *
+   * The card inside it is `BreadthCard`, the same one /decision uses. Building
+   * it here would mean this client component fetching breadth itself; handing
+   * it down keeps every network read on the server page where the rest of them
+   * already are.
+   */
+  contextRow: React.ReactNode;
 }
 
 /** `24m 10s` style countdown to the next server-side data refresh. */
@@ -69,7 +78,12 @@ function CacheCountdown({ asOfIso, cacheSeconds }: { asOfIso: string; cacheSecon
   );
 }
 
-export function Dashboard({ data, staleness, methodology }: DashboardProps) {
+export function Dashboard({
+  data,
+  staleness,
+  methodology,
+  contextRow,
+}: DashboardProps) {
   const [metric, setMetric] = useState<MetricKey>('gex');
   const [explain, setExplain] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -92,6 +106,13 @@ export function Dashboard({ data, staleness, methodology }: DashboardProps) {
       />
 
       <PositioningSearch initial={data.symbol} />
+
+      {/*
+        Above the ticker's own read, because it is the frame that read should
+        be taken in: a clean level on a day when nothing is participating is a
+        different thing from the same level on a broad one.
+      */}
+      {contextRow}
 
       {/*
         Above the read, and outside the mode toggle, because it qualifies both
