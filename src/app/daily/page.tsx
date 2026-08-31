@@ -327,10 +327,11 @@ export default async function DailyPage() {
           </p>
           <p className="mt-2">
             <span className="text-term-dim">A note on the fourth line. </span>
-            &ldquo;Gets wild only under&rdquo; reads correctly while price is
-            above the flip. When price is already below it the mood line says
-            jumpy and the “What this means” line explains it — the level is still
-            the boundary either way.
+            &ldquo;A sustained move below&rdquo; describes the crossing, not the
+            current state, so it reads correctly whichever side of the flip
+            price is on. When price is already below it, the mood line says
+            jumpy and the &ldquo;What this means&rdquo; line explains it — the
+            level is the boundary either way.
           </p>
           {!digestStore.durable && digestStore.note && (
             <p className="mt-2 text-flip/80">! {digestStore.note}</p>

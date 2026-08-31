@@ -52,7 +52,16 @@ export function SimpleRead({ input }: { input: SimpleInput }) {
       {/* The three levels, big enough to read at a glance on a phone. */}
       <dl className="grid gap-px border-y border-term-line bg-term-line sm:grid-cols-3">
         {read.rows.map((row) => (
-          <div key={row.label} className="bg-term-panel px-4 py-3">
+          /*
+            Column, with the number pushed to the bottom. The labels are no
+            longer the same length — "Possible resistance / hedging response
+            area" wraps to two lines where "Flips calm to wild" does not — and
+            without this the three numbers sit at three different heights.
+          */
+          <div
+            key={row.label}
+            className="flex h-full flex-col justify-between bg-term-panel px-4 py-3"
+          >
             <dt className="text-2xs uppercase tracking-[0.14em] text-term-faint">
               {row.label}
             </dt>

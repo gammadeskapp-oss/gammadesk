@@ -29,6 +29,14 @@ const ON_THE_LINE = 0.0025;
  * Ordered most specific first: sitting on the flip is the thing worth saying
  * even when price is also between two walls, because it is the condition most
  * likely to change during the session.
+ *
+ * ## Keep these short
+ *
+ * Whatever this returns goes into the post's fifth line, and the fourth line
+ * grew by 34 characters when "Gets wild only under: 645" became a sentence.
+ * Worst case is now 263 of the 280 available, and the worst case is whichever
+ * branch here is longest — so a sentence added below without counting is how
+ * the post starts getting rejected. /daily prints the count on every build.
  */
 function plainEnglish(args: {
   spot: number;
@@ -43,12 +51,12 @@ function plainEnglish(args: {
     flipLevel !== null && Math.abs(spot - flipLevel) / spot < ON_THE_LINE;
 
   if (nearFlip) {
-    return 'Price is sitting right on the line, so today can change character fast.';
+    return 'Price is sitting right on the line, so today can turn fast.';
   }
 
   if (regime === 'negative') {
     return flipLevel === null
-      ? 'The padding is off today, so pushes tend to keep going instead of fading.'
+      ? 'The padding is off today, so pushes tend to keep going.'
       : `Below ${formatStrike(flipLevel)} the padding is off, so moves feed on themselves.`;
   }
 
@@ -57,10 +65,10 @@ function plainEnglish(args: {
   }
 
   if (wallAbove !== null) {
-    return `Drifts tend to stall into ${formatStrike(wallAbove)} rather than run through it.`;
+    return `${formatStrike(wallAbove)} is a possible resistance / hedging response area above.`;
   }
 
-  return 'Dealers are absorbing moves today, so pushes tend to fade rather than run.';
+  return 'Dealers are absorbing moves today, so pushes tend to fade.';
 }
 
 function compose(args: {
@@ -82,7 +90,17 @@ function compose(args: {
     // should not meet a third vocabulary for the state they just read about.
     `Mood: ${regimeLabel(regime)}`,
     `Wall above: ${strike(wallAbove)} · Floor below: ${strike(floorBelow)}`,
-    `Gets wild only under: ${flipLevel === null ? dash : formatStrike(flipLevel)}`,
+    /*
+     * The longest line in the post, and knowingly so. It replaced
+     * "Gets wild only under: 645", which was 34 characters shorter and also a
+     * prediction the book cannot make. A worst-case SPY post lands near 270 of
+     * the 280 available; /daily prints the count against the limit on every
+     * build, so the day this stops fitting is a visible failure rather than a
+     * silent truncation.
+     */
+    flipLevel === null
+      ? `Gamma flip: ${dash}`
+      : `A sustained move below ${formatStrike(flipLevel)} raises the odds of larger swings`,
     `What this means: ${plain}`,
     FOOTER,
   ].join('\n');
@@ -184,7 +202,9 @@ export function toDiscordMessage(
     `**GammaDesk morning post ${dash} ${headerDate(post.date)}**`,
     `$${post.symbol} **${post.spot.toFixed(2)}** · mood ${mood}`,
     `Wall above **${strike(post.wallAbove)}** · Floor below **${strike(post.floorBelow)}**`,
-    `Gets wild only under **${strike(post.flipLevel)}**`,
+    post.flipLevel === null
+      ? `Gamma flip ${dash}`
+      : `A sustained move below **${strike(post.flipLevel)}** raises the odds of larger swings`,
     `What this means: ${post.plainEnglish}`,
   ];
 
