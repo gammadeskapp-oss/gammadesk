@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { getPositioning } from '../positioning';
+import { nearestStrongWall } from '../simple/walls';
 import { marketNow } from '../time';
 import { fetchDailyBar } from './settlement';
 import { readLog, updateLog } from './store';
@@ -60,6 +61,20 @@ export async function recordSnapshot(
     }
   }
 
+  /*
+   * Both definitions are recorded, deliberately.
+   *
+   * `magnetAbove`/`magnetBelow` are the biggest strikes and stay as they are,
+   * because the settled outcomes on every existing entry were judged against
+   * them and rewriting their meaning would silently change what the accuracy
+   * percentages refer to.
+   *
+   * `stallLevel`/`bounceLevel` are the nearest strong walls, which is what the
+   * pages actually show a reader. Without these, a history chart could plot
+   * levels or plot what was displayed, but not both — see lib/log/types.ts.
+   */
+  const strikeGex = data.rows.map((r) => ({ strike: r.strike, gex: r.total.gex }));
+
   const entry: LogEntry = {
     date,
     snapshotAt: new Date().toISOString(),
@@ -68,6 +83,8 @@ export async function recordSnapshot(
     spotAtSnapshot: data.spot,
     magnetAbove: data.summary.magnetAbove?.strike ?? null,
     magnetBelow: data.summary.magnetBelow?.strike ?? null,
+    stallLevel: nearestStrongWall(strikeGex, data.spot, 'above')?.strike ?? null,
+    bounceLevel: nearestStrongWall(strikeGex, data.spot, 'below')?.strike ?? null,
     netGex: data.summary.netGex,
     settled: false,
   };
