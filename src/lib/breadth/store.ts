@@ -77,6 +77,18 @@ const store = createJsonStore<BreadthDoc>(
  * being returned and filtered by every caller. That keeps "the series" and
  * "the series for today" from being two different things anywhere else.
  */
+/**
+ * The stored document exactly as written, whatever session it belongs to.
+ *
+ * `readBreadthDoc` substitutes an empty day once the date rolls, which is
+ * right for rendering — yesterday's samples are not today's breadth — but
+ * wrong for a health check, where "the last write was two days ago" is the
+ * entire finding and an empty document erases it.
+ */
+export async function peekBreadthDoc(): Promise<BreadthDoc | null> {
+  return store.read().catch(() => null);
+}
+
 export async function readBreadthDoc(now: Date = new Date()): Promise<BreadthDoc> {
   const doc = await store.read();
   return doc.date === marketToday(now) ? doc : empty();

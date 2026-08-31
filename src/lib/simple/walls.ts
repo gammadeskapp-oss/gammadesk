@@ -1,10 +1,10 @@
 /**
  * Picking the wall a beginner is told about.
  *
- * "Stalls going up" has to mean one thing everywhere. The homepage was using
- * the biggest wall above spot and /decision the nearest one, so the same book
- * at the same moment said price would stall at 780 on one page and 771 on the
- * other. Both were defensible; having both was not.
+ * "Possible resistance / hedging response area" has to name one level
+ * everywhere. The homepage was using the biggest wall above spot and /decision
+ * the nearest one, so the same book at the same moment named 780 on one page
+ * and 771 on the other. Both were defensible; having both was not.
  *
  * The rule is *nearest strong*, in that order. The nearest strike alone can be
  * a trivial one that price walks through; the strongest alone can be five

@@ -7,7 +7,7 @@ import type { ScanResult, ScanTimeframe, StoredGamma, VwapAnchor } from './types
 
 export { storeStatus } from '../jsonStore';
 export { refreshScannerGamma, readTodaysGamma, peekScannerGamma } from './gamma';
-export { runScanner, scanCandidates, readTodaysScan } from './run';
+export { runScanner, scanCandidates, readTodaysScan, readLatestScan } from './run';
 
 /**
  * The read path for /scanner.

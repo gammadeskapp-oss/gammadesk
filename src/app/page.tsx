@@ -1,3 +1,5 @@
+import { ContextRow } from '@/components/ContextRow';
+import { EventRiskRow } from '@/components/EventRiskRow';
 import { Dashboard } from '@/components/Dashboard';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
@@ -5,6 +7,12 @@ import { PositioningSearch } from '@/components/PositioningSearch';
 import { ChainError } from '@/lib/chainSource';
 import { config } from '@/lib/config';
 import { getPositioningView, normaliseSymbol } from '@/lib/positioning';
+import { getBreadth } from '@/lib/breadth';
+import type { BreadthReading } from '@/lib/breadth/types';
+import { getMarketContextQuotes } from '@/lib/marketContext/quotes';
+import type { MarketContextQuotes } from '@/lib/marketContext/quotes';
+import { positioningMethodology } from '@/lib/methodology';
+import { eventRow, highImportanceToday, snapshotStaleness } from '@/lib/events';
 import type { PositioningData } from '@/lib/types';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
@@ -33,6 +41,27 @@ export default async function HomePage({ searchParams }: PageProps) {
 
   let data: PositioningData | null = null;
   let error: { message: string; hint?: string; upstream?: boolean } | null = null;
+
+  /*
+   * The market backdrop, fetched alongside the chain and allowed to fail on
+   * its own. Breadth is a stored read — the sweep happens on a cron — so it
+   * costs a storage read and never an API call. The quotes are one request
+   * behind a one-minute cache.
+   *
+   * Neither can take the page down: a dead quote feed must not cost the reader
+   * the positioning they actually came for.
+   */
+  /*
+   * Straight off a JSON file compiled into the bundle — no fetch, no store, no
+   * failure mode worth a try/catch.
+   */
+  const events = eventRow();
+  const highToday = highImportanceToday();
+
+  const [breadth, quotes] = await Promise.all([
+    getBreadth().catch((): BreadthReading | null => null),
+    getMarketContextQuotes().catch((): MarketContextQuotes | null => null),
+  ]);
 
   if (wanted === null) {
     error = {
@@ -64,7 +93,27 @@ export default async function HomePage({ searchParams }: PageProps) {
   return (
     <>
       {data ? (
-        <Dashboard data={data} />
+        <Dashboard
+          data={data}
+          /*
+            Graded against the quote date, not `asOfIso`. `asOfIso` is stamped
+            at render time and is therefore always "now" — it would report a
+            snapshot as fresh no matter how long the feed had been dead. The
+            quote date is the age of the data itself.
+          */
+          staleness={snapshotStaleness(data.meta.quoteDateIso)}
+          /*
+            Built from the snapshot being rendered, so the drawer describes
+            this view rather than a general case — see lib/methodology.ts.
+          */
+          methodology={positioningMethodology(data)}
+          contextRow={
+            <>
+              <ContextRow breadth={breadth} quotes={quotes} />
+              <EventRiskRow events={events} highToday={highToday} />
+            </>
+          }
+        />
       ) : (
         <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
           <PageBar
@@ -73,6 +122,14 @@ export default async function HomePage({ searchParams }: PageProps) {
           />
 
           <PositioningSearch initial={requested} />
+
+          {/*
+            Also on the failure path. When the chain is unreachable the market
+            backdrop is the only thing on the page that still works, and it is
+            more use than an error message alone.
+          */}
+          <ContextRow breadth={breadth} quotes={quotes} />
+          <EventRiskRow events={events} highToday={highToday} />
 
           {error && (
             <div className="panel border-l-2 border-l-bear/60 px-4 py-4">

@@ -156,6 +156,7 @@ async function build(symbol: string): Promise<ForecastResult> {
       timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short',
     }).format(now),
     quoteDateLabel: positioning?.meta.quoteDateLabel ?? `close ${bars[bars.length - 1].date}`,
+    quoteDateIso: positioning?.meta.quoteDateIso ?? null,
     source: positioning?.meta.sourceLabel ?? `${series.source} (prices only)`,
     cacheSeconds: config.forecastCacheSeconds,
     notes,

@@ -8,6 +8,13 @@ import { formatStrike } from '../format';
  * produced here, so there is one place to check that promise and one place to
  * reword it.
  *
+ * One word was let back in deliberately — "hedging", in the two level labels.
+ * The labels used to read "Stalls going up" and "Bounces going down", which
+ * are jargon-free and also assertions the book cannot support: they name an
+ * outcome. "Possible resistance / hedging response area" names the mechanism
+ * and marks it possible. A reader who does not know the word learns nothing
+ * false from it, which was not true of the old pair.
+ *
  * Pure and input-only, so the homepage and /decision cannot drift into saying
  * different things about the same book.
  */
@@ -70,37 +77,53 @@ export function buildSimpleRead(input: SimpleInput): SimpleRead {
   /*
    * Two sentences, not one template.
    *
-   * "Gets wild only under X" is false once price is already under X, and the
+   * The flip clause is false once price is already under the flip, and the
    * whole point of this view is that a beginner can trust what it says. When
    * the tape is already wild it gets told the way back instead.
+   *
+   * ## Why the wording is this careful
+   *
+   * The sentences used to read "Likely drifts between X and Y" and "Gets wild
+   * only under X". Both are predictions, and neither is one the book can
+   * actually make: positioning describes where hedging pressure sits, not what
+   * price will do. "Consistent with" and "raises the odds of" say the same
+   * thing about the same book without promising an outcome, and that is the
+   * difference between a description and a forecast.
    */
   let sentence: string;
   if (calm) {
     sentence =
       above && below
-        ? `Likely drifts between ${below} and ${above}.`
+        ? `Positioning is consistent with range-bound trading between ${below} and ${above}.`
         : above
-          ? `Likely drifts up toward ${above}.`
+          ? `Positioning is consistent with range-bound trading below ${above}.`
           : below
-            ? `Likely drifts down toward ${below}.`
-            : 'Likely drifts rather than runs.';
-    if (flip) sentence += ` Gets wild only under ${flip}.`;
+            ? `Positioning is consistent with range-bound trading above ${below}.`
+            : 'Positioning is consistent with range-bound trading rather than a sustained move.';
+    if (flip) {
+      sentence += ` A sustained move below ${flip} raises the odds of larger swings.`;
+    }
   } else {
     sentence =
       above && below
-        ? `Moves can run instead of stopping, roughly between ${below} and ${above}.`
-        : 'Moves can run instead of stopping.';
-    if (flip) sentence += ` It settles down again above ${flip}.`;
+        ? `Positioning is consistent with larger swings, roughly between ${below} and ${above}.`
+        : 'Positioning is consistent with larger swings.';
+    // The mirror of the calm clause, and it has to move in the same direction:
+    // back above the flip is the condition that reduces the odds, not raises
+    // them.
+    if (flip) {
+      sentence += ` A sustained move back above ${flip} lowers the odds of larger swings.`;
+    }
   }
 
   const rows: SimpleRow[] = [
     {
-      label: 'Stalls going up',
+      label: 'Possible resistance / hedging response area',
       value: above ?? dash,
       missing: above === null,
     },
     {
-      label: 'Bounces going down',
+      label: 'Possible support / hedging response area',
       value: below ?? dash,
       missing: below === null,
     },
@@ -112,7 +135,7 @@ export function buildSimpleRead(input: SimpleInput): SimpleRead {
   ];
 
   const watch = calm
-    ? `Price tends to drift between the levels above and below rather than break out, so chasing a move is the main way to get hurt today.${
+    ? `Positioning is consistent with price holding between the levels above and below rather than breaking out, so chasing a move is the main way to get hurt today.${
         flip ? ` Watch ${flip} — under it, this changes.` : ''
       }`
     : `Moves can keep going instead of fading, so be careful and give price room.${

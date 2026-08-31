@@ -79,6 +79,14 @@ export interface ForecastResult {
   gammaFlip: number | null;
   asOfLabel: string;
   quoteDateLabel: string;
+  /**
+   * ISO quote date of the chain, when there was one.
+   *
+   * Null on the prices-only path, where there is no option chain to be stale
+   * about — the staleness guard treats that as "nothing to check" rather than
+   * as a failure, which is why this is nullable and the label above is not.
+   */
+  quoteDateIso: string | null;
   source: string;
   cacheSeconds: number;
   /** Non-fatal caveats worth showing. */

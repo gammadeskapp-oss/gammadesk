@@ -18,7 +18,7 @@ export const PAGE_DESCRIPTIONS: Record<string, string> = {
   '/sectors':
     'Which parts of the market the models currently rate strongest and weakest.',
   '/':
-    'Where dealers are exposed on any optionable ticker, and which price levels that exposure pulls toward.',
+    'Where dealers are exposed on any optionable ticker, and the levels where dealer hedging may influence price.',
   '/velocity':
     'How fast dealer positioning is shifting — slow drift or sudden change.',
   '/forecast':
@@ -43,6 +43,12 @@ export const PAGE_DESCRIPTIONS: Record<string, string> = {
   '/digest': "The whole day in a few sentences, written out once after the close.",
   '/post': "Today's positioning as a six-line post, ready to copy or send.",
   '/guide': 'What everything here means, for someone new to the market.',
+  '/history':
+    'The last 30 sessions, with the levels recorded each morning drawn on the day they belonged to.',
+  '/methodology':
+    'What every number here is built from, and the assumption it all rests on.',
+  '/status':
+    'Every scheduled job, when it last succeeded, and whether anything is behind.',
 };
 
 export function pageDescription(route: string): string | undefined {

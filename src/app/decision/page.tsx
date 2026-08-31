@@ -23,6 +23,10 @@ import { getForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
 import { getPositioningView } from '@/lib/positioning';
+import { snapshotStaleness } from '@/lib/events';
+import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
+import { MethodologyDrawer } from '@/components/MethodologyDrawer';
+import { positioningMethodology, type Methodology } from '@/lib/methodology';
 import { getRetests, type RetestFeed as RetestFeedData } from '@/lib/retest';
 import { normaliseSymbol } from '@/lib/ticker/bars';
 import type { PositioningData } from '@/lib/types';
@@ -147,10 +151,18 @@ function Decision({
   data,
   breadth,
   retests,
+  methodology,
 }: {
   data: DecisionResult;
   breadth: BreadthReading | null;
   retests: RetestFeedData | null;
+  /*
+   * Null when the chain snapshot behind the decision could not be re-read.
+   * The decision itself survives that — it was built from a cached copy — but
+   * there is then no honest set of inputs to list, and an empty drawer would
+   * imply the inputs were checked and found unremarkable.
+   */
+  methodology: Methodology | null;
 }) {
   const { context: c, walls, conviction, verdict, liquidity } = data;
 
@@ -304,13 +316,20 @@ function Decision({
         missed.
       */}
       <div className="grid gap-4 xl:grid-cols-2">
-        <LevelsPanel
-          walls={walls}
-          levelMap={data.levelMap}
-          spot={c.spot}
-          asOfLabel={c.asOfLabel}
-          showExposure={showExposure}
-        />
+        {/* The drawer belongs to the levels, so it travels in their column. */}
+        <div className="space-y-2">
+          <LevelsPanel
+            walls={walls}
+            levelMap={data.levelMap}
+            spot={c.spot}
+            asOfLabel={c.asOfLabel}
+            showExposure={showExposure}
+          />
+
+          {methodology && (
+            <MethodologyDrawer methodology={methodology} anchor="levels" />
+          )}
+        </div>
 
         {/*
           Right column: the conviction checks, and under them the tradeability
@@ -488,9 +507,21 @@ export default async function DecisionPage({ searchParams }: PageProps) {
     </div>
   );
 
+  // Graded off the chain's own quote date, carried on the context for exactly
+  // this reason — see lib/decision/types.ts.
+  const staleness = data ? snapshotStaleness(data.context.quoteDateIso) : null;
+
+  /*
+   * From the chain snapshot fetched alongside the decision, so the drawer
+   * lists the inputs to this view rather than restating the general case.
+   */
+  const methodology = positioning ? positioningMethodology(positioning) : null;
+
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-6 px-4 py-5 sm:px-6">
+        {staleness && <StaleDataBanner staleness={staleness} />}
+
         <PageBar
           title="Decision"
           description={PAGE_DESCRIPTIONS['/decision']}
@@ -516,26 +547,42 @@ export default async function DecisionPage({ searchParams }: PageProps) {
         )}
 
         {data && (
+          <div className={mutedIf(Boolean(staleness?.stale))}>
           <ReadMode
             revealLabel="Show the data behind this"
             simple={
               /* The chart and the tables sit below either view, so the simple
-                 read is just the sentences. */
-              <SimpleRead
-                input={{
-                  symbol: data.context.symbol,
-                  regime: data.context.regime,
-                  flipLevel: data.context.flipLevel,
-                  aboveFlip: data.context.aboveFlip,
-                  magnetAbove: data.context.magnetAbove?.strike ?? null,
-                  magnetBelow: data.context.magnetBelow?.strike ?? null,
-                }}
-              />
+                 read is just the sentences — plus the same drawer the advanced
+                 view carries. The reader who chose the plain-English view is
+                 the one most likely to want to know where the numbers came
+                 from, not least. */
+              <div className="space-y-2">
+                <SimpleRead
+                  input={{
+                    symbol: data.context.symbol,
+                    regime: data.context.regime,
+                    flipLevel: data.context.flipLevel,
+                    aboveFlip: data.context.aboveFlip,
+                    magnetAbove: data.context.magnetAbove?.strike ?? null,
+                    magnetBelow: data.context.magnetBelow?.strike ?? null,
+                  }}
+                />
+
+                {methodology && (
+                  <MethodologyDrawer methodology={methodology} anchor="levels" />
+                )}
+              </div>
             }
             advanced={
-              <Decision data={data} breadth={breadth} retests={retests} />
+              <Decision
+                data={data}
+                breadth={breadth}
+                retests={retests}
+                methodology={methodology}
+              />
             }
           />
+          </div>
         )}
 
         {/*

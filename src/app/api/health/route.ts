@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readCronHealth } from '@/lib/cronHealth';
 import { readDigests } from '@/lib/digest';
 import { peekStoredFlow } from '@/lib/flow';
 import { peekStoredGroups } from '@/lib/groups';
@@ -130,11 +131,18 @@ export async function GET(request: Request) {
    * dashboard at all — every one of these reads the stored copy directly and
    * never triggers a computation, so opening this page is free.
    */
-  const [log, groups, flow, digests] = await Promise.all([
+  const [log, groups, flow, digests, cron] = await Promise.all([
     readLog().catch(() => []),
     peekStoredGroups().catch(() => null),
     peekStoredFlow().catch(() => null),
     readDigests().catch(() => []),
+    /*
+     * The age of every scheduled data source, from the same helper /status
+     * renders. `jobs` below predates it and covers four of them in a shape
+     * other tooling may already read, so it stays; `sources` is the complete
+     * list and the one to use.
+     */
+    readCronHealth().catch(() => null),
   ]);
 
   const jobs = {
@@ -197,6 +205,23 @@ export async function GET(request: Request) {
     );
   }
 
+  /*
+   * Late jobs count as problems.
+   *
+   * The comment above `ok` is emphatic that a status endpoint which always
+   * says ok is worse than none — and a deployment that is perfectly configured
+   * while three of its crons have not written since Tuesday is not ok. Named
+   * individually rather than counted, because the fix differs per job.
+   */
+  for (const source of cron?.sources ?? []) {
+    if (source.state === 'ok') continue;
+    problems.push(
+      source.state === 'missing'
+        ? `${source.path} has never written anything (${source.label}).`
+        : `${source.path} last wrote ${source.ageHours}h ago, past its ${source.staleAfterHours}h limit (${source.label}).`,
+    );
+  }
+
   return NextResponse.json(
     {
       // True only when storage will actually survive a deploy and the jobs
@@ -208,6 +233,24 @@ export async function GET(request: Request) {
           : `${problems.length} thing${problems.length === 1 ? '' : 's'} still to fix — see "problems".`,
       problems,
       writeProbe,
+      /*
+       * Age in hours of every cron data source. `null` for a source that has
+       * never written anything — which is a different and worse finding than
+       * a large number, so it is not flattened to one.
+       */
+      sources: cron
+        ? cron.sources.map((s) => ({
+            path: s.path,
+            label: s.label,
+            schedule: s.schedule,
+            lastSuccess: s.lastSuccess,
+            ageHours: s.ageHours,
+            staleAfterHours: s.staleAfterHours,
+            state: s.state,
+            detail: s.detail,
+          }))
+        : null,
+      cronProblemCount: cron?.problemCount ?? null,
       jobs,
       /*
        * Which deployment is answering. Without this it is impossible to tell

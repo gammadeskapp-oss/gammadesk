@@ -57,14 +57,14 @@ const ENTRIES = {
   magnetAbove: {
     label: 'Magnet above',
     plain:
-      'The nearest wall above price. Price gets pulled up toward it, then usually stalls there like a lid.',
+      'The nearest wall above price — a possible resistance / hedging response area, where dealer hedging may influence price.',
     detail: 'Strike above spot carrying the largest absolute gamma exposure.',
   },
 
   magnetBelow: {
     label: 'Magnet below',
     plain:
-      'The nearest floor below price. Price gets pulled down to it but often bounces there.',
+      'The nearest floor below price — a possible support / hedging response area, where dealer hedging may influence price.',
     detail: 'Strike at or below spot carrying the largest absolute gamma exposure.',
   },
 
@@ -226,12 +226,12 @@ const ENTRIES = {
 
   wallsAbove: {
     label: 'Walls above',
-    plain: 'Ceilings overhead — price stalls when it rises into these.',
+    plain: 'Overhead levels where dealer hedging may influence price — possible resistance / hedging response areas.',
   },
 
   wallsBelow: {
     label: 'Walls below',
-    plain: 'Floors underneath — price often bounces at these.',
+    plain: 'Levels underneath where dealer hedging may influence price — possible support / hedging response areas.',
   },
 
   wallStrength: {

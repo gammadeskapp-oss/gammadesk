@@ -15,8 +15,30 @@ export interface LogEntry {
   regime: 'positive' | 'negative';
   flipLevel: number | null;
   spotAtSnapshot: number;
+  /**
+   * The LARGEST magnet strike either side, which is not the level the site
+   * shows.
+   *
+   * These two fields are the original accuracy-log measure and the settled
+   * outcomes below are judged against them, so they keep their meaning
+   * forever. What changed underneath them is the rest of the site: the
+   * plain-English view names the *nearest strong* wall (`lib/simple/walls.ts`),
+   * which can be a different strike entirely — the whole reason that helper
+   * exists is that "biggest" and "nearest" disagreed on the same book.
+   */
   magnetAbove: number | null;
   magnetBelow: number | null;
+  /**
+   * The levels the site actually displays: nearest strong wall each side.
+   *
+   * Optional because they were added on 2026-08-31 and every entry recorded
+   * before that date does not have them. Absent is not the same as null here —
+   * null means the chain had no qualifying wall that day, absent means nobody
+   * was recording this yet — and the history chart draws them separately for
+   * exactly that reason.
+   */
+  stallLevel?: number | null;
+  bounceLevel?: number | null;
   netGex: number;
 
   // --- the result, recorded after the close --------------------------------

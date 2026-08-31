@@ -15,6 +15,8 @@ import { peekStoredGroups } from '@/lib/groups';
 import { rankTickers } from '@/lib/groups/ranking';
 import { formatContracts, formatPrice, formatRatio, formatUsd } from '@/lib/format';
 import { getPositioning } from '@/lib/positioning';
+import { snapshotStaleness } from '@/lib/events';
+import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { formatAsOf } from '@/lib/time';
 import { TickerLink } from '@/components/TickerLink';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
@@ -191,9 +193,19 @@ export default async function DashboardPage() {
 
   const summary = positioning?.summary ?? null;
 
+  /*
+   * The dashboard's positioning cards all read from one snapshot, so one
+   * verdict covers the page. A missing snapshot is already handled by the
+   * per-card "unavailable" states, so only grade one we actually have.
+   */
+  const staleness = positioning
+    ? snapshotStaleness(positioning.meta.quoteDateIso)
+    : null;
+
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+        {staleness && <StaleDataBanner staleness={staleness} />}
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
@@ -222,7 +234,9 @@ export default async function DashboardPage() {
           <NetLiquidityUnavailable />
         )}
 
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <div
+          className={`grid gap-2 sm:grid-cols-2 xl:grid-cols-3 ${mutedIf(Boolean(staleness?.stale))}`}
+        >
           {/* ---- forecast odds ---- */}
           <Card
             href="/forecast"

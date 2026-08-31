@@ -47,10 +47,16 @@ const NAV: NavItem[] = [
   { href: '/watchlist', label: 'Watchlist', icon: '★' },
   { href: '/flow', label: 'Flow', icon: '⇄' },
   { href: '/velocity', label: 'Velocity', icon: 'Δ' },
-  { href: '/log', label: 'Accuracy Log', icon: '✓' },
+  // The log is the record; /history is the same record drawn against price.
+  { href: '/log', label: 'Accuracy Log', icon: '✓', match: ['/history'] },
   // Digest and the morning post were one day's writing split over two pages.
   { href: '/daily', label: 'Daily', icon: '≡', match: ['/digest', '/post'] },
   { href: '/guide', label: 'Guide', icon: '?' },
+  // Reached from every methodology drawer as well; listed because a reader who
+  // wants to know how the numbers are made should not have to find a drawer
+  // first. `/status` sits under it as the operational half of the same
+  // question — is the arithmetic sound, and did it actually run.
+  { href: '/methodology', label: 'Methodology', icon: '∑', match: ['/status'] },
 ];
 
 // --- collapse flag ----------------------------------------------------------

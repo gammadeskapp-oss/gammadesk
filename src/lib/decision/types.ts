@@ -24,6 +24,15 @@ export interface DecisionContext {
   magnetAbove: Wall | null;
   magnetBelow: Wall | null;
   asOfLabel: string;
+  /**
+   * The quote date of the chain this decision was built from, as an ISO
+   * timestamp.
+   *
+   * Carried alongside the human label rather than derived from it: the label
+   * is formatted for reading and cannot be parsed back reliably, and the
+   * staleness guard needs a real instant to compare against the session clock.
+   */
+  quoteDateIso: string;
 }
 
 export interface Check {

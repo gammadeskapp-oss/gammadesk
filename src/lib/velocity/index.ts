@@ -210,6 +210,13 @@ function toResult(stored: StoredVelocity): VelocityResult {
  * over a weekend, when Cboe still serves Friday's book — are no-ops rather
  * than storing duplicate days that would diff to zero.
  */
+/** Newest stored snapshot, for the health check. Never computes. */
+export async function peekVelocity(): Promise<VelocitySnapshot | null> {
+  const stored = await store.read().catch(() => null);
+  if (!stored || stored.snapshots.length === 0) return null;
+  return newestFirst(stored.snapshots)[0];
+}
+
 export async function refreshVelocity(): Promise<VelocityResult> {
   const stored = await store.read().catch(() => ({ snapshots: [] }));
   const snapshot = await captureSnapshot();

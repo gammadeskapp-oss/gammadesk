@@ -81,6 +81,11 @@ const store = createJsonStore<RetestDoc | null>(
  * holding two symbols' levels would print event lines whose prices belong to
  * something else entirely.
  */
+/** The stored document as written — see `peekBreadthDoc` for why. */
+export async function peekRetestDoc(): Promise<RetestDoc | null> {
+  return store.read().catch(() => null);
+}
+
 export async function readRetestDoc(
   symbol: string,
   now: Date = new Date(),

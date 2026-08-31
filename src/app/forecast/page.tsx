@@ -11,6 +11,8 @@ import { MAX_BEND_SIGMA } from '@/lib/forecast/simulate';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice } from '@/lib/format';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
+import { snapshotStaleness } from '@/lib/events';
+import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 
 export const metadata: Metadata = {
   title: 'Blended Magnets Forecast',
@@ -42,9 +44,20 @@ export default async function ForecastPage({ searchParams }: PageProps) {
 
   const last = data?.bands[data.bands.length - 1];
 
+  /*
+   * Only the options path is graded. On the stats-only path there is no chain
+   * behind the cone, so there is nothing here that could be a stale dealer
+   * level — the page already says so in its own words above the chart.
+   */
+  const staleness = data?.quoteDateIso
+    ? snapshotStaleness(data.quoteDateIso)
+    : null;
+
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+        {staleness && <StaleDataBanner staleness={staleness} />}
+
         <PageBar
           title="Blended Magnets Forecast"
           description={PAGE_DESCRIPTIONS['/forecast']}
@@ -84,7 +97,9 @@ export default async function ForecastPage({ searchParams }: PageProps) {
 
         {data && (
           <>
-            <ForecastStats data={data} />
+            <div className={mutedIf(Boolean(staleness?.stale))}>
+              <ForecastStats data={data} />
+            </div>
 
             <ForecastChart data={data} />
 
