@@ -5,6 +5,7 @@ import { PositioningSearch } from '@/components/PositioningSearch';
 import { ChainError } from '@/lib/chainSource';
 import { config } from '@/lib/config';
 import { getPositioningView, normaliseSymbol } from '@/lib/positioning';
+import { assessStaleness } from '@/lib/staleness';
 import type { PositioningData } from '@/lib/types';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
@@ -64,7 +65,16 @@ export default async function HomePage({ searchParams }: PageProps) {
   return (
     <>
       {data ? (
-        <Dashboard data={data} />
+        <Dashboard
+          data={data}
+          /*
+            Graded against the quote date, not `asOfIso`. `asOfIso` is stamped
+            at render time and is therefore always "now" — it would report a
+            snapshot as fresh no matter how long the feed had been dead. The
+            quote date is the age of the data itself.
+          */
+          staleness={assessStaleness(data.meta.quoteDateIso)}
+        />
       ) : (
         <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
           <PageBar

@@ -165,6 +165,7 @@ async function build(symbol: string): Promise<DecisionResult> {
     magnetAbove: asWall(nearestStrongWall(strikeGex, spot, 'above'), spot),
     magnetBelow: asWall(nearestStrongWall(strikeGex, spot, 'below'), spot),
     asOfLabel: positioning.meta.asOfLabel,
+    quoteDateIso: positioning.meta.quoteDateIso,
   };
 
   // Whichever wall price is closer to is the one the move is heading into.

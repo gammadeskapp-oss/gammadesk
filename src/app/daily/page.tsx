@@ -15,6 +15,8 @@ import {
   X_LIMIT,
 } from '@/lib/post';
 import { formatAsOf } from '@/lib/time';
+import { assessDailySnapshot } from '@/lib/staleness';
+import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 
 /**
  * Digest and Morning Post, on one page.
@@ -82,9 +84,18 @@ export default async function DailyPage() {
   // Shown so the exact text reaching the channel is checkable before it does.
   const discord = await buildDiscordMessage(post);
 
+  /*
+   * Graded by session rather than by the clock. This post is written once at
+   * 09:00 ET and never updated, so an hours-old stamp is normal and expected —
+   * what would be wrong is the post describing yesterday.
+   */
+  const staleness = assessDailySnapshot(post.date, post.generatedAt);
+
   return (
     <>
       <main className="mx-auto w-full max-w-[900px] flex-1 space-y-5 px-4 py-5 sm:px-6">
+        <StaleDataBanner staleness={staleness} />
+
         <PageBar title="Daily" description={PAGE_DESCRIPTIONS['/daily']} />
 
         {/* --- the digest --- */}
@@ -195,7 +206,9 @@ export default async function DailyPage() {
 
           {/* Monospaced and pre-wrapped so what is on screen is
               character-for-character what gets copied. */}
-          <div className="panel border-l-2 border-l-pos/60 p-4 sm:p-5">
+          <div
+            className={`panel border-l-2 border-l-pos/60 p-4 sm:p-5 ${mutedIf(staleness.stale)}`}
+          >
             <div className="flex items-center justify-between gap-3">
               <span className="label-xs">Six lines, for X</span>
               <span
@@ -239,7 +252,7 @@ export default async function DailyPage() {
           </details>
 
           {/* Where each line came from, so a wrong number is traceable. */}
-          <section className="panel px-3.5 py-3">
+          <section className={`panel px-3.5 py-3 ${mutedIf(staleness.stale)}`}>
             <h3 className="label-xs">Where these numbers come from</h3>
             <dl className="mt-2 grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2">
               <div className="flex justify-between gap-3">

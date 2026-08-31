@@ -11,13 +11,23 @@ import { PositioningTable } from './PositioningTable';
 import { ReadMode, useReadMode } from './ReadMode';
 import { nearestStrongWall } from '@/lib/simple/walls';
 import { SimpleRead } from './SimpleRead';
+import { StaleDataBanner, mutedIf } from './StaleDataBanner';
 import { SummaryStrip } from './SummaryStrip';
 import { TabBar } from './TabBar';
+import type { Staleness } from '@/lib/staleness';
 import type { MetricKey, PositioningData } from '@/lib/types';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 interface DashboardProps {
   data: PositioningData;
+  /*
+   * Graded on the server and passed down rather than computed here. This is a
+   * client component, and "how old is this" depends on the current time — the
+   * server and the browser would reach it a few hundred milliseconds apart and
+   * could disagree about which side of the threshold the snapshot falls on,
+   * which is a hydration mismatch on the one element that must never flicker.
+   */
+  staleness: Staleness;
 }
 
 /** `24m 10s` style countdown to the next server-side data refresh. */
@@ -50,7 +60,7 @@ function CacheCountdown({ asOfIso, cacheSeconds }: { asOfIso: string; cacheSecon
   );
 }
 
-export function Dashboard({ data }: DashboardProps) {
+export function Dashboard({ data, staleness }: DashboardProps) {
   const [metric, setMetric] = useState<MetricKey>('gex');
   const [explain, setExplain] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -63,6 +73,9 @@ export function Dashboard({ data }: DashboardProps) {
 
   return (
     <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+      {/* Above everything, full width, before the reader meets a single number. */}
+      <StaleDataBanner staleness={staleness} />
+
       <PageBar
         title={mode === 'simple' ? `${data.symbol} Today` : `${data.symbol} Dealer Positioning`}
         description={PAGE_DESCRIPTIONS['/']}
@@ -82,6 +95,7 @@ export function Dashboard({ data }: DashboardProps) {
         Simple leads. The exposure tables are the same data one tap away, and
         the toggle remembers which side the reader chose.
       */}
+      <div className={mutedIf(staleness.stale)}>
       <ReadMode
         simple={
           <SimpleRead
@@ -103,6 +117,7 @@ export function Dashboard({ data }: DashboardProps) {
         }
         advanced={<Advanced />}
       />
+      </div>
     </main>
   );
 

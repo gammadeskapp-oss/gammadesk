@@ -23,6 +23,8 @@ import { getForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
 import { getPositioningView } from '@/lib/positioning';
+import { assessStaleness } from '@/lib/staleness';
+import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { getRetests, type RetestFeed as RetestFeedData } from '@/lib/retest';
 import { normaliseSymbol } from '@/lib/ticker/bars';
 import type { PositioningData } from '@/lib/types';
@@ -488,9 +490,15 @@ export default async function DecisionPage({ searchParams }: PageProps) {
     </div>
   );
 
+  // Graded off the chain's own quote date, carried on the context for exactly
+  // this reason — see lib/decision/types.ts.
+  const staleness = data ? assessStaleness(data.context.quoteDateIso) : null;
+
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-6 px-4 py-5 sm:px-6">
+        {staleness && <StaleDataBanner staleness={staleness} />}
+
         <PageBar
           title="Decision"
           description={PAGE_DESCRIPTIONS['/decision']}
@@ -516,6 +524,7 @@ export default async function DecisionPage({ searchParams }: PageProps) {
         )}
 
         {data && (
+          <div className={mutedIf(Boolean(staleness?.stale))}>
           <ReadMode
             revealLabel="Show the data behind this"
             simple={
@@ -536,6 +545,7 @@ export default async function DecisionPage({ searchParams }: PageProps) {
               <Decision data={data} breadth={breadth} retests={retests} />
             }
           />
+          </div>
         )}
 
         {/*
