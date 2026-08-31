@@ -15,7 +15,7 @@ import {
   X_LIMIT,
 } from '@/lib/post';
 import { formatAsOf } from '@/lib/time';
-import { assessDailySnapshot } from '@/lib/staleness';
+import { dailySnapshotStaleness } from '@/lib/events';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 
 /**
@@ -89,7 +89,7 @@ export default async function DailyPage() {
    * 09:00 ET and never updated, so an hours-old stamp is normal and expected —
    * what would be wrong is the post describing yesterday.
    */
-  const staleness = assessDailySnapshot(post.date, post.generatedAt);
+  const staleness = dailySnapshotStaleness(post.date, post.generatedAt);
 
   return (
     <>

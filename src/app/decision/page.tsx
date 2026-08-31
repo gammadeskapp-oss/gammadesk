@@ -23,7 +23,7 @@ import { getForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
 import { getPositioningView } from '@/lib/positioning';
-import { assessStaleness } from '@/lib/staleness';
+import { snapshotStaleness } from '@/lib/events';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { MethodologyDrawer } from '@/components/MethodologyDrawer';
 import { positioningMethodology, type Methodology } from '@/lib/methodology';
@@ -509,7 +509,7 @@ export default async function DecisionPage({ searchParams }: PageProps) {
 
   // Graded off the chain's own quote date, carried on the context for exactly
   // this reason — see lib/decision/types.ts.
-  const staleness = data ? assessStaleness(data.context.quoteDateIso) : null;
+  const staleness = data ? snapshotStaleness(data.context.quoteDateIso) : null;
 
   /*
    * From the chain snapshot fetched alongside the decision, so the drawer

@@ -26,6 +26,7 @@ registerTsImports();
 const { marketTimeToUtcMs } = await import('../src/lib/time.ts');
 const { assessStaleness, assessDailySnapshot, expectedDailyDate, inSession, lastCompletedSession } =
   await import('../src/lib/staleness.ts');
+const { sessionRules } = await import('../src/lib/events/rules.ts');
 
 let failures = 0;
 let checks = 0;
@@ -167,6 +168,91 @@ ok(
   !assessDailySnapshot(MON, et(MON, 9).toISOString(), et(TUE, 8)).stale,
 );
 ok('a post with no date at all is stale', assessDailySnapshot(null, null, et(TUE, 15)).stale);
+
+// --- the market calendar -----------------------------------------------------
+
+section('Holidays and early closes come from the calendar');
+
+/*
+ * A three-line calendar rather than the real one.
+ *
+ * The shipped file changes every year; these checks must not. What is being
+ * verified is that the guard consults the rules at all and applies them in the
+ * right direction — whether Thanksgiving 2026 is on the 26th is
+ * verify:events's job, not this file's.
+ */
+const HOLIDAY = '2026-08-25'; // the Tuesday above, borrowed as a fake holiday
+const EARLY = '2026-08-26'; // and the Wednesday, closing at 13:00
+
+const rules = sessionRules({
+  events: [],
+  marketCalendar: [
+    { date: HOLIDAY, status: 'closed', name: 'Test holiday', confirmed: true },
+    {
+      date: EARLY,
+      status: 'early-close',
+      closeEt: '13:00',
+      name: 'Test early close',
+      confirmed: true,
+    },
+  ],
+});
+
+eq(
+  'a closed day is skipped when walking back',
+  lastCompletedSession(et(TUE, 20), rules).date,
+  MON,
+);
+ok('and the market is never open on it', !inSession(et(HOLIDAY, 11), rules));
+
+ok(
+  'without the calendar, the same day looks like a session',
+  inSession(et(HOLIDAY, 11)),
+);
+
+/*
+ * The case the calendar was added for. At 11:00 on a holiday, Monday's closing
+ * data is the newest that exists. Without the calendar the guard thinks a
+ * session has been open ninety minutes and condemns it.
+ */
+ok(
+  'holiday at 11:00, last close data is fine with the calendar',
+  !assessStaleness(et(MON, 15, 50).toISOString(), et(HOLIDAY, 11), rules).stale,
+);
+ok(
+  'and was a false alarm without it',
+  assessStaleness(et(MON, 15, 50).toISOString(), et(HOLIDAY, 11)).stale,
+);
+
+section('An early close ends the session early');
+
+ok('13:30 on an early-close day is outside the session', !inSession(et(EARLY, 13, 30), rules));
+ok('12:30 is still inside it', inSession(et(EARLY, 12, 30), rules));
+ok(
+  'and 13:30 data is not condemned at 15:00',
+  !assessStaleness(et(EARLY, 12, 55).toISOString(), et(EARLY, 15), rules).stale,
+);
+
+{
+  const result = assessStaleness(
+    et(MON, 9).toISOString(),
+    et(EARLY, 15),
+    rules,
+  );
+  ok('the note says an early close was applied', /early close/.test(result.expectedNote), result.expectedNote);
+}
+
+section('The once-a-day check respects the calendar too');
+
+eq(
+  'no post is expected on a closed day',
+  expectedDailyDate(et(HOLIDAY, 10), rules),
+  MON,
+);
+ok(
+  "so the previous day's post is not stale on a holiday",
+  !assessDailySnapshot(MON, et(MON, 9).toISOString(), et(HOLIDAY, 10), rules).stale,
+);
 
 // --- result ------------------------------------------------------------------
 

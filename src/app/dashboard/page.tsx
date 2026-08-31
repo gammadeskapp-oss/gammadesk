@@ -15,7 +15,7 @@ import { peekStoredGroups } from '@/lib/groups';
 import { rankTickers } from '@/lib/groups/ranking';
 import { formatContracts, formatPrice, formatRatio, formatUsd } from '@/lib/format';
 import { getPositioning } from '@/lib/positioning';
-import { assessStaleness } from '@/lib/staleness';
+import { snapshotStaleness } from '@/lib/events';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { formatAsOf } from '@/lib/time';
 import { TickerLink } from '@/components/TickerLink';
@@ -199,7 +199,7 @@ export default async function DashboardPage() {
    * per-card "unavailable" states, so only grade one we actually have.
    */
   const staleness = positioning
-    ? assessStaleness(positioning.meta.quoteDateIso)
+    ? snapshotStaleness(positioning.meta.quoteDateIso)
     : null;
 
   return (

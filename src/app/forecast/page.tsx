@@ -11,7 +11,7 @@ import { MAX_BEND_SIGMA } from '@/lib/forecast/simulate';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice } from '@/lib/format';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
-import { assessStaleness } from '@/lib/staleness';
+import { snapshotStaleness } from '@/lib/events';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 
 export const metadata: Metadata = {
@@ -50,7 +50,7 @@ export default async function ForecastPage({ searchParams }: PageProps) {
    * level — the page already says so in its own words above the chart.
    */
   const staleness = data?.quoteDateIso
-    ? assessStaleness(data.quoteDateIso)
+    ? snapshotStaleness(data.quoteDateIso)
     : null;
 
   return (

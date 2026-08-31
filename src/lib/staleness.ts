@@ -1,3 +1,4 @@
+import { NO_CALENDAR, REGULAR_CLOSE_HOUR, type SessionRules } from './events/rules';
 import { formatAsOf, marketNow, marketTimeToUtcMs } from './time';
 
 /**
@@ -29,19 +30,27 @@ import { formatAsOf, marketNow, marketTimeToUtcMs } from './time';
  *   Tue 09:00, snapshot Mon 15:50  -> fresh     (nothing new exists yet)
  *   Sat 12:00, snapshot Fri 15:50  -> fresh
  *
- * ## Holidays are not modelled
+ * ## Holidays and early closes
  *
- * There is no holiday calendar in this codebase, so a weekday holiday is
- * treated as a trading day and data from the previous session reads as stale
- * once the fake session has been open longer than the tolerance. That is a
- * false alarm, and it errs toward "do not trade on these levels" on a day the
- * market is shut. Wrong in the harmless direction; noted rather than hidden.
+ * Both come from the hand-maintained calendar in `events/calendar.json`, via
+ * the `SessionRules` argument. A closed day is skipped when walking back for
+ * the last completed session, and an early close moves that session's end to
+ * 13:00 so an afternoon reader on Christmas Eve is not told the feed died.
+ *
+ * The rules are passed in rather than imported. That is not indirection for
+ * its own sake — see the note at the top of `events/rules.ts`; a static JSON
+ * import in this file takes the whole verification suite offline.
+ *
+ * Called without rules, this degrades to treating every weekday as a full
+ * session, which is the behaviour it had before the calendar existed: a
+ * holiday then reads as stale, which is a false alarm in the harmless
+ * direction. Pages should call `snapshotStaleness` from `lib/events`, which
+ * supplies the real calendar.
  */
 
-/** Regular-hours session bounds, New York time. */
+/** Regular-hours session open, New York time. The close varies — see below. */
 const OPEN_HOUR = 9;
 const OPEN_MINUTE = 30;
-const CLOSE_HOUR = 16;
 
 /**
  * How far behind the reference point a snapshot may sit and still count.
@@ -57,14 +66,24 @@ export interface Session {
   date: string;
   openMs: number;
   closeMs: number;
+  /** True when the calendar shortened this session. */
+  earlyClose: boolean;
 }
 
-function sessionFor(date: string): Session {
+function sessionFor(date: string, rules: SessionRules): Session {
   const [y, m, d] = date.split('-').map(Number);
   return {
     date,
     openMs: marketTimeToUtcMs(y, m, d, OPEN_HOUR, OPEN_MINUTE),
-    closeMs: marketTimeToUtcMs(y, m, d, CLOSE_HOUR, 0),
+    // An early-close day ends when the calendar says it does, not at 16:00.
+    closeMs: marketTimeToUtcMs(
+      y,
+      m,
+      d,
+      rules.closeHour(date),
+      rules.closeMinute(date),
+    ),
+    earlyClose: rules.closeHour(date) !== REGULAR_CLOSE_HOUR,
   };
 }
 
@@ -85,13 +104,16 @@ function isWeekday(date: string): boolean {
  * Walks back at most a fortnight, which is far more than any weekend needs and
  * bounded so a clock problem cannot spin here forever.
  */
-export function lastCompletedSession(now: Date = new Date()): Session {
+export function lastCompletedSession(
+  now: Date = new Date(),
+  rules: SessionRules = NO_CALENDAR,
+): Session {
   const nowMs = now.getTime();
   let date = marketNow(now).date;
 
   for (let i = 0; i < 14; i += 1) {
-    if (isWeekday(date)) {
-      const session = sessionFor(date);
+    if (isWeekday(date) && !rules.isClosed(date)) {
+      const session = sessionFor(date, rules);
       if (session.closeMs <= nowMs) return session;
     }
     date = addCalendarDays(date, -1);
@@ -99,14 +121,17 @@ export function lastCompletedSession(now: Date = new Date()): Session {
 
   // Unreachable with a sane clock; returning something beats throwing inside a
   // page render.
-  return sessionFor(date);
+  return sessionFor(date, rules);
 }
 
-/** True when `now` falls inside a regular-hours weekday session. */
-export function inSession(now: Date = new Date()): boolean {
+/** True when `now` falls inside a trading session. */
+export function inSession(
+  now: Date = new Date(),
+  rules: SessionRules = NO_CALENDAR,
+): boolean {
   const { date } = marketNow(now);
-  if (!isWeekday(date)) return false;
-  const session = sessionFor(date);
+  if (!isWeekday(date) || rules.isClosed(date)) return false;
+  const session = sessionFor(date, rules);
   return now.getTime() >= session.openMs && now.getTime() <= session.closeMs;
 }
 
@@ -140,13 +165,14 @@ export interface Staleness {
 export function assessStaleness(
   isoTimestamp: string | null | undefined,
   now: Date = new Date(),
+  rules: SessionRules = NO_CALENDAR,
 ): Staleness {
-  const session = lastCompletedSession(now);
-  const open = inSession(now);
+  const session = lastCompletedSession(now, rules);
+  const open = inSession(now, rules);
   const reference = open ? now.getTime() : session.closeMs;
   const expectedNote = open
     ? `The market is open, so the feed should be no more than ${TOLERANCE_MINUTES} minutes behind.`
-    : `The last completed session, ${sessionLabel(session.date)}, closed at ${formatAsOf(new Date(session.closeMs))}.`;
+    : `The last completed session, ${sessionLabel(session.date)}, closed at ${formatAsOf(new Date(session.closeMs))}${session.earlyClose ? ' — an early close' : ''}.`;
 
   const at = isoTimestamp ? Date.parse(isoTimestamp) : NaN;
   if (!Number.isFinite(at)) {
@@ -180,14 +206,17 @@ export function assessStaleness(
  * last completed session's is the newest there can be. From 09:00 ET on a
  * weekday, anything but today's is behind.
  */
-export function expectedDailyDate(now: Date = new Date()): string {
+export function expectedDailyDate(
+  now: Date = new Date(),
+  rules: SessionRules = NO_CALENDAR,
+): string {
   const { date } = marketNow(now);
-  if (isWeekday(date)) {
+  if (isWeekday(date) && !rules.isClosed(date)) {
     const [y, m, d] = date.split('-').map(Number);
     const postTime = marketTimeToUtcMs(y, m, d, OPEN_HOUR, 0);
     if (now.getTime() >= postTime) return date;
   }
-  return lastCompletedSession(now).date;
+  return lastCompletedSession(now, rules).date;
 }
 
 /**
@@ -200,9 +229,10 @@ export function assessDailySnapshot(
   snapshotDate: string | null | undefined,
   generatedAtIso: string | null | undefined,
   now: Date = new Date(),
+  rules: SessionRules = NO_CALENDAR,
 ): Staleness {
-  const session = lastCompletedSession(now);
-  const expected = expectedDailyDate(now);
+  const session = lastCompletedSession(now, rules);
+  const expected = expectedDailyDate(now, rules);
   const at = generatedAtIso ? Date.parse(generatedAtIso) : NaN;
 
   return {

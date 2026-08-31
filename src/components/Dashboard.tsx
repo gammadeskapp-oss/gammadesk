@@ -112,7 +112,7 @@ export function Dashboard({
         be taken in: a clean level on a day when nothing is participating is a
         different thing from the same level on a broad one.
       */}
-      {contextRow}
+      <div className="space-y-2">{contextRow}</div>
 
       {/*
         Above the read, and outside the mode toggle, because it qualifies both
