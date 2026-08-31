@@ -5,6 +5,7 @@ import { PositioningSearch } from '@/components/PositioningSearch';
 import { ChainError } from '@/lib/chainSource';
 import { config } from '@/lib/config';
 import { getPositioningView, normaliseSymbol } from '@/lib/positioning';
+import { positioningMethodology } from '@/lib/methodology';
 import { assessStaleness } from '@/lib/staleness';
 import type { PositioningData } from '@/lib/types';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
@@ -74,6 +75,11 @@ export default async function HomePage({ searchParams }: PageProps) {
             quote date is the age of the data itself.
           */
           staleness={assessStaleness(data.meta.quoteDateIso)}
+          /*
+            Built from the snapshot being rendered, so the drawer describes
+            this view rather than a general case — see lib/methodology.ts.
+          */
+          methodology={positioningMethodology(data)}
         />
       ) : (
         <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">

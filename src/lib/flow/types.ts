@@ -1,3 +1,24 @@
+/*
+ * The unusual-activity screen's thresholds.
+ *
+ * They live in the types module, not beside the code that applies them, for
+ * one reason: `compute.ts` is `server-only`, and the methodology drawer that
+ * states these numbers renders on pages that also ship client components. A
+ * drawer quoting a second, hand-copied set of numbers would eventually quote
+ * numbers the screen no longer uses, which is worse than no drawer at all.
+ */
+
+/** Contracts below this volume are noise regardless of ratio. */
+export const MIN_VOLUME = 250;
+/** Below this ratio nothing is unusual enough to report. */
+export const MIN_RATIO = 1.0;
+/** Guards against a ratio blowing up on a contract with almost no open interest. */
+export const MIN_OI = 50;
+/** Most rows kept per symbol, so one busy name cannot swamp the table. */
+export const PER_SYMBOL_CAP = 6;
+/** Overall table cap. */
+export const TOTAL_CAP = 60;
+
 export type UnusualLevel = 'notable' | 'high' | 'extreme';
 
 export interface FlowRow {

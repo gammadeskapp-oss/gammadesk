@@ -11,9 +11,11 @@ import { PositioningTable } from './PositioningTable';
 import { ReadMode, useReadMode } from './ReadMode';
 import { nearestStrongWall } from '@/lib/simple/walls';
 import { SimpleRead } from './SimpleRead';
+import { MethodologyDrawer } from './MethodologyDrawer';
 import { StaleDataBanner, mutedIf } from './StaleDataBanner';
 import { SummaryStrip } from './SummaryStrip';
 import { TabBar } from './TabBar';
+import type { Methodology } from '@/lib/methodology';
 import type { Staleness } from '@/lib/staleness';
 import type { MetricKey, PositioningData } from '@/lib/types';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
@@ -28,6 +30,13 @@ interface DashboardProps {
    * which is a hydration mismatch on the one element that must never flicker.
    */
   staleness: Staleness;
+  /*
+   * Also built on the server. It is derived entirely from `data`, so it could
+   * be computed here — but keeping both provenance props on the same side of
+   * the boundary means there is one place to look when a drawer disagrees with
+   * the numbers above it.
+   */
+  methodology: Methodology;
 }
 
 /** `24m 10s` style countdown to the next server-side data refresh. */
@@ -60,7 +69,7 @@ function CacheCountdown({ asOfIso, cacheSeconds }: { asOfIso: string; cacheSecon
   );
 }
 
-export function Dashboard({ data, staleness }: DashboardProps) {
+export function Dashboard({ data, staleness, methodology }: DashboardProps) {
   const [metric, setMetric] = useState<MetricKey>('gex');
   const [explain, setExplain] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -118,6 +127,13 @@ export function Dashboard({ data, staleness }: DashboardProps) {
         advanced={<Advanced />}
       />
       </div>
+
+      {/*
+        Outside the muted wrapper. When the data is stale the numbers are dimmed
+        and the explanation of where they came from is the one thing that should
+        stay fully legible.
+      */}
+      <MethodologyDrawer methodology={methodology} anchor="levels" />
     </main>
   );
 

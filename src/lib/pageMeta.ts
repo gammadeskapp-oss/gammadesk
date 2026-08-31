@@ -43,6 +43,8 @@ export const PAGE_DESCRIPTIONS: Record<string, string> = {
   '/digest': "The whole day in a few sentences, written out once after the close.",
   '/post': "Today's positioning as a six-line post, ready to copy or send.",
   '/guide': 'What everything here means, for someone new to the market.',
+  '/methodology':
+    'What every number here is built from, and the assumption it all rests on.',
   '/status':
     'Every scheduled job, when it last succeeded, and whether anything is behind.',
 };

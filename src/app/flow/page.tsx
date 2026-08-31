@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { FlowFilters } from '@/components/FlowFilters';
+import { MethodologyDrawer } from '@/components/MethodologyDrawer';
+import { flowMethodology } from '@/lib/methodology';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
 import { InfoTip } from '@/components/InfoTip';
@@ -204,27 +206,38 @@ export default async function FlowPage({ searchParams }: PageProps) {
           </Suspense>
         )}
 
+        {/*
+          Same drawer pattern as the positioning levels, and deliberately the
+          same layout: a reader who has opened one should not have to learn a
+          second shape to read the other. The rule this page applies —
+          volume against open interest — is the thing most likely to be
+          misread as a signal, so it gets the same treatment as a dealer level.
+        */}
+        {snapshot && (
+          <MethodologyDrawer
+            /* The chain's own stamp, not the job's — the volume figure is as
+               old as the snapshot it was read from, not as new as the run. */
+            methodology={flowMethodology(snapshot.asOfLabel)}
+            anchor="flow"
+          />
+        )}
+
         {snapshot && (
           <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
-            <h2 className="label-xs">How the screen works</h2>
+            {/*
+              The rule, the thresholds, and why there is no "versus average
+              volume" comparison used to be spelled out here. They moved into
+              the methodology drawer above, which states them from the
+              constants the screen actually applies — this section had them
+              typed by hand, which is how a page ends up quoting a threshold
+              nobody uses any more.
+
+              What is left is the part that is about this table rather than
+              about the measure: how the filter behaves, and whatever the run
+              itself wanted to say.
+            */}
+            <h2 className="label-xs">About this table</h2>
             <p className="mt-1.5">
-              A contract is flagged when today&rsquo;s volume exceeds its open
-              interest, on at least{' '}
-              <span className="text-term-dim">250 contracts</span> of volume and{' '}
-              <span className="text-term-dim">50</span> of open interest. Open
-              interest is yesterday&rsquo;s settled position count, so trading
-              more than that in one session means most of the activity is
-              opening new exposure rather than shuffling what already exists.
-            </p>
-            <p className="mt-2">
-              <span className="text-term-dim">Why not &ldquo;versus recent average volume&rdquo;. </span>
-              Cboe publishes today&rsquo;s volume but no history of it, so a true
-              comparison against a contract&rsquo;s own recent average is not
-              possible without building a daily series of our own first. Rather
-              than substitute a worse proxy and call it the same thing, the
-              screen uses volume against open interest only.
-            </p>
-            <p className="mt-2">
               <span className="text-term-dim">Quotes are delayed</span> and the
               scan runs once a day, so this describes a session that has largely
               finished. It is not a live tape.

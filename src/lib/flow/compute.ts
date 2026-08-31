@@ -4,6 +4,13 @@ import { parseOccSymbol } from '../cboe';
 import { runScan, scanSymbols } from '../scanUniverse';
 import { formatExpiryLabel, formatAsOf, marketToday } from '../time';
 import { FLOW_SCHEMA } from './types';
+import {
+  MIN_OI,
+  MIN_RATIO,
+  MIN_VOLUME,
+  PER_SYMBOL_CAP,
+  TOTAL_CAP,
+} from './types';
 import type { FlowRow, FlowSnapshot, FlowSymbolSummary, UnusualLevel } from './types';
 
 /**
@@ -26,16 +33,7 @@ import type { FlowRow, FlowSnapshot, FlowSymbolSummary, UnusualLevel } from './t
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
-/** Contracts below this volume are noise regardless of ratio. */
-const MIN_VOLUME = 250;
-/** Below this ratio nothing is unusual enough to report. */
-const MIN_RATIO = 1.0;
-/** Guards against a ratio blowing up on a contract with almost no open interest. */
-const MIN_OI = 50;
-/** Most rows kept per symbol, so one busy name cannot swamp the table. */
-const PER_SYMBOL_CAP = 6;
-/** Overall table cap. */
-const TOTAL_CAP = 60;
+
 
 interface CboeContract {
   option?: string;
