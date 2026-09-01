@@ -16,6 +16,7 @@ import { MethodologyDrawer } from './MethodologyDrawer';
 import { StaleDataBanner, mutedIf } from './StaleDataBanner';
 import { SummaryStrip } from './SummaryStrip';
 import { TabBar } from './TabBar';
+import { WhatChanged } from './WhatChanged';
 import type { Methodology } from '@/lib/methodology';
 import type { Staleness } from '@/lib/staleness';
 import type { MetricKey, PositioningData } from '@/lib/types';
@@ -55,6 +56,12 @@ interface DashboardProps {
    * breadth reading and this component is given only the option book.
    */
   researchLine: string;
+  /**
+   * What moved since the previous session, already built server-side. Empty
+   * means nothing is rendered — see `WhatChanged` for why there is no empty
+   * state.
+   */
+  whatChanged: string[];
 }
 
 /** `24m 10s` style countdown to the next server-side data refresh. */
@@ -93,6 +100,7 @@ export function Dashboard({
   methodology,
   contextRow,
   researchLine,
+  whatChanged,
 }: DashboardProps) {
   const [metric, setMetric] = useState<MetricKey>('gex');
   const [explain, setExplain] = useState(false);
@@ -151,6 +159,13 @@ export function Dashboard({
       <div className={mutedIf(staleness.stale)}>
         <VerdictLead input={simpleInput} research={researchLine} headingLevel={1} />
       </div>
+
+      {/*
+        Under the verdict, because it is the first qualification of it: the
+        same reading means something different on the day it changed than on
+        the fourth day it has said the same thing.
+      */}
+      <WhatChanged lines={whatChanged} />
 
       {/*
         Directly under the verdict, phrased as the question a sceptic asks on
