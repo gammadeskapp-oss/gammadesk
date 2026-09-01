@@ -217,7 +217,9 @@ export default async function DashboardPage() {
           </div>
           <p className="text-2xs text-term-faint">
             {positioning
-              ? `${config.symbol} ${formatPrice(positioning.spot)} · ${positioning.meta.asOfLabel}`
+              // The quote date, for the same reason as `Dashboard.tsx`: the
+              // render stamp reads "now" even when the snapshot is a day old.
+              ? `${config.symbol} ${formatPrice(positioning.spot)} · ${positioning.meta.quoteDateLabel}`
               : `${config.symbol} · live data unavailable`}
           </p>
         </div>

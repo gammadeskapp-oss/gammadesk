@@ -76,19 +76,19 @@ export default async function HomePage({ searchParams }: PageProps) {
       data = await getPositioningView(wanted);
     } catch (e) {
       if (e instanceof ChainError) {
-        // Status 0 means the request never completed, and 5xx means the CDN
-        // itself is unwell. Neither says anything about the ticker, so the
-        // page must not imply the symbol was the problem.
+        /*
+          `publicMessage`, never `message`. The adapter's own text names the
+          provider and the HTTP status — right for a log, wrong for a page.
+          See `ChainError` in lib/chainSource.ts.
+
+          Status 0 means the request never completed and 5xx means the provider
+          itself is unwell. Neither says anything about the ticker, so the page
+          must not imply the symbol was the problem.
+        */
         const upstream = e.status === 0 || e.status >= 500;
-        error = {
-          message: upstream
-            ? "Live data unavailable — couldn't reach the quote service."
-            : e.message,
-          hint: upstream ? undefined : e.hint,
-          upstream,
-        };
+        error = { message: e.publicMessage, upstream };
       } else {
-        error = { message: `Could not load the ${wanted} option chain.` };
+        error = { message: "Today's data isn't available yet." };
       }
     }
   }
@@ -165,6 +165,21 @@ export default async function HomePage({ searchParams }: PageProps) {
                   ? `No positioning is shown because none could be measured. Nothing on this page is estimated or filled in when the feed is down — the numbers are either real or absent. Try again in a few minutes.`
                   : `Not every listed company has an options chain worth reading, and thinly traded ones can return contracts with no open interest at all. Try a more heavily traded name, or go back to ${config.symbol}.`}
               </p>
+              {/*
+                Only on the upstream path. A ticker with no listed chain is not
+                an outage, and pointing that reader at the job list would send
+                them looking for a fault that is not there.
+              */}
+              {error.upstream && (
+                <p className="mt-2 text-2xs text-term-faint">
+                  <a
+                    href="/status"
+                    className="underline decoration-dotted underline-offset-2 hover:text-term-dim"
+                  >
+                    What&rsquo;s running, and what isn&rsquo;t
+                  </a>
+                </p>
+              )}
             </div>
           )}
 

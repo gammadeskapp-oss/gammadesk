@@ -3,6 +3,8 @@ import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { readCronHealth, type CronSource } from '@/lib/cronHealth';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
+import { config } from '@/lib/config';
+import { lastGoodSnapshotStatus } from '@/lib/lastSnapshot';
 import { formatAsOf } from '@/lib/time';
 
 export const metadata: Metadata = {
@@ -91,6 +93,21 @@ function Row({ source }: { source: CronSource }) {
 
 export default async function StatusPage() {
   const health = await readCronHealth();
+
+  /*
+   * The live chain feed, which is not a cron and therefore not in `health`.
+   *
+   * It is here because the error screen a visitor hits when the feed is down
+   * points at this page, and it would be a poor destination if it could only
+   * talk about scheduled jobs. Presence only — never a credential value.
+   */
+  const feed = await lastGoodSnapshotStatus().catch(() => ({
+    present: false,
+    quoteDate: null,
+    savedAt: null,
+  }));
+  const credentialPresent =
+    config.dataSource === 'polygon' ? Boolean(config.apiKey) : true;
   const allGood = health.problemCount === 0;
 
   return (
@@ -127,6 +144,64 @@ export default async function StatusPage() {
           {health.sources.map((source) => (
             <Row key={`${source.path}-${source.label}`} source={source} />
           ))}
+        </section>
+
+        {/*
+          The live feed. Separate from the job list above because it is not a
+          job — nothing schedules it, every page load reads it directly — and
+          because this is where the visitor-facing error card sends people.
+        */}
+        <section className="panel px-3.5 py-3" aria-label="Market data feed">
+          <h2 className="label-xs">Market data feed</h2>
+
+          <dl className="mt-2 grid gap-x-6 gap-y-1.5 text-2xs sm:grid-cols-3">
+            <div>
+              <dt className="text-term-faint">Provider</dt>
+              <dd className="text-term-text">{config.dataSource}</dd>
+            </div>
+            <div>
+              <dt className="text-term-faint">Credential</dt>
+              <dd className={credentialPresent ? 'text-pos' : 'text-bear'}>
+                {credentialPresent
+                  ? 'present'
+                  : 'missing — the feed cannot be read'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-term-faint">Last good snapshot</dt>
+              <dd className={feed.present ? 'text-term-text' : 'text-bear'}>
+                {feed.quoteDate
+                  ? formatAsOf(new Date(feed.quoteDate))
+                  : 'none stored'}
+              </dd>
+            </div>
+          </dl>
+
+          <p className="mt-2.5 text-2xs leading-relaxed text-term-faint">
+            {feed.present ? (
+              <>
+                When the live feed cannot be reached, pages serve this stored
+                snapshot with a warning banner above it rather than failing.
+                Recovered data is never presented as current — it keeps its own
+                timestamp, and the banner is not dismissible.
+              </>
+            ) : (
+              <>
+                Nothing is stored yet, so a feed outage right now would leave
+                pages with nothing to show. The first successful read writes
+                this, after which an outage degrades to stale data instead of an
+                error.
+              </>
+            )}
+          </p>
+
+          <p className="mt-2 text-2xs leading-relaxed text-term-faint">
+            Which credentials this deployment can actually see is reported by{' '}
+            <a href="/api/health" className="underline hover:text-term-text">
+              /api/health
+            </a>
+            , as presence only — no value is ever returned or displayed.
+          </p>
         </section>
 
         <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
