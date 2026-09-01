@@ -124,6 +124,33 @@ export function lastCompletedSession(
   return sessionFor(date, rules);
 }
 
+/**
+ * The trading day before `date`, skipping weekends and calendar holidays.
+ *
+ * This exists because "the previous session" and "yesterday" are the same
+ * thing only four days in five. Subtracting one calendar day lands on Sunday
+ * every Monday, and any feature that compares today against it would go blank
+ * once a week and look broken rather than careful.
+ *
+ * Walks back at most a fortnight, the same bound `lastCompletedSession` uses,
+ * so a bad clock or a mis-entered calendar cannot spin here. Returns null if
+ * it finds nothing in that window, which the caller must treat as "no
+ * comparison available" rather than substituting a guess.
+ */
+export function previousSessionDate(
+  date: string,
+  rules: SessionRules = NO_CALENDAR,
+): string | null {
+  let cursor = addCalendarDays(date, -1);
+
+  for (let i = 0; i < 14; i += 1) {
+    if (isWeekday(cursor) && !rules.isClosed(cursor)) return cursor;
+    cursor = addCalendarDays(cursor, -1);
+  }
+
+  return null;
+}
+
 /** True when `now` falls inside a trading session. */
 export function inSession(
   now: Date = new Date(),

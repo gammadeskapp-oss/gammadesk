@@ -15,7 +15,16 @@ import type { MarketContextQuotes } from '@/lib/marketContext/quotes';
 import { positioningMethodology } from '@/lib/methodology';
 import { researchLine } from '@/lib/simple/research';
 import { moodOf } from '@/lib/simple/translate';
-import { eventRow, highImportanceToday, snapshotStaleness } from '@/lib/events';
+import {
+  eventRow,
+  highImportanceToday,
+  priorSessionDate,
+  snapshotStaleness,
+} from '@/lib/events';
+import { readLog } from '@/lib/log/store';
+import { readArchive } from '@/lib/scanner/archive';
+import { marketToday } from '@/lib/time';
+import { buildWhatChanged } from '@/lib/whatChanged';
 import type { PositioningData } from '@/lib/types';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
@@ -61,10 +70,26 @@ export default async function HomePage({ searchParams }: PageProps) {
   const events = eventRow();
   const highToday = highImportanceToday();
 
-  const [breadth, quotes] = await Promise.all([
+  const [breadth, quotes, log, archive] = await Promise.all([
     getBreadth().catch((): BreadthReading | null => null),
     getMarketContextQuotes().catch((): MarketContextQuotes | null => null),
+    /*
+      Two stored reads for the what-changed lines. Both are allowed to fail on
+      their own and both degrade to an empty list, which renders nothing —
+      never a partial comparison. A dead store must cost the reader the card,
+      not the page.
+    */
+    readLog().catch(() => []),
+    readArchive().catch(() => []),
   ]);
+
+  /*
+    The previous TRADING day, from the market calendar — not today minus one.
+    Subtracting a calendar day lands on Sunday every Monday, and the card would
+    go blank once a week for a reason that has nothing to do with the data.
+  */
+  const today = marketToday();
+  const prior = priorSessionDate(today);
 
   if (wanted === null) {
     error = {
@@ -129,6 +154,22 @@ export default async function HomePage({ searchParams }: PageProps) {
                   : data.summary.spot > data.summary.flipLevel,
             }),
             breadthPct: breadth?.computed?.pctAbovePriorClose ?? null,
+          })}
+          /*
+            Built server-side so the diff is a pure function of two stored
+            snapshots and `verify:what-changed` can walk it.
+
+            The accuracy log only ever holds the tracked symbol, so its line is
+            withheld on any other ticker rather than being compared against a
+            different company's history. The scanner archive is market-wide and
+            applies either way.
+          */
+          whatChanged={buildWhatChanged({
+            symbol: wanted ?? config.symbol,
+            today,
+            prior,
+            log: wanted === config.symbol ? log : [],
+            archive,
           })}
           contextRow={
             <>

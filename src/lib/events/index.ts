@@ -7,7 +7,12 @@ import {
   type MarketCalendar,
   type SessionRules,
 } from './rules';
-import { assessDailySnapshot, assessStaleness, type Staleness } from '../staleness';
+import {
+  assessDailySnapshot,
+  assessStaleness,
+  previousSessionDate,
+  type Staleness,
+} from '../staleness';
 import { marketToday } from '../time';
 
 /**
@@ -65,4 +70,13 @@ export function dailySnapshotStaleness(
   now: Date = new Date(),
 ): Staleness {
   return assessDailySnapshot(snapshotDate, generatedAtIso, now, rules);
+}
+
+/**
+ * The trading day before `date`, holidays included. The calendar-aware wrapper
+ * pages should call — the bare helper defaults to treating every weekday as a
+ * session, which would point a comparison at Thanksgiving.
+ */
+export function priorSessionDate(date: string): string | null {
+  return previousSessionDate(date, rules);
 }

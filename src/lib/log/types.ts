@@ -135,3 +135,55 @@ export function judge(
 
   return { flipOutcome, magnetTouched };
 }
+
+/**
+ * The plain-English verdict on one settled day, for readers who do not want to
+ * assemble HELD/BROKE and a magnet outcome into an opinion themselves.
+ *
+ * `null` means the day cannot be judged at all — nothing settled, or neither a
+ * flip level nor a magnet strike was recorded — and that is deliberately not
+ * folded into "did not match". An unjudgeable day is not a miss, and counting
+ * it as one would flatter or damn the record for no reason.
+ */
+export type MatchStatus = 'mostly' | 'partially' | 'none';
+
+export const MATCH_LABEL: Record<MatchStatus, string> = {
+  mostly: 'Mostly matched',
+  partially: 'Partially matched',
+  none: 'Did not match',
+};
+
+/**
+ * Two independent claims are made each morning: that price stays on its side
+ * of the flip level, and that the day's range reaches a magnet strike. Both
+ * landing is "mostly", one landing is "partially", neither is "did not match".
+ *
+ * A day where only one of the two could be judged is scored on that one alone
+ * rather than being half-credited for a claim that was never made.
+ */
+export function matchStatus(entry: LogEntry): MatchStatus | null {
+  if (!entry.settled) return null;
+
+  const flipJudged = entry.flipOutcome === 'held' || entry.flipOutcome === 'broke';
+  const magnetJudged =
+    entry.magnetTouched !== undefined &&
+    entry.magnetTouched !== null &&
+    (entry.magnetAbove !== null || entry.magnetBelow !== null);
+
+  if (!flipJudged && !magnetJudged) return null;
+
+  let hits = 0;
+  let claims = 0;
+  if (flipJudged) {
+    claims += 1;
+    if (entry.flipOutcome === 'held') hits += 1;
+  }
+  if (magnetJudged) {
+    claims += 1;
+    if (entry.magnetTouched !== 'none') hits += 1;
+  }
+
+  if (hits === 0) return 'none';
+  if (hits === claims) return 'mostly';
+  return 'partially';
+}

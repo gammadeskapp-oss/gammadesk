@@ -16,6 +16,7 @@ import { MethodologyDrawer } from './MethodologyDrawer';
 import { StaleDataBanner, mutedIf } from './StaleDataBanner';
 import { SummaryStrip } from './SummaryStrip';
 import { TabBar } from './TabBar';
+import { WhatChanged } from './WhatChanged';
 import type { Methodology } from '@/lib/methodology';
 import type { Staleness } from '@/lib/staleness';
 import type { MetricKey, PositioningData } from '@/lib/types';
@@ -55,6 +56,12 @@ interface DashboardProps {
    * breadth reading and this component is given only the option book.
    */
   researchLine: string;
+  /**
+   * What moved since the previous session, already built server-side. Empty
+   * means nothing is rendered — see `WhatChanged` for why there is no empty
+   * state.
+   */
+  whatChanged: string[];
 }
 
 /** `24m 10s` style countdown to the next server-side data refresh. */
@@ -93,6 +100,7 @@ export function Dashboard({
   methodology,
   contextRow,
   researchLine,
+  whatChanged,
 }: DashboardProps) {
   const [metric, setMetric] = useState<MetricKey>('gex');
   const [explain, setExplain] = useState(false);
@@ -151,6 +159,39 @@ export function Dashboard({
       <div className={mutedIf(staleness.stale)}>
         <VerdictLead input={simpleInput} research={researchLine} headingLevel={1} />
       </div>
+
+      {/*
+        Under the verdict, because it is the first qualification of it: the
+        same reading means something different on the day it changed than on
+        the fourth day it has said the same thing.
+      */}
+      <WhatChanged lines={whatChanged} />
+
+      {/*
+        Directly under the verdict, phrased as the question a sceptic asks on
+        being handed one — not as an invitation to admire the record. The page
+        it goes to is still called Track Record; this is the way in, not a
+        rename.
+
+        Outside the muted wrapper on purpose. When today's numbers are stale,
+        the offer to go and check how yesterday's read settled is more useful
+        than ever, not less.
+
+        Set in the accent colour at the body size rather than as fine print.
+        The first version of this used the smallest, faintest pair of tokens in
+        the app and was invisible in practice — which defeats the whole point
+        of asking the question, since the reader who most needs the record is
+        the one not already looking for it.
+      */}
+      <p className="text-xs">
+        <a
+          href="/log"
+          className="inline-flex items-center gap-1.5 font-bold text-flip underline decoration-dotted underline-offset-4 hover:text-term-text"
+        >
+          Did yesterday&rsquo;s read hold up?
+          <span aria-hidden>&rarr;</span>
+        </a>
+      </p>
 
       <PageBar
         // Demoted to an `h2`: the verdict above is this page's `h1` now.

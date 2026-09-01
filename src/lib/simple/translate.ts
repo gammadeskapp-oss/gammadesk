@@ -142,10 +142,10 @@ export function buildSimpleRead(input: SimpleInput): SimpleRead {
 
   const watch = calm
     ? `Positioning is consistent with price holding between the levels above and below rather than breaking out, so chasing a move is the main way to get hurt today.${
-        flip ? ` Watch ${flip} — under it, this changes.` : ''
+        flip ? ` Watch ${flip}. A sustained move below it may increase the chance of larger swings.` : ''
       }`
     : `Moves can keep going instead of fading, so be careful and give price room.${
-        flip ? ` Watch ${flip} — back above it, this calms down.` : ''
+        flip ? ` Watch ${flip}. A sustained move above it may reduce the chance of larger swings.` : ''
       }`;
 
   const conflict =
