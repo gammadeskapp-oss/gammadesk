@@ -2,7 +2,7 @@ import 'server-only';
 
 import { fetchTradierQuotes, tradierToken } from '../breadth/tradier';
 import { operatorDetail } from '../errorText';
-import { marketSessionRules } from '../events';
+import { marketSessionRules, priorSessionDate } from '../events';
 import { getDigestBySymbol, getRsResult } from '../rs';
 import { getMembership } from '../rs/membership';
 import { sectorMap, GICS_NAMES, type Gics } from '../rs/universe';
@@ -10,7 +10,12 @@ import { DEFAULT_WEIGHTS, type DigestEntry } from '../rs/types';
 import { lookupEarnings } from '../scanner/earnings';
 import { formatEtClock } from '../scanner/schedule';
 import { peekStoredSectors, splitByMomentum } from '../sectors';
-import { inSession, lastCompletedSession, sessionFor } from '../staleness';
+import {
+  inSession,
+  lastCompletedSession,
+  sessionFor,
+  sessionLabel,
+} from '../staleness';
 import { marketNow, marketToday } from '../time';
 import { fetchGroupedDaily } from './groupedDaily';
 import {
@@ -68,12 +73,37 @@ import {
  * while developing against a real intraday tape, not because it is the version
  * that should ship.
  *
- * ## The digest names the session, on the session reading
+ * ## The provider names the session, and both figures come from it
  *
- * `sessionDate` there is the digest's own `asOfDate`, and Polygon is asked for
- * exactly that day. Reading the change from stored history and the volume from
- * a date derived off the clock would eventually divide one session's volume by
- * another session's average and render it as an ordinary row.
+ * The session reading asks Polygon for the newest completed session it will
+ * actually serve, walking back a day at a time, and then asks for the session
+ * before it. The percentage change is those two closes and the volume is the
+ * newer one's, so the two numbers a row is gated on always describe the same
+ * day and come from the same place.
+ *
+ * The earlier version read the change out of the RS digest and took the
+ * session from the digest's `asOfDate`. That was correct but brittle: the
+ * overnight refresh stamps `asOfDate` with the session that just closed, and
+ * this provider does not serve a session until the following day, so from
+ * about 18:00 ET until publication the page could name a day the provider
+ * would refuse and had nothing to show for it. An app that reports an
+ * entitlement error through the evening reads as broken, in the window someone
+ * is most likely planning the next day in.
+ *
+ * So a session Polygon has not published yet is not an error. The page falls
+ * back to the newest one it does have and says which day that is — older but
+ * labelled beats correct-but-blank, and the date is on screen either way.
+ *
+ * ## What the digest still supplies, and why staleness is tolerable there
+ *
+ * Only slow-moving context: the twenty-session volume baseline, the two moving
+ * averages and the relative-strength rank. None of these is a statement about
+ * one particular day, and all of them move by a rounding error over a single
+ * session, so a digest a session ahead of or behind the reported day does not
+ * make a row wrong. That is why names whose shard has not caught up are no
+ * longer excluded — the exclusion existed to stop one session's change being
+ * divided by another session's volume, and neither number comes from the
+ * digest any more.
  *
  * ## The universe is not widened, on purpose
  *
@@ -164,53 +194,115 @@ interface ReadFailure {
 }
 
 /**
- * The last completed session, priced from Polygon grouped daily bars.
+ * How many sessions back to look for one the provider will serve.
  *
- * The reading production always uses.
+ * Four covers a long weekend plus the publication lag. Beyond that the data is
+ * old enough that showing it under any heading would be misleading, and the
+ * honest answer is that the feed is not working.
+ */
+const MAX_SESSIONS_BACK = 4;
+
+/** One session's bars, with the session it belongs to. */
+interface SessionBars {
+  date: string;
+  bars: Map<string, { volume: number; close: number }>;
+}
+
+/**
+ * The newest completed session the provider will actually serve, plus the one
+ * before it for prior closes.
+ *
+ * Walks back from the last completed session rather than assuming today's is
+ * available: this provider publishes a session on the following day, so the
+ * most recent close is routinely not there yet. Results are cached across the
+ * walk so the prior-session fetch never repeats a request already made.
+ */
+async function resolveSessions(
+  now: Date,
+  rules: ReturnType<typeof marketSessionRules>,
+): Promise<
+  { current: SessionBars; prior: SessionBars; requests: number } | { failure: string }
+> {
+  const seen = new Map<string, Map<string, { volume: number; close: number }> | null>();
+  const reasons: string[] = [];
+  let requests = 0;
+
+  /** Fetches a session once; a date asked for twice costs one request. */
+  async function load(date: string) {
+    if (seen.has(date)) return seen.get(date) ?? null;
+    requests += 1;
+    const result = await fetchGroupedDaily(date);
+    const bars = result.ok ? result.bars : null;
+    if (!result.ok) reasons.push(result.reason);
+    seen.set(date, bars);
+    return bars;
+  }
+
+  let date: string | null = lastCompletedSession(now, rules).date;
+
+  for (let i = 0; i < MAX_SESSIONS_BACK && date !== null; i += 1) {
+    const bars = await load(date);
+    if (bars) {
+      const priorDate = priorSessionDate(date);
+      if (priorDate === null) {
+        return { failure: 'No prior session could be identified for a comparison.' };
+      }
+      const priorBars = await load(priorDate);
+      if (!priorBars) {
+        return {
+          failure:
+            `Market data for ${date} is available but the session before it ` +
+            'is not, so no percentage change could be computed.',
+        };
+      }
+      return {
+        current: { date, bars },
+        prior: { date: priorDate, bars: priorBars },
+        requests,
+      };
+    }
+    date = priorSessionDate(date);
+  }
+
+  return {
+    failure:
+      reasons[reasons.length - 1] ??
+      'No completed session could be read from the market-data provider.',
+  };
+}
+
+/**
+ * The newest published completed session, priced from Polygon grouped daily
+ * bars. The reading production always uses.
  */
 async function readSession(
   digests: Map<string, DigestEntry>,
   symbols: string[],
+  now: Date,
+  rules: ReturnType<typeof marketSessionRules>,
   notes: string[],
 ): Promise<Reading | ReadFailure> {
-  /*
-   * The digest names the session, because the digest is what the percentage
-   * change is read from. Falling back to a date derived from the clock would
-   * let the page ask the provider for a day the stored side knows nothing
-   * about, and then divide one session's volume by another session's average.
-   */
-  const digestDates = new Set<string>();
-  for (const entry of digests.values()) digestDates.add(entry.asOfDate);
-  const sessionDate = [...digestDates].sort().pop() ?? null;
-
-  if (sessionDate === null) {
-    return {
-      sessionDate: null,
-      failure:
-        'No stored price history is available yet, so no session can be ' +
-        'reported. The relative-strength refresh fills this overnight, a ' +
-        'quarter of the index at a time.',
-    };
+  const resolved = await resolveSessions(now, rules);
+  if ('failure' in resolved) {
+    return { sessionDate: lastCompletedSession(now, rules).date, failure: resolved.failure };
   }
 
+  const { current, prior } = resolved;
+  const sessionDate = current.date;
+
   /*
-   * Shards rotate one at a time, so a shard that has not run since the last
-   * close still carries the session before it. Those names are counted out
-   * rather than mixed in: a row whose change came from Monday and whose volume
-   * came from Tuesday would look like an ordinary row.
+   * Said out loud whenever the newest closed session is not the one on screen.
+   * A reader who knows the market closed a few hours ago and sees an older
+   * date has to be told why, or the page looks stale rather than honest.
    */
-  const stale = [...digestDates].filter((d) => d !== sessionDate);
-  if (stale.length > 0) {
+  const newestClosed = lastCompletedSession(now, rules).date;
+  if (sessionDate !== newestClosed) {
     notes.push(
-      `Some stored history is still one session behind (${stale
-        .sort()
-        .join(', ')}), and those names are left out of this reading rather ` +
-        'than mixed into it. The overnight refresh brings them up.',
+      `The ${sessionLabel(newestClosed)} session has closed but the ` +
+        'market-data provider has not published it yet, so this reading is ' +
+        `${sessionLabel(sessionDate)}. It moves on once that day is available.`,
     );
   }
-
-  const grouped = await fetchGroupedDaily(sessionDate);
-  if (!grouped.ok) return { sessionDate, failure: grouped.reason };
 
   const candidates: Candidate[] = [];
   let measured = 0;
@@ -218,27 +310,29 @@ async function readSession(
   let noVolumeBaseline = 0;
 
   for (const symbol of symbols) {
-    const digest = digests.get(symbol);
-    // No stored history, or history that stops before the session being
-    // reported. Either way there is no percentage change for this day.
-    if (!digest || digest.asOfDate !== sessionDate) continue;
-    if (digest.changePct === null) continue;
+    const today = current.bars.get(symbol);
+    const yesterday = prior.bars.get(symbol);
+    // Both closes or there is no change to report. A name that did not trade
+    // in either session is simply absent rather than counted as flat.
+    if (!today || !yesterday) continue;
 
     measured += 1;
 
-    // The digest holds the change as a fraction; every figure downstream of
-    // here is a percentage.
-    const changePct = digest.changePct * 100;
+    const changePct = (today.close / yesterday.close - 1) * 100;
 
     // Gainers only in this branch. A losers list is a different page with a
     // different set of warnings on it, deferred for the same reason puts are.
     if (!(changePct > 0)) continue;
     gainers += 1;
 
-    const baseline = digest.avgVolume20 ?? null;
-    const volume = grouped.bars.get(symbol)?.volume ?? null;
+    /*
+     * The baseline is the digest's, and it is allowed to be a session out of
+     * step with the reported day — see the note on the module. What it may not
+     * be is absent, because then the one gate cannot be applied.
+     */
+    const baseline = digests.get(symbol)?.avgVolume20 ?? null;
 
-    if (volume === null || baseline === null || !(baseline > 0)) {
+    if (baseline === null || !(baseline > 0)) {
       /*
        * Cannot be graded, so it cannot qualify. Counted and reported rather
        * than dropped in silence: an ungradeable name is a gap in this
@@ -250,23 +344,29 @@ async function readSession(
       continue;
     }
 
-    if (!qualifies(changePct, volume, baseline)) continue;
+    if (!qualifies(changePct, today.volume, baseline)) continue;
 
-    const last = digest.close;
     candidates.push({
       symbol,
-      last,
-      // Recovered from the close and the session's own change, so it is the
-      // same two numbers the percentage came from rather than a third source.
-      prevClose: last / (1 + digest.changePct),
+      last: today.close,
+      prevClose: yesterday.close,
       changePct,
-      volume,
+      volume: today.volume,
       avgVolume20: baseline,
-      relativeVolume: volume / baseline,
+      relativeVolume: today.volume / baseline,
     });
   }
 
-  return { sessionDate, candidates, measured, gainers, noVolumeBaseline, requests: 1 };
+  return {
+    sessionDate,
+    candidates,
+    measured,
+    gainers,
+    noVolumeBaseline,
+    // Reported rather than assumed: the walk may have spent a probe on a
+    // session the provider has not published before landing on one it has.
+    requests: resolved.requests,
+  };
 }
 
 /**
@@ -371,7 +471,7 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
 
   const reading = live
     ? await readLive(digests, symbols, clockSession, notes)
-    : await readSession(digests, symbols, notes);
+    : await readSession(digests, symbols, now, rules, notes);
 
   if ('failure' in reading) {
     return nothing(now, source, reading.sessionDate ?? clockSession, symbols.length, 1, [
@@ -464,9 +564,9 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
 
   if (noVolumeBaseline > 0) {
     notes.push(
-      `${noVolumeBaseline} names were up on the day but could not be graded on ` +
-        'volume — no stored twenty-session baseline yet, or no session volume ' +
-        'in the quote. They are left off rather than admitted ungated.',
+      `${noVolumeBaseline} names were up but could not be graded on volume — ` +
+        'no stored twenty-session baseline for them yet. They are left off ' +
+        'rather than admitted ungated.',
     );
   }
 
