@@ -2,7 +2,7 @@ import 'server-only';
 
 import { createJsonStore } from '../jsonStore';
 import { runScan } from '../scanUniverse';
-import { rsi } from '../ticker/indicators';
+import { ema, rsi } from '../ticker/indicators';
 import { addDays, marketToday } from '../time';
 import { fetchBars, type DailyBar } from './history';
 import { getMembership } from './membership';
@@ -79,6 +79,16 @@ const BUDGET_MS = 40_000;
  * as pending rather than ranked.
  */
 const MIN_BARS = WINDOWS.m1 + TREND_LOOKBACK + 1;
+
+/**
+ * The two moving-average periods stored in the digest for /movers.
+ *
+ * Read from `types.ts` would be circular-ish and these are not tunable: they
+ * match the scanner's fixed extended flag (20) and its default trend gate
+ * (200) on purpose. See the note on `DigestEntry.ema20`.
+ */
+const EMA_SHORT = 20;
+const EMA_LONG = 200;
 
 // --- stores -------------------------------------------------------------------
 
@@ -337,6 +347,25 @@ function digestFor(
   const recent = meanVolume(recentFrom, n);
   const baseline = meanVolume(recentFrom - VOLUME_BASELINE, recentFrom);
 
+  /*
+   * The two averages the movers list reads. Same series as everything above,
+   * so a halted stock's 200-day average covers 200 sessions it actually
+   * traded. `latestFinite` rather than a bare index because `ema` yields null
+   * until its period is filled, and a symbol with 60 bars has no 200-day
+   * average at all — which is reported as null, never as the 60-bar one.
+   */
+  const latestFinite = (series: (number | null)[]): number | null => {
+    const value = series[series.length - 1];
+    return value !== null && value !== undefined && Number.isFinite(value) ? value : null;
+  };
+
+  const ema20 = n >= EMA_SHORT ? latestFinite(ema(series, EMA_SHORT)) : null;
+  const ema200 = n >= EMA_LONG ? latestFinite(ema(series, EMA_LONG)) : null;
+
+  // Share volume over the same 20 sessions the dollar figure uses, so the two
+  // never disagree about which window they cover.
+  const avgVolume20 = meanVolume(Math.max(0, n - LIQUIDITY_WINDOW), n);
+
   return {
     symbol,
     asOfDate: seriesDates[last],
@@ -363,6 +392,9 @@ function digestFor(
       rsiLast !== null && rsiLast !== undefined && Number.isFinite(rsiLast)
         ? rsiLast
         : null,
+    ema20,
+    ema200,
+    avgVolume20,
   };
 }
 

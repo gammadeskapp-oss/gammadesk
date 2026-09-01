@@ -27,6 +27,13 @@ import 'server-only';
  * There is no VWAP field and no intraday series — quotes are a snapshot. The
  * fifteen-minute reading is therefore built by this project from its own
  * stored prices (see `store.ts`), not read from the provider.
+ *
+ * It does carry a session `volume`, which /movers reads. There is also an
+ * `average_volume` field alongside it, and it is deliberately not used: its
+ * window is the provider's business and could change under us, whereas the
+ * twenty-session average in the RS digest is computed here from bars this
+ * project already stores. Relative volume has to be a ratio of two numbers
+ * measured the same way, or it is not a ratio of anything.
  */
 
 const QUOTES_URL = 'https://api.tradier.com/v1/markets/quotes';
@@ -37,6 +44,17 @@ export interface TradierQuote {
   last: number;
   /** Yesterday's closing price. */
   prevClose: number;
+  /**
+   * Shares traded so far in the current session, or the whole of the last one
+   * after the close.
+   *
+   * Optional because it is genuinely absent for a symbol that has not printed
+   * yet, and because breadth — the reason this module exists — does not read
+   * it. The movers list does, and a missing volume there must read as "cannot
+   * be graded" rather than as zero, which would compute a relative volume of
+   * nought and quietly drop a real mover off the list.
+   */
+  volume?: number;
 }
 
 interface RawQuote {
@@ -44,6 +62,7 @@ interface RawQuote {
   last?: number | null;
   close?: number | null;
   prevclose?: number | null;
+  volume?: number | null;
 }
 
 export function tradierToken(): string | undefined {
@@ -104,7 +123,15 @@ export async function fetchTradierQuotes(
     const prevClose = item.prevclose;
     if (!symbol || typeof price !== 'number' || typeof prevClose !== 'number') continue;
     if (!(price > 0) || !(prevClose > 0)) continue;
-    quotes.set(symbol, { symbol, last: price, prevClose });
+    const volume = item.volume;
+    quotes.set(symbol, {
+      symbol,
+      last: price,
+      prevClose,
+      ...(typeof volume === 'number' && Number.isFinite(volume) && volume >= 0
+        ? { volume }
+        : {}),
+    });
   }
 
   const unmatchedRaw = body.quotes?.unmatched_symbols?.symbol;

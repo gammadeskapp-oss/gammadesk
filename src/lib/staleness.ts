@@ -70,7 +70,14 @@ export interface Session {
   earlyClose: boolean;
 }
 
-function sessionFor(date: string, rules: SessionRules): Session {
+/**
+ * The open and close of one named trading day.
+ *
+ * Exported for /movers, which needs the two edges to say how far through a
+ * session a reading was taken. It does not check whether the date is a
+ * trading day at all — callers that care must ask `rules.isClosed` first.
+ */
+export function sessionFor(date: string, rules: SessionRules): Session {
   const [y, m, d] = date.split('-').map(Number);
   return {
     date,

@@ -277,6 +277,20 @@ export async function getRsInputs(): Promise<RsInputs> {
 }
 
 /** Refresh state, for the health check. */
+/**
+ * Digest entries keyed by symbol.
+ *
+ * For /movers, which needs three stored numbers the ranking itself never
+ * reads — the two moving averages and the twenty-session share volume. It
+ * goes through the same memoised `loadInputs` as the ranking, so a reader
+ * with both pages open pays for one set of store reads rather than two, and
+ * the two pages can never be looking at different digest documents.
+ */
+export async function getDigestBySymbol(): Promise<Map<string, DigestEntry>> {
+  const { entries } = await loadInputs();
+  return new Map(entries.map((e) => [e.symbol, e]));
+}
+
 export async function peekRsMeta() {
   return metaStore.read().catch(() => null);
 }
