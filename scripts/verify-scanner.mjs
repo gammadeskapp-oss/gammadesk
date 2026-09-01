@@ -23,13 +23,26 @@ registerTsImports();
 const { gradeContract, pickContract, contractSummary } = await import(
   '../src/lib/scanner/optionQuality.ts'
 );
-const { evaluateRow, partition, buildWatchLine, whyItMatched, readExtension } =
-  await import('../src/lib/scanner/evaluate.ts');
+const {
+  evaluateRow,
+  partition,
+  buildWatchLine,
+  whyItMatched,
+  readExtension,
+  alignmentBadges,
+} = await import('../src/lib/scanner/evaluate.ts');
+const { SCANNER_PRESETS, applyPreset, presetById, PULLBACK_BAND_PCT } =
+  await import('../src/lib/scanner/presets.ts');
 const { excludedForEarnings, daysBetween } = await import(
   '../src/lib/scanner/earningsRules.ts'
 );
-const { FILTER_KEYS, EARNINGS_EXCLUSION_DAYS, EXTENDED_PCT, OPTION_WINDOW } =
-  await import('../src/lib/scanner/types.ts');
+const {
+  FILTER_KEYS,
+  EARNINGS_EXCLUSION_DAYS,
+  EXTENDED_PCT,
+  OPTION_WINDOW,
+  ALIGNMENT_KEYS,
+} = await import('../src/lib/scanner/types.ts');
 
 let failures = 0;
 let checks = 0;
@@ -404,6 +417,183 @@ for (const part of ['45 DTE', '0.62 delta', '2,400 OI', '4.0% spread']) {
 ok(
   'a missing number says unknown rather than zero',
   contractSummary(contract({ openInterest: null })).includes('OI unknown'),
+);
+
+
+// --- 8. alignment badges -----------------------------------------------------
+
+section('Alignment badges: four, always, never weighted toward green');
+
+const goodQuality = {
+  badge: 'tradable',
+  contract: contract(),
+  reasons: ['Moderate bid/ask spread, 3.2% of mid.'],
+  source: 'scan',
+  checkedAt: '',
+  quoteDateIso: null,
+};
+
+ok('there are exactly four', ALIGNMENT_KEYS.length === 4, ALIGNMENT_KEYS.join(','));
+
+for (const [label, r] of [
+  ['clean', row({ optionQuality: goodQuality })],
+  ['ungraded contract', row()],
+  ['unknown earnings', row({ earnings: unknownEarnings })],
+  [
+    'failed trend gate',
+    row({
+      single: gates({
+        // The wording run.ts actually emits. A terse fixture here would let
+        // the badge pass this check while printing something unreadable.
+        ema: { state: 'fail', detail: 'below the 200-day average' },
+      }),
+    }),
+  ],
+  ['unreadable extension', row({ extension: { pctAbove20Ema: null, ema20: null, extended: false } })],
+]) {
+  const badges = alignmentBadges(r);
+  ok(`${label} renders all four`, badges.length === 4, String(badges.length));
+  ok(
+    `${label} keeps the declared order`,
+    badges.map((b) => b.key).join(',') === ALIGNMENT_KEYS.join(','),
+    badges.map((b) => b.key).join(','),
+  );
+  ok(
+    `${label} gives every badge evidence`,
+    badges.every((b) => typeof b.detail === 'string' && b.detail.length > 5),
+    JSON.stringify(badges.map((b) => b.detail)),
+  );
+}
+
+const byKey = (r) => Object.fromEntries(alignmentBadges(r).map((b) => [b.key, b]));
+
+ok(
+  'an ungraded contract is never a green options badge',
+  byKey(row()).options.state === 'unknown',
+);
+ok(
+  'an Avoid contract is a red options badge',
+  byKey(row({ optionQuality: { ...goodQuality, badge: 'avoid' } })).options.state === 'fail',
+);
+ok(
+  'a Caution contract is also red, not green',
+  byKey(row({ optionQuality: { ...goodQuality, badge: 'caution' } })).options.state === 'fail',
+  'this badge answers a yes/no question and caution is a no',
+);
+ok(
+  'an ungradeable contract is unknown, not red',
+  byKey(row({ optionQuality: { ...goodQuality, badge: 'unknown' } })).options.state === 'unknown',
+);
+
+ok(
+  'trend is green only when both averages agree',
+  byKey(row({ extension: { pctAbove20Ema: 3, ema20: 97, extended: false } })).trend.state ===
+    'pass',
+);
+ok(
+  'above the 200-day but under the 20-day is red',
+  byKey(row({ extension: { pctAbove20Ema: -4, ema20: 104, extended: false } })).trend.state ===
+    'fail',
+  'the two trends disagree and the badge has to show it',
+);
+ok(
+  'and it says which way',
+  /below its 20-day/.test(
+    byKey(row({ extension: { pctAbove20Ema: -4, ema20: 104, extended: false } })).trend.detail,
+  ),
+);
+ok(
+  'an unreadable 20-day is unknown, not green',
+  byKey(row({ extension: { pctAbove20Ema: null, ema20: null, extended: false } })).trend.state ===
+    'unknown',
+);
+
+ok(
+  'momentum names the extension without turning red for it',
+  (() => {
+    const b = byKey(row({ extension: { pctAbove20Ema: 8, ema20: 92, extended: true } })).momentum;
+    return b.state === 'pass' && /8% above its 20-day average/.test(b.detail);
+  })(),
+);
+
+// --- 9. presets never widen the list ----------------------------------------
+
+section('Presets are a view, never a second rule set');
+
+ok('there are three views', SCANNER_PRESETS.length === 3);
+ok('no put preset exists in this branch', !SCANNER_PRESETS.some((p) => /put|bear|short/i.test(p.label)));
+ok('an unknown id falls back to All results', presetById('nonsense').id === 'all');
+
+const survivors = [
+  row({ symbol: 'RUN', extension: { pctAbove20Ema: 7, ema20: 93, extended: true } }),
+  row({ symbol: 'EASED', extension: { pctAbove20Ema: 0.5, ema20: 99, extended: false } }),
+  row({ symbol: 'UNDER', extension: { pctAbove20Ema: -3, ema20: 103, extended: false } }),
+  row({ symbol: 'BLIND', extension: { pctAbove20Ema: null, ema20: null, extended: false } }),
+];
+
+const all = applyPreset(presetById('all'), survivors);
+const cont = applyPreset(presetById('continuation'), survivors);
+const pull = applyPreset(presetById('pullback'), survivors);
+
+ok('All results shows everything', all.length === survivors.length);
+ok(
+  'continuation takes the extended one',
+  cont.map((e) => e.row.symbol).join(',') === 'RUN',
+  cont.map((e) => e.row.symbol).join(','),
+);
+ok(
+  'pullback takes the two near or under the average',
+  pull.map((e) => e.row.symbol).join(',') === 'EASED,UNDER',
+  pull.map((e) => e.row.symbol).join(','),
+);
+ok(
+  'a name with no 20-day reading is in neither',
+  !cont.some((e) => e.row.symbol === 'BLIND') && !pull.some((e) => e.row.symbol === 'BLIND'),
+  'a preset that admitted unmeasured names would be selecting on nothing',
+);
+
+for (const [label, list] of [['continuation', cont], ['pullback', pull]]) {
+  ok(
+    `${label} states why it selected each name`,
+    list.every((e) => e.reason.length > 15),
+    JSON.stringify(list.map((e) => e.reason)),
+  );
+}
+
+ok(
+  'the two shapes never overlap',
+  cont.filter((c) => pull.some((p) => p.row.symbol === c.row.symbol)).length === 0,
+  'one boundary, so a ticker cannot appear under two contradictory descriptions',
+);
+ok(
+  'and together they cover every measurable survivor',
+  cont.length + pull.length === survivors.filter((r) => r.extension.pctAbove20Ema !== null).length,
+);
+
+ok(
+  'no preset can admit a name that failed a gate',
+  (() => {
+    const failed = row({
+      symbol: 'NOPE',
+      single: gates({ ema: { state: 'fail', detail: 'below the 200-day average' } }),
+      extension: { pctAbove20Ema: 7, ema20: 93, extended: true },
+    });
+    // partition is what feeds applyPreset; a failing row never reaches it.
+    return partition([failed]).passed.length === 0;
+  })(),
+);
+
+ok(
+  'the pullback band matches the constant',
+  applyPreset(presetById('pullback'), [
+    row({ extension: { pctAbove20Ema: PULLBACK_BAND_PCT, ema20: 98, extended: false } }),
+  ]).length === 1,
+);
+ok(
+  'and just past it is continuation',
+  applyPreset(presetById('continuation'), [
+    row({ extension: { pctAbove20Ema: PULLBACK_BAND_PCT + 0.1, ema20: 98, extended: false } }),
+  ]).length === 1,
 );
 
 // --- result ------------------------------------------------------------------

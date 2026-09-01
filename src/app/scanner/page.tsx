@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { ScannerBoard } from '@/components/ScannerBoard';
+import { ScannerRunRate } from '@/components/ScannerRunRate';
 import { InfoTip } from '@/components/InfoTip';
 import { getBreadth } from '@/lib/breadth';
 import { breadthSentence } from '@/lib/breadth/wording';
@@ -83,6 +84,13 @@ export default async function ScannerPage() {
             target or stop anywhere on it.
           </p>
         </div>
+
+        {/*
+          Above the list, because a shortlist of three cannot be read without
+          it: three out of a typical twenty is a thin day, three out of a
+          typical four is an ordinary one, and the list itself cannot say which.
+        */}
+        <ScannerRunRate counts={view.counts} average={view.averagePassed} />
 
         {scan ? (
           <ScannerBoard

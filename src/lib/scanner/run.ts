@@ -8,6 +8,7 @@ import { DEFAULT_MIN_DOLLAR_VOLUME, DEFAULT_WEIGHTS, type RsRow } from '../rs/ty
 import { runScan } from '../scanUniverse';
 import { ema } from '../ticker/indicators';
 import { marketToday } from '../time';
+import { archiveScan } from './archive';
 import { readExtension } from './evaluate';
 import { lookupEarnings } from './earnings';
 import { excludedForEarnings } from './earningsRules';
@@ -616,6 +617,15 @@ export async function runScanner(): Promise<ScanResult> {
     // scan has not been stored, which is true and visible, rather than serving
     // an older day's list under today's heading.
   }
+
+  /*
+   * The archive is written on every path, including the mornings that produce
+   * nothing. A run-rate that silently skipped its zeros would answer "how many
+   * names pass on the days when names pass", which is not a question anyone
+   * has — and would flatter the rule set on exactly the days it is doing its
+   * job. See `archive.ts`; it never throws.
+   */
+  await archiveScan(result);
 
   return result;
 }

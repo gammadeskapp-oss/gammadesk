@@ -18,11 +18,15 @@
  */
 
 import {
+  ALIGNMENT_KEYS,
   EARNINGS_EXCLUSION_DAYS,
   EXTENDED_PCT,
   FILTER_KEYS,
   FILTER_LABEL,
+  type AlignmentBadge,
+  type AlignmentKey,
   type FilterKey,
+  type FilterState,
   type FilterVerdict,
   type ScanRow,
   type WatchLine,
@@ -128,6 +132,119 @@ export function buildWatchLine(row: ScanRow): WatchLine {
     items,
     text: items.length > 0 ? items.join('; ') : 'Nothing flagged beyond the usual.',
   };
+}
+
+// --- alignment badges --------------------------------------------------------
+
+/**
+ * The four badges, each resolved from its own evidence and nothing else.
+ *
+ * No badge reads another badge, none is weighted, and none is suppressed when
+ * it comes out red. The point of a four-badge row is that a reader can see
+ * disagreement between them at a glance; a row engineered to agree with itself
+ * would be decoration.
+ *
+ * `unknown` is used where the evidence is absent, and it is never green. See
+ * `ALIGNMENT_KEYS` for why that third state has to exist.
+ */
+export function alignmentBadges(row: ScanRow): AlignmentBadge[] {
+  const badge = (key: AlignmentKey, state: FilterState, detail: string): AlignmentBadge => ({
+    key,
+    state,
+    detail,
+  });
+
+  const out: AlignmentBadge[] = [];
+
+  // --- market: the one market-wide gate ------------------------------------
+  const market = row.single.spyGamma;
+  out.push(
+    badge(
+      'market',
+      market?.state ?? 'unknown',
+      market?.detail ?? 'the market regime could not be read',
+    ),
+  );
+
+  /*
+   * --- momentum: the volume gate, qualified by how far it has already run ---
+   *
+   * Confirmed volume is what makes it green. Being extended does not turn it
+   * red — the move is still confirmed — but it is named in the detail, because
+   * "confirmed" and "confirmed and already 8% past its 20-day average" are not
+   * the same thing to act on.
+   */
+  const volume = row.single.volume;
+  const extendedNote =
+    row.extension.extended && row.extension.pctAbove20Ema !== null
+      ? `, and already ${row.extension.pctAbove20Ema.toFixed(0)}% above its 20-day average`
+      : '';
+  out.push(
+    badge(
+      'momentum',
+      volume?.state ?? 'unknown',
+      `${volume?.detail ?? 'volume could not be read'}${extendedNote}`,
+    ),
+  );
+
+  /*
+   * --- trend: the long average and the short one, pointing the same way ----
+   *
+   * The gate is the 200-day alone. This badge is stricter on purpose: a name
+   * above its 200-day but under its 20-day has a long trend that is up and a
+   * short one that is not, and that disagreement is exactly the thing four
+   * badges exist to show.
+   */
+  const trendGate = row.single.ema;
+  const pct = row.extension.pctAbove20Ema;
+
+  if (!trendGate || trendGate.state === 'unknown' || pct === null) {
+    out.push(
+      badge(
+        'trend',
+        'unknown',
+        trendGate?.state === 'unknown'
+          ? trendGate.detail
+          : 'the 20-day average could not be read, so the two trends cannot be compared',
+      ),
+    );
+  } else if (trendGate.state === 'fail') {
+    out.push(badge('trend', 'fail', trendGate.detail));
+  } else if (pct >= 0) {
+    out.push(
+      badge('trend', 'pass', 'above both the 200-day and the 20-day averages'),
+    );
+  } else {
+    out.push(
+      badge(
+        'trend',
+        'fail',
+        `above the 200-day average but ${Math.abs(pct).toFixed(0)}% below its 20-day — the long trend is up, the short one is not`,
+      ),
+    );
+  }
+
+  /*
+   * --- options: the contract, which is the one thing the gates never saw ---
+   *
+   * Green for Excellent and Tradable only. Caution is amber-in-spirit and red
+   * here, because this badge answers a yes/no question — is there something
+   * worth trading — and "the spread is wide and the open interest is thin" is
+   * a no.
+   */
+  const quality = row.optionQuality;
+  if (!quality) {
+    out.push(badge('options', 'unknown', 'the contract has not been checked yet'));
+  } else if (quality.badge === 'excellent' || quality.badge === 'tradable') {
+    out.push(badge('options', 'pass', quality.reasons[0] ?? 'the contract is tradable'));
+  } else if (quality.badge === 'unknown') {
+    out.push(badge('options', 'unknown', quality.reasons[0] ?? 'the contract could not be graded'));
+  } else {
+    out.push(badge('options', 'fail', quality.reasons[0] ?? 'the contract scored poorly'));
+  }
+
+  // Returned in the declared order, always all four, never filtered.
+  return ALIGNMENT_KEYS.map((key) => out.find((b) => b.key === key)!);
 }
 
 // --- why it matched ----------------------------------------------------------

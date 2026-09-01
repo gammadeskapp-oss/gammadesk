@@ -4,15 +4,29 @@ import { useMemo, useState } from 'react';
 import { ScannerChart } from '@/components/ScannerChart';
 import { TickerLink } from '@/components/TickerLink';
 import { formatUsd } from '@/lib/format';
-import { partition, whyItMatched, type RowOutcome } from '@/lib/scanner/evaluate';
+import {
+  alignmentBadges,
+  buildWatchLine,
+  partition,
+  whyItMatched,
+  type RowOutcome,
+} from '@/lib/scanner/evaluate';
 import type { NwSettings } from '@/lib/scanner/nadarayaWatson';
 import { contractSummary } from '@/lib/scanner/optionQuality';
 import {
+  applyPreset,
+  presetById,
+  SCANNER_PRESETS,
+  type PresetId,
+} from '@/lib/scanner/presets';
+import {
+  ALIGNMENT_LABEL,
   FILTER_EXPLANATION,
   FILTER_KEYS,
   FILTER_LABEL,
   OPTION_BADGE_LABEL,
   OPTION_WINDOW,
+  type AlignmentBadge,
   type FilterKey,
   type FilterState,
   type OptionQuality,
@@ -80,6 +94,45 @@ function GateChip({ gate, state }: { gate: FilterKey; state: FilterState }) {
       <span aria-hidden>{STATE_GLYPH[state]}</span>
       <span className="sr-only">{state}</span>
     </span>
+  );
+}
+
+/**
+ * The four alignment badges, and the watch line beside them.
+ *
+ * Rendered together because they answer the same question from two directions:
+ * the badges say what is lined up, the watch line says what is not. Splitting
+ * them across the card would let a reader take in four green chips without
+ * meeting the sentence that qualifies them.
+ *
+ * Every badge is rendered every time, in a fixed order, whatever its state. A
+ * row that hid its red ones would be worse than no row.
+ */
+function AlignmentRow({ badges, watch }: { badges: AlignmentBadge[]; watch: string }) {
+  return (
+    <div className="space-y-1.5">
+      <ul className="flex flex-wrap gap-1.5">
+        {badges.map((badge) => (
+          <li
+            key={badge.key}
+            title={badge.detail}
+            className={`inline-flex items-center gap-1.5 whitespace-nowrap border px-2 py-1 text-2xs font-bold tracking-[0.06em] ${STATE_CLASS[badge.state]}`}
+          >
+            {ALIGNMENT_LABEL[badge.key]}
+            <span aria-hidden>{STATE_GLYPH[badge.state]}</span>
+            {/* The glyph is decorative and the colour is not available to a
+                screen reader; the evidence has to reach one as text. */}
+            <span className="sr-only">
+              {badge.state}: {badge.detail}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-2xs leading-relaxed text-flip">
+        <span className="font-bold tracking-[0.06em]">Watch: </span>
+        {watch}
+      </p>
+    </div>
   );
 }
 
@@ -203,11 +256,14 @@ function ResultCard({
   outcome,
   nwSettings,
   trendEmaPeriod,
+  presetReason,
 }: {
   row: ScanRow;
   outcome: RowOutcome;
   nwSettings: NwSettings;
   trendEmaPeriod: number;
+  /** Why the active preset selected this name. Empty on "All results". */
+  presetReason?: string;
 }) {
   const [chartOpen, setChartOpen] = useState(false);
   const [quality, setQuality] = useState<OptionQuality | null>(initial.optionQuality);
@@ -222,6 +278,8 @@ function ResultCard({
   );
 
   const lines = whyItMatched(row);
+  const badges = alignmentBadges(row);
+  const watch = buildWatchLine(row).text;
 
   const check = async () => {
     setChecking(true);
@@ -274,28 +332,45 @@ function ResultCard({
         `buildWatchLine`, which returns a sentence rather than nothing when
         there is nothing to flag.
       */}
-      <dl className="space-y-1 px-3.5 py-3 text-xs">
-        {lines.map((line) => (
+      {/*
+        What the preset selected on, stated rather than implied. A view that
+        silently reorders a list is one the reader has to take on trust.
+      */}
+      {presetReason && (
+        <p className="border-b border-term-line/60 px-3.5 py-2 text-2xs leading-relaxed text-pos">
+          {presetReason}
+        </p>
+      )}
+
+      <dl className="space-y-1 px-3.5 pb-2 pt-3 text-xs">
+        {/*
+          Every line except Watch. The watch line is still the last thing the
+          reader meets — it renders immediately below, beside the alignment
+          badges — but it is drawn there rather than here so the badges sit
+          between the reasons and the risks instead of after both. Rendering it
+          in each place would print it twice.
+        */}
+        {lines
+          .filter((line) => line.label !== 'Watch')
+          .map((line) => (
           <div key={line.label} className="flex flex-wrap gap-x-2">
-            <dt
-              className={`w-20 shrink-0 font-bold tracking-[0.06em] ${
-                line.label === 'Watch' ? 'text-flip' : 'text-term-faint'
-              }`}
-            >
+            <dt className="w-20 shrink-0 font-bold tracking-[0.06em] text-term-faint">
               {line.label}:
             </dt>
-            <dd
-              className={`min-w-0 flex-1 leading-relaxed ${
-                line.label === 'Watch' ? 'text-flip' : 'text-term-dim'
-              }`}
-            >
+            <dd className="min-w-0 flex-1 leading-relaxed text-term-dim">
               {line.text}
             </dd>
           </div>
-        ))}
+          ))}
       </dl>
 
-      <div className="space-y-2 px-3.5 pb-3">
+      <div className="space-y-2.5 px-3.5 pb-3">
+        {/*
+          Above the contract panel, because these four are the summary and the
+          panel below is the detail behind one of them.
+        */}
+        <AlignmentRow badges={badges} watch={watch} />
+
         <OptionPanel
           quality={quality}
           onCheck={check}
@@ -363,10 +438,28 @@ export function ScannerBoard({
    */
   scannedAtEt: string;
 }) {
+  const [presetId, setPresetId] = useState<PresetId>('all');
+  const preset = presetById(presetId);
+
   const { passed, all, biggestEliminator } = useMemo(
     () => partition(scan.rows),
     [scan.rows],
   );
+
+  /*
+   * Applied to the survivors only. A preset can never admit a name the five
+   * gates rejected — see `presets.ts`; it selects a shape among names that
+   * already passed, and reorders nothing else.
+   */
+  const shown = useMemo(
+    () => applyPreset(preset, passed.map((entry) => entry.row)),
+    [preset, passed],
+  );
+
+  const outcomeFor = useMemo(() => {
+    const map = new Map(passed.map((entry) => [entry.row.symbol, entry.outcome]));
+    return (symbol: string) => map.get(symbol)!;
+  }, [passed]);
 
   const gammaStamp = scan.gammaDate
     ? `gamma as of ${gammaTimeEt} ET on ${scan.gammaDate}`
@@ -442,6 +535,41 @@ export function ScannerBoard({
         &ldquo;no earnings soon&rdquo;.
       </p>
 
+      {/*
+        Presets. Calls only in this branch, and deliberately: see `presets.ts`
+        for why there is no put preset yet.
+      */}
+      {passed.length > 0 && (
+        <section className="panel px-3.5 py-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="label-xs mr-1">View</span>
+            {SCANNER_PRESETS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setPresetId(option.id)}
+                aria-pressed={option.id === presetId}
+                className={`border px-2.5 py-1 text-2xs font-bold tracking-[0.08em] transition-colors ${
+                  option.id === presetId
+                    ? 'border-pos/70 bg-pos/15 text-pos'
+                    : 'border-term-line text-term-faint hover:border-pos/50 hover:text-term-dim'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-2xs leading-relaxed text-term-dim">
+            {preset.description}
+          </p>
+          <p className="mt-1.5 text-2xs leading-relaxed text-term-faint">
+            A view, not a rule. Every name below has already cleared all five
+            rules — a preset only picks out where in its move it is, and can
+            never add a name the rules rejected. Calls only in this version.
+          </p>
+        </section>
+      )}
+
       {scan.gateReason ? (
         <div className="panel border-l-2 border-l-bear/60 px-4 py-8 text-center text-xs">
           <p className="font-bold text-bear">
@@ -478,16 +606,29 @@ export function ScannerBoard({
             Every candidate and its five gate states is below.
           </p>
         </div>
+      ) : shown.length === 0 ? (
+        <div className="panel px-4 py-8 text-center text-xs">
+          <p className="font-bold text-term-text">
+            {passed.length} name{passed.length === 1 ? '' : 's'} passed, but none
+            fits &ldquo;{preset.label}&rdquo;.
+          </p>
+          <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-dim">
+            {preset.description} Switch to &ldquo;All results&rdquo; to see
+            everything that cleared the five rules today — the preset narrowed
+            the view, it did not reject anything the rules accepted.
+          </p>
+        </div>
       ) : (
         <section className="space-y-3">
           <h2 className="sr-only">Names passing all five rules</h2>
-          {passed.map(({ row, outcome }) => (
+          {shown.map(({ row, reason }) => (
             <ResultCard
               key={row.symbol}
               row={row}
-              outcome={outcome}
+              outcome={outcomeFor(row.symbol)}
               nwSettings={nwSettings}
               trendEmaPeriod={trendEmaPeriod}
+              presetReason={reason}
             />
           ))}
         </section>

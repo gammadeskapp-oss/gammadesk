@@ -358,6 +358,62 @@ export interface WatchLine {
   text: string;
 }
 
+
+// --- alignment badges --------------------------------------------------------
+
+/**
+ * The four things a reader actually wants to know at a glance, each answered
+ * from its own evidence.
+ *
+ * ## Why these are not just the five gates repainted
+ *
+ * Every name on the pass list has all five gates green by definition, so five
+ * green chips would carry no information at all. These four are chosen because
+ * they *vary between names that all passed*:
+ *
+ *  - **Trend aligned** wants the long trend and the short one pointing the
+ *    same way. The gate is the 200-day average alone; a name can clear that
+ *    and still be under its 20-day, which is a genuinely different picture.
+ *  - **Momentum confirmed** is the volume gate plus the extension flag. A name
+ *    that has already run 8% past its 20-day average has confirmed momentum
+ *    and a worse place to start from, and the badge says so.
+ *  - **Options liquid** comes from the contract check, which is the one thing
+ *    upstream never measured.
+ *  - **Market aligned** is the market regime. Constant across a single scan by
+ *    construction, and kept anyway: it is the badge that explains why the list
+ *    is empty on the days it is empty, and it varies in the archive.
+ *
+ * ## Amber is not a shade of green
+ *
+ * `unknown` exists because the alternative is worse. The instruction was that
+ * each badge is red or green on its own evidence and that none may be weighted
+ * or hidden to produce more green — so a badge with no evidence behind it is
+ * never green, and it is never quietly dropped either. It renders grey, states
+ * why, and counts as not-green everywhere it is counted.
+ */
+export const ALIGNMENT_KEYS = [
+  'market',
+  'momentum',
+  'trend',
+  'options',
+] as const;
+export type AlignmentKey = (typeof ALIGNMENT_KEYS)[number];
+
+export const ALIGNMENT_LABEL: Record<AlignmentKey, string> = {
+  market: 'Market aligned',
+  momentum: 'Momentum confirmed',
+  trend: 'Trend aligned',
+  options: 'Options liquid',
+};
+
+export interface AlignmentBadge {
+  key: AlignmentKey;
+  /** `unknown` is never counted as aligned. See above. */
+  state: FilterState;
+  /** The evidence, in plain English. Never empty. */
+  detail: string;
+}
+
 /** A gamma magnet — a strike holding a large share of positive exposure. */
 export interface Magnet {
   strike: number;
