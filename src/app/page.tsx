@@ -12,6 +12,8 @@ import type { BreadthReading } from '@/lib/breadth/types';
 import { getMarketContextQuotes } from '@/lib/marketContext/quotes';
 import type { MarketContextQuotes } from '@/lib/marketContext/quotes';
 import { positioningMethodology } from '@/lib/methodology';
+import { researchLine } from '@/lib/simple/research';
+import { moodOf } from '@/lib/simple/translate';
 import { eventRow, highImportanceToday, snapshotStaleness } from '@/lib/events';
 import type { PositioningData } from '@/lib/types';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
@@ -107,6 +109,26 @@ export default async function HomePage({ searchParams }: PageProps) {
             this view rather than a general case — see lib/methodology.ts.
           */
           methodology={positioningMethodology(data)}
+          /*
+            The one line under the verdict. Built here rather than in the
+            client component because it needs the breadth reading, which is
+            fetched on this page — and because keeping it pure and server-side
+            is what lets `verify:research` walk every combination of it.
+
+            Mood comes from `translate.ts`'s own `moodOf`, not from a second
+            reading of the regime, so the line and the headline above it cannot
+            disagree about whether today is calm or wild.
+          */
+          researchLine={researchLine({
+            mood: moodOf({
+              regime: data.summary.regime,
+              aboveFlip:
+                data.summary.flipLevel === null
+                  ? null
+                  : data.summary.spot > data.summary.flipLevel,
+            }),
+            breadthPct: breadth?.computed?.pctAbovePriorClose ?? null,
+          })}
           contextRow={
             <>
               <ContextRow breadth={breadth} quotes={quotes} />

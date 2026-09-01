@@ -10,6 +10,7 @@ export function PageBar({
   description,
   meta,
   asOfLabel,
+  titleLevel = 1,
 }: {
   title: string;
   /**
@@ -20,13 +21,23 @@ export function PageBar({
   /** Short right-aligned detail, e.g. counts or timestamps. */
   meta?: string;
   asOfLabel?: string;
+  /**
+   * Demote the heading to an `h2`.
+   *
+   * The home page puts its verdict above this bar and makes that the `h1`, so
+   * a second `h1` underneath would give the page two top-level headings. Every
+   * other page leaves this alone.
+   */
+  titleLevel?: 1 | 2;
 }) {
+  const Title = titleLevel === 1 ? 'h1' : 'h2';
+
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
       <div className="min-w-0">
-        <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+        <Title className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
           {title}
-        </h1>
+        </Title>
         {description && (
           <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
             {description}

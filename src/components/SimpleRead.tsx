@@ -4,7 +4,18 @@ import { buildSimpleRead, type SimpleInput } from '@/lib/simple/translate';
  * The default view: what the book says, in words a beginner can act on.
  *
  * All wording comes from `lib/simple/translate.ts` — nothing here composes a
- * sentence, so the no-jargon promise has one place to be checked.
+ * sentence, so the no-jargon promise has one place to be checked. The one
+ * exception is the research line, which comes from `lib/simple/research.ts`
+ * and is passed in by the page rather than built here, because it needs the
+ * breadth reading and this component is deliberately given only the book.
+ *
+ * ## Why this file exports three things
+ *
+ * The front door needs the verdict, its sentence and its levels on the first
+ * phone screen, with the market backdrop *below* them — so those parts have to
+ * be renderable on their own, above the read-mode toggle. `/decision` wants
+ * the whole block in one piece, as before. `SimpleRead` is therefore just the
+ * two halves stacked, and neither half knows which caller it has.
  *
  * ## Why this says "Wild" and not "WILD (negative gamma)"
  *
@@ -21,9 +32,31 @@ import { buildSimpleRead, type SimpleInput } from '@/lib/simple/translate';
  * view exists to avoid would undo its whole purpose. The reader who wants that
  * gloss is one tap away, in the advanced view, where it is on every tile.
  */
-export function SimpleRead({ input }: { input: SimpleInput }) {
+
+/**
+ * The verdict, its sentence, the levels it refers to, and one research line.
+ *
+ * Sized to fit a 390px-wide phone screen without scrolling, which is the whole
+ * reason it is separable from the rest.
+ */
+export function VerdictLead({
+  input,
+  research,
+  headingLevel = 2,
+}: {
+  input: SimpleInput;
+  /** One plain-English line on how carefully to read today. Optional: only
+   *  the home page has the breadth reading needed to build it. */
+  research?: string;
+  /**
+   * `1` when this is the first thing on the page and there is no page title
+   * above it — which is the home page, and only the home page.
+   */
+  headingLevel?: 1 | 2;
+}) {
   const read = buildSimpleRead(input);
   const calm = read.mood === 'calm';
+  const Heading = headingLevel === 1 ? 'h1' : 'h2';
 
   return (
     <section
@@ -31,12 +64,19 @@ export function SimpleRead({ input }: { input: SimpleInput }) {
       className={`panel border-l-2 ${calm ? 'border-l-pos/60' : 'border-l-bear/60'}`}
     >
       <div className="p-4 sm:p-6">
-        <h2 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-2xl font-bold tracking-tight sm:text-3xl">
+        {/*
+          The largest element on the page, by some distance. It was previously
+          `text-2xl` and shared the screen with a page title, a search box and
+          two backdrop cards; on a phone it landed below the fold, which made
+          the one sentence the app exists to say the one thing a first-time
+          reader never saw.
+        */}
+        <Heading className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-3xl font-bold tracking-tight sm:text-5xl">
           <span className="text-term-text">{input.symbol} today:</span>
           <span className={calm ? 'text-pos' : 'text-bear'}>
             <span aria-hidden>{read.emoji}</span> {calm ? 'Calm' : 'Wild'}
           </span>
-        </h2>
+        </Heading>
 
         <p className="mt-3 text-base leading-relaxed text-term-text sm:text-lg">
           {read.sentence}
@@ -76,16 +116,39 @@ export function SimpleRead({ input }: { input: SimpleInput }) {
         ))}
       </dl>
 
-      <div className="p-4 sm:px-6 sm:py-5">
-        <h3 className="text-2xs font-bold uppercase tracking-[0.18em] text-pos">
-          What to watch
-        </h3>
-        <p className="mt-2 text-sm leading-relaxed text-term-dim">{read.watch}</p>
-        <p className="mt-3 text-2xs leading-relaxed text-term-faint">
-          This describes what kind of day it is, not what to do. It is never a
-          reason to buy or sell on its own.
+      {research && (
+        <p className="px-4 py-3.5 text-sm leading-relaxed text-term-dim sm:px-6">
+          {research}
         </p>
-      </div>
+      )}
     </section>
+  );
+}
+
+/** The "what to watch" half, and the standing reminder that goes with it. */
+export function WhatToWatch({ input }: { input: SimpleInput }) {
+  const read = buildSimpleRead(input);
+
+  return (
+    <section aria-label="What to watch" className="panel p-4 sm:px-6 sm:py-5">
+      <h3 className="text-2xs font-bold uppercase tracking-[0.18em] text-pos">
+        What to watch
+      </h3>
+      <p className="mt-2 text-sm leading-relaxed text-term-dim">{read.watch}</p>
+      <p className="mt-3 text-2xs leading-relaxed text-term-faint">
+        This describes what kind of day it is, not what to do. It is never a
+        reason to buy or sell on its own.
+      </p>
+    </section>
+  );
+}
+
+/** Both halves together — the shape `/decision` has always rendered. */
+export function SimpleRead({ input }: { input: SimpleInput }) {
+  return (
+    <div className="space-y-2">
+      <VerdictLead input={input} />
+      <WhatToWatch input={input} />
+    </div>
   );
 }

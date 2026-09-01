@@ -58,8 +58,14 @@ export interface SimpleRead {
  * so when they disagree the data is telling us price is sitting right on the
  * boundary. Reading that as wild is the cautious way round, and the
  * disagreement is surfaced rather than swallowed.
+ *
+ * Exported, and narrowed to the two fields it actually reads, because the home
+ * page needs the same verdict to pick its research line and must not reach it
+ * by a second route — see `lib/simple/research.ts`.
  */
-function moodOf(input: SimpleInput): 'calm' | 'wild' {
+export function moodOf(
+  input: Pick<SimpleInput, 'regime' | 'aboveFlip'>,
+): 'calm' | 'wild' {
   if (input.regime === 'negative') return 'wild';
   return input.aboveFlip === false ? 'wild' : 'calm';
 }
