@@ -54,6 +54,17 @@ export const MOVERS_EXPLANATION =
   'Moved last session — these met no quality bar. They moved, and here is what to check.';
 
 /**
+ * The same line for the live intraday reading, which only ever renders on a
+ * developer's machine.
+ *
+ * Kept beside the shipped one rather than built by swapping a word at the call
+ * site, so both can be read at once and checked against the same rules — every
+ * requirement on the line above applies here identically.
+ */
+export const MOVERS_EXPLANATION_LIVE =
+  'Moving today — these met no quality bar. They are moving, and here is what to check.';
+
+/**
  * Why a row carries a warning.
  *
  * Every one of these is *shown*, never applied. A movers list is where people
@@ -122,6 +133,23 @@ export interface MoverRow {
   earningsDate: string | null;
 }
 
+/**
+ * Where a reading's prices came from, which is also where it may be served.
+ *
+ * `session` — Polygon grouped daily bars for the last completed session. The
+ * only reading production is allowed to produce, and the one the public site
+ * always shows.
+ *
+ * `live` — Tradier batch quotes for the session in progress. **Local only.**
+ * Tradier's terms make serving their data to visitors redistribution, so the
+ * production deploy must never carry `TRADIER_TOKEN` and no code path may
+ * assume it exists. This is not solved by an unlisted URL or a password: an
+ * unlisted page is not private, and a protected public deploy still puts the
+ * data on a URL a third party can reach. The only safe boundary is that the
+ * credential never leaves a developer's machine.
+ */
+export type MoversSource = 'session' | 'live';
+
 export interface MoversResult {
   rows: MoverRow[];
 
@@ -130,17 +158,47 @@ export interface MoversResult {
   /** New York wall clock of the same instant, `HH:MM`. */
   capturedEt: string;
   /**
-   * The completed session these numbers describe, `YYYY-MM-DD`.
+   * Which reading this is, and therefore what every number on it means.
    *
-   * Always a session that has closed — this list never reports the day in
-   * progress. It is the RS digest's own `asOfDate` rather than a date derived
-   * from the clock, because the digest is where the percentage change comes
-   * from and the two must not be able to disagree. The page is required to
-   * show it: a reader has to be able to see which day they are looking at.
+   * `session` is the only one production can produce: the last completed
+   * session, priced from Polygon's grouped daily bars. `live` is the intraday
+   * reading, and it exists on a developer's machine and nowhere else — see
+   * `MoversSource` for why that is a rule rather than a default.
+   */
+  source: MoversSource;
+
+  /**
+   * True only for the live intraday reading.
+   *
+   * Never true in production. The page branches its wording on this, and a
+   * reading that is a finished day must not be labelled as anything current.
+   */
+  live: boolean;
+
+  /**
+   * The session these numbers describe, `YYYY-MM-DD`.
+   *
+   * For the `session` reading this is a day that has closed, taken from the RS
+   * digest's own `asOfDate` rather than derived from the clock — the digest is
+   * where the percentage change comes from, and the two must not be able to
+   * disagree. For the `live` reading it is the day in progress.
+   *
+   * The page is required to show it either way: a reader has to be able to see
+   * which day they are looking at.
    */
   sessionDate: string;
 
-  /** Constituents with stored history for that session. */
+  /**
+   * How far through the session the capture was, 0-1.
+   *
+   * Only meaningful for the `live` reading, where the volume numerator is a
+   * running total against a whole-day average and an 11:00 figure is
+   * structurally low. Always 1 for the `session` reading, where both sides of
+   * the ratio are complete days and there is no such caveat.
+   */
+  sessionProgress: number;
+
+  /** Constituents with a usable reading for that session. */
   measured: number;
   /** Symbols in the universe this run asked for. */
   universe: number;

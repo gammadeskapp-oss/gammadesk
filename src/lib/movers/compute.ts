@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { fetchTradierQuotes, tradierToken } from '../breadth/tradier';
+import { operatorDetail } from '../errorText';
 import { marketSessionRules } from '../events';
 import { getDigestBySymbol, getRsResult } from '../rs';
 import { getMembership } from '../rs/membership';
@@ -8,7 +10,8 @@ import { DEFAULT_WEIGHTS, type DigestEntry } from '../rs/types';
 import { lookupEarnings } from '../scanner/earnings';
 import { formatEtClock } from '../scanner/schedule';
 import { peekStoredSectors, splitByMomentum } from '../sectors';
-import { lastCompletedSession } from '../staleness';
+import { inSession, lastCompletedSession, sessionFor } from '../staleness';
+import { marketNow, marketToday } from '../time';
 import { fetchGroupedDaily } from './groupedDaily';
 import {
   byChangeDescending,
@@ -17,71 +20,94 @@ import {
   trendFrom,
   warningsFor,
 } from './rules';
-import { MAX_MOVERS, type MoverRow, type MoversResult } from './types';
+import {
+  MAX_MOVERS,
+  type MoverRow,
+  type MoversResult,
+  type MoversSource,
+} from './types';
 
 /**
- * Build the last-completed-session movers list.
+ * Build the movers list, from whichever source this deployment is allowed.
  *
- * ## Why a finished session rather than a live one
+ * ## Two readings, and the boundary between them is a rule
  *
- * This reports the session that has closed, not the one in progress, and that
- * is a deliberate choice about what the app is for rather than a fallback.
+ * - **`session`** - Polygon grouped daily bars for the last completed session.
+ *   One request, no entitlement beyond the key already here. This is what the
+ *   public site shows, always.
+ * - **`live`** - Tradier batch quotes for the day in progress. Runs only when
+ *   `TRADIER_TOKEN` is present, which is only ever a developer's machine.
  *
- * A live intraday list of what is running right now is a day-trading
- * instrument: it invites acting on a move while it is happening, and its
- * relative-volume figure is a running total against a whole-day average, so
- * the number is structurally understated all morning and only becomes exact
- * at the close. The rest of this project is built for swing decisions made on
- * daily bars. A finished session fits that: every figure on the page is final,
- * the volume ratio is a whole day over an average of whole days, and nothing
- * on it can change while it is being read.
+ * Tradier's data may not be redistributed, and putting it on a page visitors
+ * can load is redistribution whether or not anyone is charged for it. So the
+ * production deploy carries no token, and the selection below is written so no
+ * code path *depends* on one existing: absence is the ordinary case and takes
+ * the session branch without complaint. There is deliberately no
+ * password-protected variant - an unlisted page is not a private one, and a
+ * protected public deploy still puts the data on a URL a third party can
+ * reach.
  *
- * The page is named for what it shows. It is not "moving today".
+ * ## What the two share, which is nearly everything
  *
- * ## One upstream request
+ * The gate, the context columns and the warnings are identical. Both readings
+ * produce the same `Candidate` list and then run through one row-building
+ * pass, so there is no second copy of the rules that could drift from the
+ * first. Only the price source and the labelling differ.
  *
- * 1. **Polygon grouped daily bars**, one GET for the whole US market, read for
- *    the session's share volume. See `groupedDaily.ts` — that endpoint is the
- *    one figure this project does not already store.
+ * The ungradeable case is the same in both: a name with no stored
+ * twenty-session baseline is held back and counted, never shown with its one
+ * gate unapplied.
  *
- * Everything else is a stored read and costs nothing: membership, the RS
- * ranking, the moving averages, the twenty-session volume baseline, the
- * session's percentage change and the sector momentum all come out of the RS
- * digest and the sectors snapshot.
+ * ## Why the session reading is the better feature anyway
  *
- * The earnings warning is a second request, and only for the handful of names
- * that made the list. It has no non-Tradier source, so in production it
- * resolves to "unknown" for every row and the row says so — see
- * `scanner/earnings.ts`.
+ * A live list of what is running right now invites acting mid-move, which is
+ * day trading; the rest of this project is built for swing decisions on daily
+ * bars. On the session reading every figure is final and the volume ratio is a
+ * whole day over an average of whole days, so it needs no allowance made for
+ * the time of day it was read. The live reading is kept because it is useful
+ * while developing against a real intraday tape, not because it is the version
+ * that should ship.
  *
- * ## The digest sets the session, and everything is checked against it
+ * ## The digest names the session, on the session reading
  *
- * `sessionDate` is the digest's own `asOfDate`, not a date computed from the
- * clock. The percentage change comes from the digest and the volume comes from
- * Polygon, so the two have to describe the same day or the ratio is a
- * comparison between two different sessions wearing one date. Asking the
- * provider for exactly the digest's session, and refusing when the digest
- * cannot name one, is what keeps that from happening quietly.
+ * `sessionDate` there is the digest's own `asOfDate`, and Polygon is asked for
+ * exactly that day. Reading the change from stored history and the volume from
+ * a date derived off the clock would eventually divide one session's volume by
+ * another session's average and render it as an ordinary row.
  *
  * ## The universe is not widened, on purpose
  *
  * Relative volume is a ratio against the name's own history, and the only
  * history this project holds is the S&P 500 shards. A wider list would produce
- * rows whose gate had never actually been applied — a movers list where some
+ * rows whose gate had never actually been applied - a movers list where some
  * rows were checked and some were not is worse than a shorter one.
- *
- * ## What relative volume here is, exactly
- *
- * The session's total share volume divided by the twenty-session average of
- * whole days. Both sides are complete days, so the figure is exact rather than
- * a running total that has to be read with the clock in mind. That caveat, and
- * the session-progress number that used to carry it, are gone with the live
- * reading that needed them.
  */
 
-/** An empty reading that still carries the clock and the reason. */
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(1, Math.max(0, value));
+}
+
+/**
+ * How far through the session `now` is, 0-1.
+ *
+ * Only the live reading has a partial day to describe. 1 outside a session,
+ * and 1 for the session reading, where both sides of the volume ratio are
+ * complete days and the caveat does not apply.
+ */
+function sessionProgressAt(now: Date): number {
+  const rules = marketSessionRules();
+  if (!inSession(now, rules)) return 1;
+  const session = sessionFor(marketNow(now).date, rules);
+  const span = session.closeMs - session.openMs;
+  if (!(span > 0)) return 1;
+  return clamp01((now.getTime() - session.openMs) / span);
+}
+
+/** An empty reading that still carries the clock, the source and the reason. */
 function nothing(
   now: Date,
+  source: MoversSource,
   sessionDate: string,
   universe: number,
   requests: number,
@@ -91,7 +117,10 @@ function nothing(
     rows: [],
     capturedAt: now.toISOString(),
     capturedEt: formatEtClock(now),
+    source,
+    live: source === 'live',
     sessionDate,
+    sessionProgress: source === 'live' ? sessionProgressAt(now) : 1,
     measured: 0,
     universe,
     gainers: 0,
@@ -112,19 +141,38 @@ interface Candidate {
   relativeVolume: number;
 }
 
-export async function computeMovers(now: Date = new Date()): Promise<MoversResult> {
-  const rules = marketSessionRules();
-  const notes: string[] = [];
 
-  const membership = await getMembership();
-  const symbols = membership.members.map((m) => m.symbol);
+/**
+ * What a source produces before the shared row-building pass.
+ *
+ * Both readings return this and nothing else, which is what keeps the gate and
+ * the warnings from being implemented twice.
+ */
+interface Reading {
+  sessionDate: string;
+  candidates: Candidate[];
+  measured: number;
+  gainers: number;
+  noVolumeBaseline: number;
+  requests: number;
+}
 
-  const [digests, rs, sectors] = await Promise.all([
-    getDigestBySymbol().catch(() => new Map<string, DigestEntry>()),
-    getRsResult(DEFAULT_WEIGHTS).catch(() => null),
-    peekStoredSectors().catch(() => null),
-  ]);
+/** Returned instead of a `Reading` when a source cannot produce one. */
+interface ReadFailure {
+  failure: string;
+  sessionDate: string | null;
+}
 
+/**
+ * The last completed session, priced from Polygon grouped daily bars.
+ *
+ * The reading production always uses.
+ */
+async function readSession(
+  digests: Map<string, DigestEntry>,
+  symbols: string[],
+  notes: string[],
+): Promise<Reading | ReadFailure> {
   /*
    * The digest names the session, because the digest is what the percentage
    * change is read from. Falling back to a date derived from the clock would
@@ -133,17 +181,17 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
    */
   const digestDates = new Set<string>();
   for (const entry of digests.values()) digestDates.add(entry.asOfDate);
-  const storedSession = [...digestDates].sort().pop() ?? null;
+  const sessionDate = [...digestDates].sort().pop() ?? null;
 
-  if (storedSession === null) {
-    return nothing(now, lastCompletedSession(now, rules).date, symbols.length, 0, [
-      'No stored price history is available yet, so no session can be ' +
+  if (sessionDate === null) {
+    return {
+      sessionDate: null,
+      failure:
+        'No stored price history is available yet, so no session can be ' +
         'reported. The relative-strength refresh fills this overnight, a ' +
         'quarter of the index at a time.',
-    ]);
+    };
   }
-
-  const sessionDate = storedSession;
 
   /*
    * Shards rotate one at a time, so a shard that has not run since the last
@@ -151,10 +199,10 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
    * rather than mixed in: a row whose change came from Monday and whose volume
    * came from Tuesday would look like an ordinary row.
    */
-  const staleDigests = [...digestDates].filter((d) => d !== sessionDate);
-  if (staleDigests.length > 0) {
+  const stale = [...digestDates].filter((d) => d !== sessionDate);
+  if (stale.length > 0) {
     notes.push(
-      `Some stored history is still one session behind (${staleDigests
+      `Some stored history is still one session behind (${stale
         .sort()
         .join(', ')}), and those names are left out of this reading rather ` +
         'than mixed into it. The overnight refresh brings them up.',
@@ -162,33 +210,7 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
   }
 
   const grouped = await fetchGroupedDaily(sessionDate);
-  let requests = 1;
-
-  if (!grouped.ok) {
-    return nothing(now, sessionDate, symbols.length, requests, [
-      `${grouped.reason} Nothing is shown rather than a list with its one ` +
-        'gate unapplied.',
-    ]);
-  }
-
-  const sectorOf = sectorMap(membership.members);
-  const rsBySymbol = new Map(rs?.rows.map((r) => [r.symbol, r]) ?? []);
-
-  /*
-   * "Leading" is the sectors engine's own accelerating set, not a fresh
-   * judgement made here. A movers page inventing its own definition of a
-   * leading sector while /sectors used another would put two different answers
-   * to one question on the same site.
-   */
-  const leading: Set<string> | null = sectors
-    ? new Set(splitByMomentum(sectors).accelerating.map((s) => s.id))
-    : null;
-  if (!sectors) {
-    notes.push(
-      'No sectors snapshot is stored yet, so the leading-sector reading is ' +
-        'unknown rather than guessed.',
-    );
-  }
+  if (!grouped.ok) return { sessionDate, failure: grouped.reason };
 
   const candidates: Candidate[] = [];
   let measured = 0;
@@ -242,6 +264,141 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
       avgVolume20: baseline,
       relativeVolume: volume / baseline,
     });
+  }
+
+  return { sessionDate, candidates, measured, gainers, noVolumeBaseline, requests: 1 };
+}
+
+/**
+ * The session in progress, priced from Tradier batch quotes. Local only.
+ *
+ * Reached only when `TRADIER_TOKEN` is set, which production never does. See
+ * the note on `MoversSource` for why that is a rule and not a preference.
+ */
+async function readLive(
+  digests: Map<string, DigestEntry>,
+  symbols: string[],
+  sessionDate: string,
+  notes: string[],
+): Promise<Reading | ReadFailure> {
+  let quotes: Awaited<ReturnType<typeof fetchTradierQuotes>>['quotes'];
+  try {
+    const result = await fetchTradierQuotes(symbols);
+    quotes = result.quotes;
+    if (result.unmatched.length > 0) {
+      notes.push(
+        `${result.unmatched.length} symbols on the membership list were not ` +
+          `recognised by the quote feed and are not counted: ${result.unmatched.join(', ')}.`,
+      );
+    }
+  } catch (error) {
+    /*
+     * The detail goes to the log, not to the page. `fetch()` collapses every
+     * connection-level failure into "fetch failed" and puts the real reason in
+     * `cause`, so logging `error.message` alone reports nothing an operator
+     * can act on.
+     */
+    console.warn('[movers] quote feed failed:', operatorDetail(error));
+    return {
+      sessionDate,
+      failure: 'The quote feed did not answer, so there is no reading for this refresh.',
+    };
+  }
+
+  const candidates: Candidate[] = [];
+  let gainers = 0;
+  let noVolumeBaseline = 0;
+
+  for (const quote of quotes.values()) {
+    const changePct = ((quote.last - quote.prevClose) / quote.prevClose) * 100;
+    if (!(changePct > 0)) continue;
+    gainers += 1;
+
+    const baseline = digests.get(quote.symbol)?.avgVolume20 ?? null;
+    const volume = quote.volume ?? null;
+
+    // Identical to the session reading: ungradeable is held back and counted,
+    // never shown with the gate unapplied.
+    if (volume === null || baseline === null || !(baseline > 0)) {
+      noVolumeBaseline += 1;
+      continue;
+    }
+
+    if (!qualifies(changePct, volume, baseline)) continue;
+
+    candidates.push({
+      symbol: quote.symbol,
+      last: quote.last,
+      prevClose: quote.prevClose,
+      changePct,
+      volume,
+      avgVolume20: baseline,
+      relativeVolume: volume / baseline,
+    });
+  }
+
+  return {
+    sessionDate,
+    candidates,
+    measured: quotes.size,
+    gainers,
+    noVolumeBaseline,
+    requests: 1,
+  };
+}
+
+export async function computeMovers(now: Date = new Date()): Promise<MoversResult> {
+  const rules = marketSessionRules();
+  const notes: string[] = [];
+
+  /*
+   * Absence of a token is the ordinary case, not a degraded one: it is what
+   * production looks like. Nothing below may assume the credential exists.
+   */
+  const source: MoversSource = tradierToken() ? 'live' : 'session';
+  const live = source === 'live';
+
+  const membership = await getMembership();
+  const symbols = membership.members.map((m) => m.symbol);
+
+  const [digests, rs, sectors] = await Promise.all([
+    getDigestBySymbol().catch(() => new Map<string, DigestEntry>()),
+    getRsResult(DEFAULT_WEIGHTS).catch(() => null),
+    peekStoredSectors().catch(() => null),
+  ]);
+
+  const clockSession = live ? marketToday(now) : lastCompletedSession(now, rules).date;
+
+  const reading = live
+    ? await readLive(digests, symbols, clockSession, notes)
+    : await readSession(digests, symbols, notes);
+
+  if ('failure' in reading) {
+    return nothing(now, source, reading.sessionDate ?? clockSession, symbols.length, 1, [
+      `${reading.failure} Nothing is shown rather than a list with its one gate unapplied.`,
+    ]);
+  }
+
+  const { sessionDate, candidates, measured, gainers, noVolumeBaseline } = reading;
+  let requests = reading.requests;
+
+  const sectorOf = sectorMap(membership.members);
+  const rsBySymbol = new Map(rs?.rows.map((r) => [r.symbol, r]) ?? []);
+
+  /*
+   * "Leading" is the sectors engine's own accelerating set, not a fresh
+   * judgement made here. A movers page inventing its own definition of a
+   * leading sector while /sectors used another would put two different answers
+   * to one question on the same site.
+   */
+  const leading: Set<string> | null = sectors
+    ? new Set(splitByMomentum(sectors).accelerating.map((s) => s.id))
+    : null;
+  if (!sectors) {
+    notes.push(
+      'No sectors snapshot is stored yet, so the leading-sector reading is ' +
+        'unknown rather than guessed.',
+    );
   }
 
   candidates.sort(byChangeDescending);
@@ -327,7 +484,10 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
     rows,
     capturedAt: now.toISOString(),
     capturedEt: formatEtClock(now),
+    source,
+    live,
     sessionDate,
+    sessionProgress: live ? sessionProgressAt(now) : 1,
     measured,
     universe: symbols.length,
     gainers,

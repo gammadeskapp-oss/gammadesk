@@ -24,7 +24,13 @@ registerTsImports();
 
 const { qualifies, trendFrom, pctFrom, warningsFor, byChangeDescending, EARNINGS_WARN_DAYS } =
   await import('../src/lib/movers/rules.ts');
-const { MIN_RELATIVE_VOLUME, HIGH_RELATIVE_VOLUME, MAX_MOVERS, MOVERS_EXPLANATION } =
+const {
+  MIN_RELATIVE_VOLUME,
+  HIGH_RELATIVE_VOLUME,
+  MAX_MOVERS,
+  MOVERS_EXPLANATION,
+  MOVERS_EXPLANATION_LIVE,
+} =
   await import('../src/lib/movers/types.ts');
 const { EXTENDED_PCT, EARNINGS_EXCLUSION_DAYS } = await import('../src/lib/scanner/types.ts');
 
@@ -301,6 +307,29 @@ ok(
   'and it never says buy or sell',
   !/\b(buy|sell|long|short|target|stop)\b/i.test(MOVERS_EXPLANATION),
   MOVERS_EXPLANATION,
+);
+
+/*
+ * The live reading renders a different line, and it is held to every rule the
+ * shipped one is. A variant that only appears on a developer's machine is
+ * exactly the one that would drift, because nobody reviews it on the way past.
+ */
+ok(
+  'the live explanation line says no quality bar was met',
+  /met no quality bar/.test(MOVERS_EXPLANATION_LIVE),
+  MOVERS_EXPLANATION_LIVE,
+);
+ok(
+  'and the live line never says buy or sell either',
+  !/\b(buy|sell|long|short|target|stop)\b/i.test(MOVERS_EXPLANATION_LIVE),
+  MOVERS_EXPLANATION_LIVE,
+);
+ok(
+  'the two lines name different sessions, so one cannot be mistaken for the other',
+  MOVERS_EXPLANATION !== MOVERS_EXPLANATION_LIVE &&
+    /last session/i.test(MOVERS_EXPLANATION) &&
+    /today/i.test(MOVERS_EXPLANATION_LIVE),
+  `${MOVERS_EXPLANATION} / ${MOVERS_EXPLANATION_LIVE}`,
 );
 ok('the list is capped at 15', MAX_MOVERS === 15, String(MAX_MOVERS));
 

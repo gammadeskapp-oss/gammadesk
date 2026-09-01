@@ -108,6 +108,12 @@ export default async function StatusPage() {
   }));
   const credentialPresent =
     config.dataSource === 'polygon' ? Boolean(config.apiKey) : true;
+
+  /*
+   * Read here rather than from a movers result, so the row is truthful even
+   * when the page has never been built this process.
+   */
+  const moversLive = Boolean(process.env.TRADIER_TOKEN?.trim());
   const allGood = health.problemCount === 0;
 
   return (
@@ -158,6 +164,20 @@ export default async function StatusPage() {
             <div>
               <dt className="text-term-faint">Provider</dt>
               <dd className="text-term-text">{config.dataSource}</dd>
+            </div>
+            <div>
+              <dt className="text-term-faint">Movers source</dt>
+              {/*
+                Named here because the two readings are not interchangeable and
+                only one of them may ever be served publicly. "live" appearing
+                on a deployed status page means a Tradier token has reached an
+                environment it must never be in — see `MoversSource`.
+              */}
+              <dd className={moversLive ? 'text-bear' : 'text-term-text'}>
+                {moversLive
+                  ? 'live intraday (Tradier) — local only, must not be deployed'
+                  : 'last completed session (Polygon)'}
+              </dd>
             </div>
             <div>
               <dt className="text-term-faint">Credential</dt>

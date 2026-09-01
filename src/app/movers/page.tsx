@@ -8,6 +8,7 @@ import { EARNINGS_WARN_DAYS } from '@/lib/movers/rules';
 import {
   MIN_RELATIVE_VOLUME,
   MOVERS_EXPLANATION,
+  MOVERS_EXPLANATION_LIVE,
   REFRESH_SECONDS,
   getMovers,
 } from '@/lib/movers';
@@ -51,13 +52,20 @@ export default async function MoversPage() {
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <PageBar
-          title="Moved last session"
+          title={movers.live ? 'Moving today' : 'Moved last session'}
           description={PAGE_DESCRIPTIONS['/movers']}
           /*
-            The session, not the refresh clock. This reading is a finished day,
-            so which day it is matters and when it was fetched does not.
+            Which source produced this, and which session it describes. The
+            source is named because the two readings are not interchangeable
+            and only one of them can ever appear in production — see
+            `MoversSource`. The session date is shown either way: a reader has
+            to be able to see which day they are looking at.
           */
-          meta={`Session of ${sessionLabel(movers.sessionDate)} · close`}
+          meta={
+            movers.live
+              ? `Live · Tradier · ${sessionLabel(movers.sessionDate)} · refreshed ${movers.capturedEt} ET`
+              : `Last completed session · Polygon · ${sessionLabel(movers.sessionDate)} close`
+          }
           asOfLabel={formatAsOf(new Date(movers.capturedAt))}
         />
 
@@ -66,7 +74,9 @@ export default async function MoversPage() {
           wording cannot drift away from the wording that was reviewed.
         */}
         <div className="panel border-l-2 border-l-flip/60 px-3.5 py-3 text-xs leading-relaxed">
-          <p className="font-bold text-flip">{MOVERS_EXPLANATION}</p>
+          <p className="font-bold text-flip">
+            {movers.live ? MOVERS_EXPLANATION_LIVE : MOVERS_EXPLANATION}
+          </p>
           <p className="mt-2 text-term-dim">
             One gate is applied and only one: the name has to be trading above{' '}
             {MIN_RELATIVE_VOLUME} times its own average volume, because a large
@@ -123,11 +133,18 @@ export default async function MoversPage() {
           <MoversBoard rows={movers.rows} />
         ) : (
           <div className="panel px-4 py-10 text-center text-xs">
-            <p className="font-bold text-term-text">Nothing is moving on volume.</p>
+            <p className="font-bold text-term-text">
+              {movers.live
+                ? 'Nothing is moving on volume.'
+                : 'Nothing moved on volume.'}
+            </p>
             <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-dim">
-              {movers.gainers} of {movers.measured} names read closed up on{' '}
+              {movers.gainers} of {movers.measured} names read were up on{' '}
               {sessionLabel(movers.sessionDate)}, and none of them cleared{' '}
-              {MIN_RELATIVE_VOLUME} times its own average volume.
+              {MIN_RELATIVE_VOLUME} times its own average volume
+              {movers.live && movers.sessionProgress < 0.5
+                ? ' — which is common this early, because the volume figure is a running total measured against a whole day.'
+                : '.'}
             </p>
           </div>
         )}
@@ -153,14 +170,32 @@ export default async function MoversPage() {
 
           <p className="mt-2">
             <span className="text-term-dim">
-              Both sides of the volume ratio are complete days.{' '}
+              {movers.live
+                ? 'Relative volume is a running total against a whole day. '
+                : 'Both sides of the volume ratio are complete days. '}
             </span>
-            The numerator is every share traded in the session named above; the
-            denominator is the average of the twenty complete sessions before
-            it. Neither is a partial figure, so the number needs no allowance
-            made for the time of day it was read — which is the whole reason
-            this page reports a session that has closed rather than one still
-            running.
+            {movers.live ? (
+              <>
+                The numerator is the shares traded so far today; the
+                denominator is the average of twenty complete sessions. It is
+                deliberately not scaled by how much of the session has elapsed
+                — volume does not arrive evenly, and prorating it linearly
+                would roughly treble every reading in the first half hour, on
+                the part of the day when a movers list most invites chasing. So
+                the figure understates early and is exact after the close. This
+                session was {Math.round(movers.sessionProgress * 100)}% elapsed
+                when these were read.
+              </>
+            ) : (
+              <>
+                The numerator is every share traded in the session named above;
+                the denominator is the average of the twenty complete sessions
+                before it. Neither is a partial figure, so the number needs no
+                allowance made for the time of day it was read — which is the
+                whole reason this page reports a session that has closed rather
+                than one still running.
+              </>
+            )}
           </p>
 
           <p className="mt-2">
@@ -191,12 +226,25 @@ export default async function MoversPage() {
             <span className="text-term-dim">
               Built on read, with no scheduled job and nothing stored.{' '}
             </span>
-            One request for the session&rsquo;s share volumes, over price
-            history this project already keeps. The session shown is the one
-            that history is current to, so this page cannot get ahead of it, and
-            the reading is held for {Math.round(REFRESH_SECONDS / 60)} minutes
-            because a closed session has no way to change until the overnight
-            refresh lands the next one.
+            {movers.live ? (
+              <>
+                This reading is the live intraday one, priced from a quote feed
+                that is available on a development machine and never in
+                production. The published site always shows the last completed
+                session instead, from a different provider — so what is on this
+                screen is not what a visitor would see.
+              </>
+            ) : (
+              <>
+                One request for the session&rsquo;s share volumes, over price
+                history this project already keeps. The session shown is the
+                one that history is current to, so this page cannot get ahead
+                of it, and the reading is held for{' '}
+                {Math.round(REFRESH_SECONDS / 60)} minutes because a closed
+                session has no way to change until the overnight refresh lands
+                the next one.
+              </>
+            )}
           </p>
 
           <p className="mt-2">
