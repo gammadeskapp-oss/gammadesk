@@ -1,5 +1,6 @@
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
 import { formatExpiryLabel } from '@/lib/time';
+import { MATCH_LABEL, matchStatus } from '@/lib/log/types';
 import type { AccuracyStats, LogEntry } from '@/lib/log/types';
 
 function Stat({
@@ -60,6 +61,30 @@ function Magnet({ entry }: { entry: LogEntry }) {
     default:
       return <span className="text-term-faint">n/a</span>;
   }
+}
+
+/**
+ * The plain reading of the day, in words rather than in flags.
+ *
+ * A miss is styled as legibly as a hit — same weight, same size, only the
+ * colour differs. A record that renders its failures in grey mouse type is
+ * telling the reader something untrue about itself.
+ */
+function Status({ entry }: { entry: LogEntry }) {
+  const status = matchStatus(entry);
+  if (status === null) {
+    return (
+      <span className="text-term-faint">
+        {entry.settled ? 'not judged' : 'pending'}
+      </span>
+    );
+  }
+  const tone = {
+    mostly: 'text-pos',
+    partially: 'text-flip',
+    none: 'text-neg',
+  }[status];
+  return <span className={`font-bold ${tone}`}>{MATCH_LABEL[status]}</span>;
 }
 
 interface Props {
@@ -136,6 +161,7 @@ export function AccuracyLogTable({ entries, stats }: Props) {
                     Flip
                   </th>
                   <th scope="col" className={head}>Magnet</th>
+                  <th scope="col" className={`${head} text-left`}>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -191,6 +217,9 @@ export function AccuracyLogTable({ entries, stats }: Props) {
                       </td>
                       <td className={cell}>
                         <Magnet entry={e} />
+                      </td>
+                      <td className={`${cell} text-left`}>
+                        <Status entry={e} />
                       </td>
                     </tr>
                   );

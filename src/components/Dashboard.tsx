@@ -152,6 +152,25 @@ export function Dashboard({
         <VerdictLead input={simpleInput} research={researchLine} headingLevel={1} />
       </div>
 
+      {/*
+        Directly under the verdict, phrased as the question a sceptic asks on
+        being handed one — not as an invitation to admire the record. The page
+        it goes to is still called Track Record; this is the way in, not a
+        rename.
+
+        Outside the muted wrapper on purpose. When today's numbers are stale,
+        the offer to go and check how yesterday's read settled is more useful
+        than ever, not less.
+      */}
+      <p className="text-2xs text-term-faint">
+        <a
+          href="/log"
+          className="underline decoration-dotted underline-offset-2 hover:text-term-dim"
+        >
+          Did yesterday&rsquo;s read hold up?
+        </a>
+      </p>
+
       <PageBar
         // Demoted to an `h2`: the verdict above is this page's `h1` now.
         titleLevel={2}

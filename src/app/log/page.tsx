@@ -60,6 +60,17 @@ export default async function LogPage() {
             as touched if the session&rsquo;s range reached that strike.
           </p>
           <p className="mt-2">
+            <span className="text-term-dim">The status column. </span>
+            Two claims are made each morning — that price stays on its side of
+            the flip level, and that the day&rsquo;s range reaches a magnet
+            strike. Both landing reads{' '}
+            <span className="text-pos">Mostly matched</span>, one landing reads{' '}
+            <span className="text-flip">Partially matched</span>, neither reads{' '}
+            <span className="text-neg">Did not match</span>. Every settled day
+            is listed in date order, misses included. Nothing here is filtered
+            or sorted to put the good days on top.
+          </p>
+          <p className="mt-2">
             <span className="text-term-dim">Known bias. </span>
             A daily bar carries no intraday timing, so the high and low include
             the part of the session before the snapshot was taken. That slightly

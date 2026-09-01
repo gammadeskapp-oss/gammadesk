@@ -58,7 +58,7 @@ export const RESEARCH_CARDS: ResearchCard[] = [
   {
     href: '/log',
     label: 'Track record',
-    question: 'How have prior daily reads performed?',
+    question: "Did yesterday's read hold up?",
   },
   {
     href: '/scanner',
