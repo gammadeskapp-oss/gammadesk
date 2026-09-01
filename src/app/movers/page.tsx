@@ -4,6 +4,7 @@ import { MoversBoard } from '@/components/MoversBoard';
 import { PageBar } from '@/components/PageBar';
 import { StaleDataBanner } from '@/components/StaleDataBanner';
 import { snapshotStaleness } from '@/lib/events';
+import { EARNINGS_WARN_DAYS } from '@/lib/movers/rules';
 import {
   MIN_RELATIVE_VOLUME,
   MOVERS_EXPLANATION,
@@ -188,7 +189,7 @@ export default async function MoversPage() {
             <span className="text-term-dim">
               Warnings flag, they never exclude.{' '}
             </span>
-            Earnings today or tomorrow, below the 200-day average, extended far
+            Earnings within {EARNINGS_WARN_DAYS} days, below the 200-day average, extended far
             above the 20-day, and unusually high relative volume are each shown
             on the row and none of them removes a name. Where no earnings date
             can be established the row says the date is unknown; an unknown

@@ -1,5 +1,6 @@
 import { TickerLink } from '@/components/TickerLink';
 import { formatCompact } from '@/lib/format';
+import { EARNINGS_WARN_DAYS } from '@/lib/movers/rules';
 import {
   HIGH_RELATIVE_VOLUME,
   MIN_RELATIVE_VOLUME,
@@ -48,7 +49,9 @@ const WARNING_TONE: Record<MoverWarning, string> = {
 function warningLabel(row: MoverRow, warning: MoverWarning): string {
   switch (warning) {
     case 'earnings':
-      return row.earningsDate ? `Earnings ${row.earningsDate}` : 'Earnings today or tomorrow';
+      return row.earningsDate
+        ? `Earnings ${row.earningsDate}`
+        : `Earnings within ${EARNINGS_WARN_DAYS} days`;
     case 'earnings-unknown':
       return 'Earnings date unknown';
     case 'below-200':

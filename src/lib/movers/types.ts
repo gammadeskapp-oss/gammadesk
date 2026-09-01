@@ -65,7 +65,7 @@ export const MOVERS_EXPLANATION =
  * `scanner/earnings.ts` is built around.
  */
 export type MoverWarning =
-  /** Reports today or tomorrow. */
+  /** Reports within `EARNINGS_WARN_DAYS`. */
   | 'earnings'
   /** No earnings date could be established. Never read as "clear". */
   | 'earnings-unknown'

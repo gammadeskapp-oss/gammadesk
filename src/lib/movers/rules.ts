@@ -21,8 +21,23 @@ import {
  *   shortened this list, and a change here must never be able to.
  */
 
-/** Reports today or tomorrow. */
-export const EARNINGS_WARN_DAYS = 1;
+/**
+ * How many calendar days out an earnings date still warrants a warning.
+ *
+ * Three, not one. A name up seven percent two days before it reports is
+ * exactly the row this flag exists for — the move and the report are close
+ * enough together that the second is the likeliest explanation of the first,
+ * and a reader acting on the move is taking on the report whether they meant
+ * to or not.
+ *
+ * Deliberately shorter than the scanner's `EARNINGS_EXCLUSION_DAYS`, and the
+ * two are not the same decision. Ten days is how far out a name should be
+ * *removed* from a list of things to hold an option through. Three is how far
+ * out a name should be *annotated* on a list of things that are moving right
+ * now. Nothing here is ever removed, so the window that governs removal has no
+ * business setting this one.
+ */
+export const EARNINGS_WARN_DAYS = 3;
 
 /**
  * Whether a name belongs on the list at all.

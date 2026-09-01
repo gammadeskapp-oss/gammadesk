@@ -26,7 +26,7 @@ const { qualifies, trendFrom, pctFrom, warningsFor, byChangeDescending, EARNINGS
   await import('../src/lib/movers/rules.ts');
 const { MIN_RELATIVE_VOLUME, HIGH_RELATIVE_VOLUME, MAX_MOVERS, MOVERS_EXPLANATION } =
   await import('../src/lib/movers/types.ts');
-const { EXTENDED_PCT } = await import('../src/lib/scanner/types.ts');
+const { EXTENDED_PCT, EARNINGS_EXCLUSION_DAYS } = await import('../src/lib/scanner/types.ts');
 
 let failures = 0;
 let checks = 0;
@@ -155,16 +155,27 @@ ok(
   '"we could not find out" must not render as "it reports tomorrow"',
 );
 
-section('Earnings today or tomorrow');
+section(`Earnings inside ${EARNINGS_WARN_DAYS} days`);
 
+ok('the window is three days', EARNINGS_WARN_DAYS === 3, String(EARNINGS_WARN_DAYS));
 ok('today warns', warningsFor({ ...clean, earnings: known(0) }).includes('earnings'));
+ok('tomorrow warns', warningsFor({ ...clean, earnings: known(1) }).includes('earnings'));
 ok(
-  'tomorrow warns',
+  'two days out warns — the row this flag exists for',
+  warningsFor({ ...clean, earnings: known(2) }).includes('earnings'),
+);
+ok(
+  'the last day of the window warns',
   warningsFor({ ...clean, earnings: known(EARNINGS_WARN_DAYS) }).includes('earnings'),
 );
 ok(
   'the day after does not',
   !warningsFor({ ...clean, earnings: known(EARNINGS_WARN_DAYS + 1) }).includes('earnings'),
+);
+ok(
+  "and the warning window is shorter than the scanner's exclusion window",
+  EARNINGS_WARN_DAYS < EARNINGS_EXCLUSION_DAYS,
+  'annotating a mover and removing a candidate are different decisions',
 );
 ok(
   'a date already past does not warn',
