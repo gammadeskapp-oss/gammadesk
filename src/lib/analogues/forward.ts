@@ -1,6 +1,7 @@
 import { HORIZONS } from './types';
 import type {
-  Bar, ConditionDef, ConditionResult, Honesty, HorizonStats, Match, Outcome,
+  BaselineStats, Bar, ConditionDef, ConditionResult, Honesty, HorizonStats,
+  Match, Outcome,
 } from './types';
 
 /**
@@ -128,11 +129,71 @@ export function honestyOf(matches: Match[]): Honesty {
     }
   }
 
+  const overlapping = matches.filter((m) => m.overlapsPrevious).length;
+
   return {
     thin: matches.length < THIN_SAMPLE,
-    overlapping: matches.filter((m) => m.overlapsPrevious).length,
+    overlapping,
+    /*
+     * Every match that does not overlap its predecessor opens a new run, so
+     * the run count is exactly the number of such matches. Derived, not
+     * approximated — which is why the page is willing to print it as a figure
+     * rather than hedging it.
+     */
+    episodes: matches.length - overlapping,
     clusteredYear,
   };
+}
+
+/**
+ * What every window in the series did, condition or no condition.
+ *
+ * Entries are every bar with a full forward window, which is the same rule the
+ * matches are held to — so the two rows on the table are measured the same way
+ * and the gap between them is the only thing that differs.
+ */
+export function baselineFor(bars: Bar[], horizon: number): BaselineStats {
+  const h = horizon as BaselineStats['horizon'];
+  const returns: number[] = [];
+  const drawdowns: number[] = [];
+
+  for (let i = 0; i + horizon < bars.length; i += 1) {
+    const entry = bars[i].close;
+    if (entry <= 0) continue;
+
+    let deepest = 0;
+    for (let j = i + 1; j <= i + horizon; j += 1) {
+      const move = bars[j].close / entry - 1;
+      if (move < deepest) deepest = move;
+    }
+
+    returns.push(bars[i + horizon].close / entry - 1);
+    drawdowns.push(deepest);
+  }
+
+  if (returns.length === 0) {
+    return {
+      horizon: h, n: 0, medianReturn: null, positivePct: null,
+      medianDrawdown: null,
+    };
+  }
+
+  const positive = returns.filter((r) => r > 0).length;
+  returns.sort((a, b) => a - b);
+  drawdowns.sort((a, b) => a - b);
+
+  return {
+    horizon: h,
+    n: returns.length,
+    medianReturn: median(returns),
+    positivePct: (positive / returns.length) * 100,
+    medianDrawdown: median(drawdowns),
+  };
+}
+
+/** The baseline at each horizon. One pass per horizon over the whole series. */
+export function buildBaseline(bars: Bar[]): BaselineStats[] {
+  return HORIZONS.map((h) => baselineFor(bars, h));
 }
 
 export function summarise(

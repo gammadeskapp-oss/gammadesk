@@ -22,9 +22,10 @@ import { registerTsImports } from './ts-imports.mjs';
 registerTsImports();
 
 const { detect, CONDITIONS } = await import('../src/lib/analogues/conditions.ts');
-const { outcomesAt, buildMatches, summarise, honestyOf, LONGEST } = await import(
-  '../src/lib/analogues/forward.ts'
-);
+const {
+  outcomesAt, buildMatches, summarise, honestyOf, LONGEST, baselineFor,
+  buildBaseline,
+} = await import('../src/lib/analogues/forward.ts');
 
 let failures = 0;
 let checks = 0;
@@ -286,6 +287,96 @@ section('Every condition in the brief is present exactly once');
     const bars = series(new Array(400).fill(0).map((_, i) => 100 + Math.sin(i / 5) * 10));
     return Array.isArray(detect(bars, c.id));
   }));
+}
+
+
+section('Episodes are derived from the overlap count, not estimated');
+{
+  const bars = series(new Array(400).fill(0).map((_, i) => 100 + i));
+  // Two clusters: three matches close together, then two more much later.
+  const matches = buildMatches(bars, [0, 5, 10, 200, 210]);
+  const h = honestyOf(matches);
+  eq('three matches inside one window leave three overlapping', h.overlapping, 3);
+  eq('two clusters read as two episodes', h.episodes, 2);
+  ok(
+    'episodes and overlaps account for every match',
+    h.episodes + h.overlapping === matches.length,
+  );
+}
+{
+  const bars = series(new Array(400).fill(0).map((_, i) => 100 + i));
+  const spread = buildMatches(bars, [0, 60, 120, 180, 240]);
+  const h = honestyOf(spread);
+  eq('matches spaced beyond the window are all independent', h.episodes, 5);
+  eq('and none overlap', h.overlapping, 0);
+}
+{
+  eq('no matches means no episodes', honestyOf([]).episodes, 0);
+}
+
+section('The baseline covers every window, not just the matches');
+{
+  // Eleven bars rising 1% a session: every 1-day window is +1%, ten of them.
+  const closes = [];
+  for (let i = 0; i < 11; i += 1) closes.push(100 * 1.01 ** i);
+  const bars = series(closes);
+
+  const one = baselineFor(bars, 1);
+  eq('every eligible entry bar is counted', one.n, 10);
+  close('median of a constant riser', one.medianReturn, 0.01, 1e-9);
+  close('all windows positive', one.positivePct, 100, 1e-9);
+  eq('a monotonic riser never draws down', one.medianDrawdown, 0);
+
+  const five = baselineFor(bars, 5);
+  eq('the longer horizon has fewer windows', five.n, 6);
+  close('five sessions of 1%', five.medianReturn, 1.01 ** 5 - 1, 1e-9);
+}
+{
+  // A steady decline: the baseline must report it, not assume drift up.
+  const closes = [];
+  for (let i = 0; i < 30; i += 1) closes.push(100 * 0.99 ** i);
+  const bars = series(closes);
+  const one = baselineFor(bars, 1);
+  close('a falling series has a negative baseline', one.medianReturn, -0.01, 1e-9);
+  close('and no positive windows', one.positivePct, 0, 1e-9);
+  close('drawdown equals the move', one.medianDrawdown, -0.01, 1e-9);
+}
+{
+  const bars = series([100, 101, 102]);
+  const long = baselineFor(bars, 42);
+  eq('a horizon longer than the series yields nothing', long.n, 0);
+  eq('and reports null rather than zero', long.medianReturn, null);
+}
+{
+  const bars = series(new Array(300).fill(0).map((_, i) => 100 + i));
+  const all = buildBaseline(bars);
+  eq('one baseline per horizon', all.map((b) => b.horizon), [1, 5, 10, 21, 42]);
+  ok(
+    'each is computed over its own window count',
+    all.every((b, i) => i === 0 || b.n < all[i - 1].n),
+  );
+}
+{
+  /*
+   * The baseline and the condition rows must be measured the same way, or the
+   * gap between them is not a comparison. Firing a condition on every eligible
+   * bar has to reproduce the baseline exactly.
+   */
+  const closes = [];
+  for (let i = 0; i < 120; i += 1) closes.push(100 + Math.sin(i / 4) * 8 + i * 0.2);
+  const bars = series(closes);
+  const everyBar = Array.from({ length: bars.length }, (_, i) => i);
+  const def = CONDITIONS.find((c) => c.id === 'down-3');
+  const asCondition = summarise(def, bars, everyBar);
+
+  for (const horizon of [1, 5, 21]) {
+    const b = baselineFor(bars, horizon);
+    const c = asCondition.horizons.find((h) => h.horizon === horizon);
+    eq(`n agrees at ${horizon}d`, c.n, b.n);
+    close(`median agrees at ${horizon}d`, c.medianReturn, b.medianReturn, 1e-12);
+    close(`positive share agrees at ${horizon}d`, c.positivePct, b.positivePct, 1e-12);
+    close(`median drawdown agrees at ${horizon}d`, c.medianDrawdown, b.medianDrawdown, 1e-12);
+  }
 }
 
 console.log(

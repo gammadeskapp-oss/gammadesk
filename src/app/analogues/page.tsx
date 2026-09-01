@@ -231,6 +231,7 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                     <AnalogueTable
                       condition={selected}
                       coverage={view.coverage}
+                      baseline={view.baseline}
                     />
 
                     {selected.matches.length > 0 && (
@@ -289,6 +290,7 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                           key={condition.id}
                           condition={condition}
                           coverage={view.coverage}
+                          baseline={view.baseline}
                         />
                       ))
                     )}

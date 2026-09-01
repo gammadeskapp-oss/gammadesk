@@ -3,15 +3,15 @@ import 'server-only';
 import { cached } from '../cache';
 import { CONDITIONS, detect } from './conditions';
 import { fetchDeepBars } from './deepBars';
-import { summarise } from './forward';
+import { buildBaseline, summarise } from './forward';
 import type { AnaloguesView, ConditionId } from './types';
 
 export { CONDITIONS, conditionById, detect } from './conditions';
-export { LONGEST, THIN_SAMPLE } from './forward';
+export { buildBaseline, LONGEST, THIN_SAMPLE } from './forward';
 export { fetchDeepBars } from './deepBars';
 export { HORIZONS } from './types';
 export type {
-  AnaloguesView, Bar, ConditionId, ConditionResult, Coverage, Horizon,
+  AnaloguesView, BaselineStats, Bar, ConditionId, ConditionResult, Coverage, Horizon,
   HorizonStats, Match, Outcome,
 } from './types';
 
@@ -37,6 +37,7 @@ export function getAnalogues(symbol: string): Promise<AnaloguesView> {
 
     return {
       coverage,
+      baseline: buildBaseline(bars),
       conditions,
       active: conditions
         .filter((c) => c.activeToday)

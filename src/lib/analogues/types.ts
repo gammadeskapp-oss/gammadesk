@@ -91,8 +91,38 @@ export interface Honesty {
   thin: boolean;
   /** Matches within 42 sessions of an earlier match. */
   overlapping: number;
+  /**
+   * Separate episodes the matches came from: runs of matches each within 42
+   * sessions of the one before are one episode, however many matches they
+   * contain. Exactly `matches.length - overlapping`, because a match that does
+   * not overlap its predecessor is by definition the start of a new run.
+   *
+   * This is the plain-English form of the overlap count, and it is derived
+   * rather than estimated.
+   */
+  episodes: number;
   /** Set when more than half the matches share one calendar year. */
   clusteredYear: { year: string; count: number } | null;
+}
+
+/**
+ * What an unconditional window did over the same history, for comparison.
+ *
+ * Without this the tables imply an edge they have not demonstrated. SPY drifts
+ * up over 33 years, so a +2.5% median at 42 days may be exactly what a window
+ * picked at random does — in which case the condition added nothing, and only
+ * the gap between the two rows says so.
+ *
+ * No significance test is computed. Both numbers are shown and the difference
+ * is left to the reader.
+ */
+export interface BaselineStats {
+  horizon: Horizon;
+  /** Windows with this horizon fully elapsed — every eligible entry bar. */
+  n: number;
+  medianReturn: number | null;
+  positivePct: number | null;
+  medianDrawdown: number | null;
 }
 
 export interface ConditionResult {
@@ -130,6 +160,12 @@ export interface Coverage {
 
 export interface AnaloguesView {
   coverage: Coverage;
+  /**
+   * One baseline per horizon, over the whole series. Computed once and shared
+   * by every table: all sixteen conditions rest on the same lookback, so a
+   * per-condition baseline would be the same numbers repeated sixteen times.
+   */
+  baseline: BaselineStats[];
   conditions: ConditionResult[];
   /** Ids currently firing on the last bar. Empty is a real answer. */
   active: ConditionId[];

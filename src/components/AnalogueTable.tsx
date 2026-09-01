@@ -1,4 +1,7 @@
-import type { ConditionResult, Coverage, HorizonStats } from '@/lib/analogues';
+import { Fragment } from 'react';
+import type {
+  BaselineStats, ConditionResult, Coverage, HorizonStats,
+} from '@/lib/analogues';
 import { THIN_SAMPLE } from '@/lib/analogues';
 
 /**
@@ -19,10 +22,16 @@ import { THIN_SAMPLE } from '@/lib/analogues';
  *     to 1993 and one back to 2019 are not comparable claims, and nothing here
  *     lets them be read side by side without saying so.
  *   - Overlap and single-year clustering are printed as counts, not hidden
- *     behind a footnote.
+ *     behind a footnote, and the overlap caveat leads with a plain sentence
+ *     rather than the statistician's phrasing.
+ *   - Every horizon carries an unconditional baseline row beneath it. SPY
+ *     drifts up over 33 years, so a positive median proves nothing on its own;
+ *     without the baseline the table implies an edge it has not shown. The
+ *     honest read is the gap between the two rows, and both are printed so the
+ *     difference is visible without any test being run on the reader's behalf.
  *
  * No phrasing implies an action. Columns say what followed; nothing says what
- * to do about it.
+ * to do about it, and no significance test is computed or implied.
  */
 
 function pct(value: number | null, digits = 1): string {
@@ -83,12 +92,48 @@ function Row({ stats, thin }: { stats: HorizonStats; thin: boolean }) {
   );
 }
 
+/**
+ * The unconditional row, directly under its condition row.
+ *
+ * Paired with each horizon rather than gathered into its own block: the
+ * comparison only means anything horizon by horizon, and a reader should not
+ * have to hold "+2.5% at 42 days" in their head while they scroll to find what
+ * a random 42-day window did.
+ */
+function BaselineRow({ stats }: { stats: BaselineStats }) {
+  return (
+    <tr className="text-term-faint">
+      <td className="pb-1.5 pr-3 pl-3 text-2xs">all windows</td>
+      <td className="pb-1.5 pr-3 text-right text-2xs tabular-nums">
+        {stats.n.toLocaleString()}
+      </td>
+      <td className="pb-1.5 pr-3 text-right text-2xs tabular-nums">
+        {pct(stats.medianReturn)}
+      </td>
+      {/* No best or worst: the extremes of every window in 33 years are not a
+          comparison, they are just the largest moves in the series. */}
+      <td className="pb-1.5 pr-3 text-right text-2xs">—</td>
+      <td className="pb-1.5 pr-3 text-right text-2xs">—</td>
+      <td className="pb-1.5 pr-3 text-right text-2xs tabular-nums">
+        {stats.positivePct === null ? '—' : `${stats.positivePct.toFixed(0)}%`}
+      </td>
+      <td className="pb-1.5 pr-3 text-right text-2xs tabular-nums">
+        {pct(stats.medianDrawdown)}
+      </td>
+      <td className="pb-1.5 text-right text-2xs">—</td>
+    </tr>
+  );
+}
+
 export function AnalogueTable({
   condition,
   coverage,
+  baseline,
 }: {
   condition: ConditionResult;
   coverage: Coverage;
+  /** One entry per horizon, over the same lookback. */
+  baseline: BaselineStats[];
 }) {
   const { matches, honesty } = condition;
   const count = matches.length;
@@ -141,9 +186,15 @@ export function AnalogueTable({
             )}
             {honesty.overlapping > 0 && (
               <Caveat>
-                {count} matches, {honesty.overlapping} overlapping — that many
-                fall within 42 sessions of an earlier match, so their forward
-                windows share sessions and are not independent observations.
+                These {count} matches come from about {honesty.episodes}{' '}
+                separate {honesty.episodes === 1 ? 'episode' : 'episodes'} — the
+                condition clusters, so this is closer to {honesty.episodes}{' '}
+                independent {honesty.episodes === 1 ? 'reading' : 'readings'}{' '}
+                than {count}.{' '}
+                <span className="text-term-faint">
+                  {honesty.overlapping} of the {count} fall within 42 sessions
+                  of an earlier match, so their forward windows share sessions.
+                </span>
               </Caveat>
             )}
             {honesty.clusteredYear && (
@@ -191,7 +242,25 @@ export function AnalogueTable({
               </thead>
               <tbody>
                 {condition.horizons.map((h) => (
-                  <Row key={h.horizon} stats={h} thin={honesty.thin} />
+                  <Fragment key={h.horizon}>
+                    <Row stats={h} thin={honesty.thin} />
+                    {/*
+                      Rendered even when the baseline is missing a horizon, so
+                      a condition row is never left sitting on its own looking
+                      like it needs no comparison.
+                    */}
+                    <BaselineRow
+                      stats={
+                        baseline.find((b) => b.horizon === h.horizon) ?? {
+                          horizon: h.horizon,
+                          n: 0,
+                          medianReturn: null,
+                          positivePct: null,
+                          medianDrawdown: null,
+                        }
+                      }
+                    />
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -221,6 +290,13 @@ export function AnalogueTable({
               Horizons with a smaller n have matches whose window has not
               finished yet; those are left out of that row rather than counted
               early.
+            </p>
+            <p>
+              The <span className="text-term-dim">all windows</span> row under
+              each horizon is every window of that length in the same lookback,
+              condition or not. It is what an entry picked at random did. The
+              comparison worth making is the gap between the two rows, not the
+              level of either. No significance test is applied.
             </p>
           </div>
         </>
