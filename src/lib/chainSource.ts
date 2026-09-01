@@ -1,4 +1,5 @@
 import { impliedVol, MIN_T } from './blackScholes';
+import { publicChainMessage } from './errorText';
 import { yearsToExpiry } from './time';
 import { modelIv } from './volSurface';
 import type { IvSource, NormalisedContract, OptionType } from './types';
@@ -17,6 +18,22 @@ export class ChainError extends Error {
   ) {
     super(message);
     this.name = 'ChainError';
+  }
+
+  /**
+   * The same failure, said to a reader rather than to an operator.
+   *
+   * `message` and `hint` are written for whoever is debugging: they name the
+   * provider, the HTTP status, sometimes the CDN. That is the right content
+   * for a log and the wrong content for a page. Adapters keep writing them,
+   * nothing is lost from the logs, and every user-facing surface renders this
+   * instead.
+   *
+   * The mapping itself lives in `errorText.ts` so it can be checked without
+   * the chain machinery attached — see `verify:errors`.
+   */
+  get publicMessage(): string {
+    return publicChainMessage(this.status);
   }
 }
 

@@ -157,7 +157,16 @@ export function Dashboard({
         titleLevel={2}
         title={mode === 'simple' ? `${data.symbol} Today` : `${data.symbol} Dealer Positioning`}
         description={PAGE_DESCRIPTIONS['/']}
-        asOfLabel={data.meta.asOfLabel}
+        /*
+          The quote date, not `asOfLabel`. `asOfLabel` is stamped at render
+          time, so it always reads "just now" — which is fine when the feed is
+          healthy and actively false the moment a stored snapshot is being
+          served: the page would print "Data as of 23:40" directly under a
+          banner saying the numbers are 26 hours old. This is the same field
+          the staleness grader reads, so the stamp and the warning can no
+          longer disagree.
+        */
+        asOfLabel={data.meta.quoteDateLabel}
       />
 
       <PositioningSearch initial={data.symbol} />
@@ -233,7 +242,13 @@ export function Dashboard({
               type="button"
               onClick={reload}
               disabled={pending}
-              title={`Data is cached for ${Math.round(data.meta.cacheSeconds / 60)} minutes to stay inside the Polygon free-plan limit of 5 requests per minute. Reloading before then re-reads the cached snapshot.`}
+              /*
+                No provider name and no plan detail. Which upstream is
+                configured, and what it costs, is an operational fact that
+                belongs on /status — not in a tooltip on a button a visitor is
+                about to press.
+              */
+              title={`Data is refreshed at most every ${Math.round(data.meta.cacheSeconds / 60)} minutes. Reloading before then re-reads the same snapshot.`}
               className="border border-term-line bg-term-panel/60 px-3 py-2 uppercase tracking-[0.14em] text-term-dim transition-colors hover:border-term-edge hover:text-term-text disabled:opacity-40"
             >
               {pending ? 'Loading…' : 'Reload'}

@@ -6,6 +6,7 @@ import { ChainError } from './chainSource';
 import { config } from './config';
 import { fetchCboeSnapshot } from './cboe';
 import { buildPositioning } from './exposure';
+import { readLastGoodSnapshot, saveLastGoodSnapshot } from './lastSnapshot';
 import { fetchPolygonSnapshot } from './polygon';
 import { formatAsOf } from './time';
 import type { DataSource, PositioningData } from './types';
@@ -20,6 +21,15 @@ interface RawSnapshot {
   snapshot: ChainSnapshot;
   source: DataSource;
   notes: string[];
+  /**
+   * Set when this came out of storage rather than off the wire.
+   *
+   * The page does not read it to decide whether to warn — `snapshotStaleness`
+   * does that from the quote date, and does it for a live-but-old snapshot
+   * too. This exists so the notes can say where the numbers came from, which
+   * is a different question from how old they are.
+   */
+  recovered?: boolean;
 }
 
 function snapshotCacheKey(): string {
@@ -37,12 +47,12 @@ function viewCacheKey(expirationCount: number): string {
  * built from this single cached snapshot, so widening the forecast horizon
  * costs nothing upstream.
  */
-async function loadSnapshot(): Promise<RawSnapshot> {
+async function fetchSnapshot(): Promise<RawSnapshot> {
   if (config.dataSource === 'polygon' && !config.apiKey) {
     throw new ChainError(
-      'POLYGON_API_KEY is not set.',
+      'The market data provider is not configured.',
       0,
-      'Add it to .env.local locally, and to Project Settings -> Environment Variables on Vercel.',
+      'See /status for which credential is missing.',
     );
   }
 
@@ -50,6 +60,51 @@ async function loadSnapshot(): Promise<RawSnapshot> {
   const snapshot =
     source === 'polygon' ? await fetchPolygonSnapshot() : await fetchCboeSnapshot();
   return { snapshot, source, notes: snapshot.notes };
+}
+
+/**
+ * One upstream refresh, with the last good snapshot as a fallback.
+ *
+ * ## Why the failure path serves stored data instead of throwing
+ *
+ * It used to throw, and the page died with it. That was wrong twice over: the
+ * reader lost a working page, and they lost it in favour of an error screen
+ * that told them less than a timestamped snapshot from earlier the same
+ * morning would have.
+ *
+ * The rule this project holds to is that numbers are never invented when the
+ * feed is down. A stored snapshot does not break that rule — it is a real
+ * reading that really was taken, and it arrives with the `quoteDate` it was
+ * taken at. `snapshotStaleness` grades that date and `StaleDataBanner` puts a
+ * non-dismissible warning above the whole page, so recovered data cannot
+ * present itself as current.
+ *
+ * If there is nothing stored, the original error is rethrown unchanged. "We
+ * have nothing" is still a real answer, and it is the honest one.
+ */
+async function loadSnapshot(): Promise<RawSnapshot> {
+  try {
+    const fresh = await fetchSnapshot();
+    // Write-through, after the value is in hand. Never throws; see the module.
+    await saveLastGoodSnapshot(fresh.snapshot, fresh.source);
+    return fresh;
+  } catch (error) {
+    const recovered = await readLastGoodSnapshot().catch(() => null);
+    if (!recovered) throw error;
+
+    const reason =
+      error instanceof ChainError ? error.message : 'the market data feed is unavailable';
+
+    return {
+      snapshot: recovered.snapshot,
+      source: recovered.source,
+      recovered: true,
+      notes: [
+        ...recovered.snapshot.notes,
+        `These numbers are the last snapshot that was successfully read, taken at ${formatAsOf(recovered.snapshot.quoteDate)}. The live feed could not be reached on this request (${reason}). Nothing here has been estimated or filled in — it is an earlier reading, shown with its own timestamp.`,
+      ],
+    };
+  }
 }
 
 function cachedSnapshot(): Promise<RawSnapshot> {

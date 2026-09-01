@@ -28,8 +28,9 @@
     "verify:events": "node scripts/verify-events.mjs",
     "verify:research": "node scripts/verify-research.mjs",
     "verify:scanner": "node scripts/verify-scanner.mjs",
+    "verify:errors": "node scripts/verify-errors.mjs",
     "verify:history": "node scripts/verify-history.mjs",
-    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:regime && npm run verify:retests && npm run verify:staleness && npm run verify:context && npm run verify:events && npm run verify:research && npm run verify:scanner && npm run verify:history"
+    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:regime && npm run verify:retests && npm run verify:staleness && npm run verify:context && npm run verify:events && npm run verify:research && npm run verify:scanner && npm run verify:errors && npm run verify:history"
   },
   "dependencies": {
     "@vercel/blob": "^2.7.0",
