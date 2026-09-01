@@ -23,7 +23,23 @@ export interface DecisionContext {
   flipDistancePct: number | null;
   magnetAbove: Wall | null;
   magnetBelow: Wall | null;
+  /**
+   * When this page rendered. Not when the book was read.
+   *
+   * Kept because the morning post stamps itself with it, and only for that.
+   * Nothing describing the *levels* may use it: it moves with the wall clock,
+   * so a book that has not been rewritten for two days still reports the
+   * current minute, and the reader is told the numbers are current by the one
+   * line whose job was to say how old they are.
+   */
   asOfLabel: string;
+  /**
+   * When the chain this decision was built from was stamped by the feed.
+   *
+   * This is the age of the book on screen, and it is what every surface that
+   * dates the levels must print — see the note on `asOfLabel` above.
+   */
+  quoteDateLabel: string;
   /**
    * The quote date of the chain this decision was built from, as an ISO
    * timestamp.
