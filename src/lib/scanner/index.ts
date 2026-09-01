@@ -3,7 +3,7 @@ import 'server-only';
 import { config } from '../config';
 import { peekScannerGamma } from './gamma';
 import { readLatestScan, readTodaysScan } from './run';
-import type { ScanResult, ScanTimeframe, StoredGamma, VwapAnchor } from './types';
+import type { ScanResult, StoredGamma } from './types';
 
 export { storeStatus } from '../jsonStore';
 export { refreshScannerGamma, readTodaysGamma, peekScannerGamma } from './gamma';
@@ -34,7 +34,6 @@ export interface ScannerView {
   rsMin: number;
   nw: { bandwidth: number; lookback: number; mult: number; minBars: number };
   trendEmaPeriod: number;
-  vwapAnchor: Record<ScanTimeframe, VwapAnchor>;
 }
 
 export async function getScannerView(): Promise<ScannerView> {
@@ -59,6 +58,5 @@ export async function getScannerView(): Promise<ScannerView> {
       minBars: tuning.nw.minBars,
     },
     trendEmaPeriod: tuning.trendEmaPeriod,
-    vwapAnchor: { ...tuning.vwapAnchor },
   };
 }

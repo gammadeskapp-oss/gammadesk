@@ -27,7 +27,7 @@ export const PAGE_DESCRIPTIONS: Record<string, string> = {
     'Thousands of simulated price paths, to show the spread of outcomes.',
   '/flow': 'Unusual options activity, ranked by size relative to the usual.',
   '/scanner':
-    "This morning's S&P 500 names that pass every filter, checked on three timeframes.",
+    "This morning's S&P 500 names that pass all five rules, each with its option contract graded.",
   '/strength':
     "Every S&P 500 stock ranked by how much it's beating the market — leaders and laggards.",
   '/watchlist': "The tickers you're tracking, with their current readings.",

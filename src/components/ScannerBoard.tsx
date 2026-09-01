@@ -1,79 +1,54 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { InfoTip } from '@/components/InfoTip';
 import { ScannerChart } from '@/components/ScannerChart';
 import { TickerLink } from '@/components/TickerLink';
-import { formatPrice, formatUsd } from '@/lib/format';
-import { partition, type RowOutcome } from '@/lib/scanner/evaluate';
+import { formatUsd } from '@/lib/format';
+import { partition, whyItMatched, type RowOutcome } from '@/lib/scanner/evaluate';
 import type { NwSettings } from '@/lib/scanner/nadarayaWatson';
+import { contractSummary } from '@/lib/scanner/optionQuality';
 import {
+  FILTER_EXPLANATION,
+  FILTER_KEYS,
   FILTER_LABEL,
-  SCAN_TIMEFRAMES,
-  SINGLE_FILTERS,
-  STRICTNESS_LABEL,
-  STRICTNESS_MODES,
-  TIMEFRAME_FILTERS,
-  TIMEFRAME_LABEL,
-  timeframesForMode,
+  OPTION_BADGE_LABEL,
+  OPTION_WINDOW,
+  type FilterKey,
   type FilterState,
-  type NwState,
+  type OptionQuality,
+  type OptionQualityBadge,
   type ScanResult,
   type ScanRow,
-  type ScanTimeframe,
-  type StrictnessMode,
-  type TimeframeFilterKey,
-  type VwapAnchor,
 } from '@/lib/scanner/types';
 
 /**
  * The scanner's rendered output.
  *
- * All the strictness toggle does is re-partition rows the scan already stored,
- * which is why it responds instantly and why the pass list and the near-miss
- * list can never disagree — both come out of one `partition` call over the
- * same numbers.
+ * ## One list, no controls
+ *
+ * There is no strictness toggle and no "soften the market filter" option. Both
+ * existed to produce results on days that should not have any, and a control
+ * that turns a hard gate into a score penalty is a control whose only function
+ * is to lower the bar at the moment the bar matters most. Five hard gates, one
+ * list, and a zero-result morning renders as a zero-result morning with the
+ * reason attached.
+ *
+ * ## Every result is a card, not a table row
+ *
+ * The old grid packed nine columns of abbreviations — `RS ✓ VOL ✓ LIQ ✓ GAM ✓
+ * SPY ✓` over a 3x3 matrix — into a horizontally scrolling table. It was
+ * dense, and it was unreadable to anyone who had not memorised the rules. A
+ * card can carry the sentences: why this name matched, what the contract looks
+ * like, and what to watch on it.
  */
 
-/** Compact labels for the five single-shot filters. */
-const SINGLE_ABBREV: Record<(typeof SINGLE_FILTERS)[number], string> = {
-  rs: 'RS',
-  volume: 'VOL',
-  liquidity: 'LIQ',
-  gamma: 'GAM',
-  spyGamma: 'SPY',
-};
+// --- small pieces ------------------------------------------------------------
 
 const STATE_CLASS: Record<FilterState, string> = {
   pass: 'border-bull/50 bg-bull/15 text-bull',
   fail: 'border-bear/50 bg-bear/10 text-bear',
-  // Grey, and never red. A filter nobody could compute has not failed.
+  // Grey, and never red. A gate nobody could compute has not failed.
   unknown: 'border-term-line bg-term-raised text-term-faint',
-};
-
-/**
- * The NW cell keeps its colours even though it no longer gates anything.
- *
- * Amber says price is sitting inside the envelope — not above it and not
- * clearly below it. That used to be a fail; now it is just a place on a scale,
- * but it is still worth seeing at a glance, because the entry being watched
- * for is a close back *above* the band and the in-band state is the run-up to
- * it. `unavailable` is the 4H case: no band is computed there at all.
- */
-const NW_CLASS: Record<NwState, string> = {
-  above: 'border-bull/50 bg-bull/15 text-bull',
-  inside: 'border-flip/50 bg-flip/10 text-flip',
-  below: 'border-bear/50 bg-bear/10 text-bear',
-  unknown: 'border-term-line bg-term-raised text-term-faint',
-  unavailable: 'border-term-line/50 bg-transparent text-term-faint/60',
-};
-
-const NW_WORD: Record<NwState, string> = {
-  above: 'above band',
-  inside: 'in band',
-  below: 'below band',
-  unknown: 'not computable',
-  unavailable: 'no band on this timeframe',
 };
 
 const STATE_GLYPH: Record<FilterState, string> = {
@@ -82,360 +57,315 @@ const STATE_GLYPH: Record<FilterState, string> = {
   unknown: '?',
 };
 
-function Chip({
-  label,
-  state,
-  title,
-}: {
-  label: string;
-  state: FilterState;
-  title: string;
-}) {
+/**
+ * Badge colours.
+ *
+ * `unknown` is grey, deliberately not amber. Amber would put it on the same
+ * scale as `caution` — a judgement — when it is the absence of one.
+ */
+const BADGE_CLASS: Record<OptionQualityBadge, string> = {
+  excellent: 'border-bull/60 bg-bull/15 text-bull',
+  tradable: 'border-pos/60 bg-pos/12 text-pos',
+  caution: 'border-flip/60 bg-flip/12 text-flip',
+  avoid: 'border-bear/60 bg-bear/12 text-bear',
+  unknown: 'border-term-line bg-term-raised text-term-faint',
+};
+
+function GateChip({ gate, state }: { gate: FilterKey; state: FilterState }) {
   return (
     <span
-      title={title}
-      className={`inline-flex items-center gap-1 whitespace-nowrap border px-1.5 py-0.5 text-2xs font-bold tracking-[0.08em] ${STATE_CLASS[state]}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap border px-2 py-1 text-2xs font-bold tracking-[0.06em] ${STATE_CLASS[state]}`}
     >
-      {label}
+      {FILTER_LABEL[gate]}
       <span aria-hidden>{STATE_GLYPH[state]}</span>
-      {/* The glyph is decorative; the state has to reach a screen reader too. */}
       <span className="sr-only">{state}</span>
     </span>
   );
 }
 
-/**
- * Rows VWAP / 200 EMA / NW z, columns 1H / 4H / D.
- *
- * The first two rows are gates and carry pass/fail glyphs. The third is not a
- * gate at all — it prints the NW z-score, so it shows a number rather than a
- * tick, and it is never dimmed by the strictness toggle because the toggle has
- * no bearing on it. 4H shows a dash there: no band is computed on that
- * timeframe, which is a different thing from a band that failed.
- */
-function TimeframeGrid({
-  row,
-  mode,
-  trendEmaPeriod,
-}: {
-  row: ScanRow;
-  mode: StrictnessMode;
-  trendEmaPeriod: number;
-}) {
-  const consulted = timeframesForMode(mode);
-
-  const reading = (tf: ScanTimeframe) => row.timeframes.find((t) => t.timeframe === tf);
-
-  const rowLabel: Record<TimeframeFilterKey, string> = {
-    vwap: 'VWAP',
-    ema: `${trendEmaPeriod}E`,
-  };
-
+function OptionBadge({ badge }: { badge: OptionQualityBadge }) {
   return (
-    <table className="border-separate border-spacing-0.5 text-2xs">
-      <caption className="sr-only">
-        VWAP and {trendEmaPeriod} EMA state, and the Nadaraya-Watson z-score, for{' '}
-        {row.symbol} on each timeframe.
-      </caption>
-      <thead>
-        <tr>
-          <td />
-          {SCAN_TIMEFRAMES.map((tf) => (
-            <th
-              key={tf}
-              scope="col"
-              className={`px-1 font-bold tracking-[0.08em] ${
-                consulted.includes(tf) ? 'text-term-dim' : 'text-term-faint/50'
-              }`}
-            >
-              {TIMEFRAME_LABEL[tf]}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {TIMEFRAME_FILTERS.map((key) => (
-          <tr key={key}>
-            <th
-              scope="row"
-              className="pr-1 text-right font-bold tracking-[0.08em] text-term-faint"
-            >
-              {rowLabel[key]}
-            </th>
-            {SCAN_TIMEFRAMES.map((tf) => {
-              const r = reading(tf);
-              const verdict = r?.verdicts[key];
-              const state = verdict?.state ?? 'unknown';
-
-              // The VWAP cell names its anchor, in the accessible description
-              // as well as the title, so it is never hover-only.
-              const extra = key === 'vwap' && r ? ` — ${r.vwapAnchor}-anchored` : '';
-
-              // Columns the current strictness does not consult are dimmed, so
-              // the toggle visibly changes what is being counted rather than
-              // silently changing the answer.
-              const dimmed = consulted.includes(tf) ? '' : 'opacity-35';
-
-              return (
-                <td key={tf} className="px-0.5">
-                  <span
-                    title={`${TIMEFRAME_LABEL[tf]} ${FILTER_LABEL[key]}: ${verdict?.detail ?? 'no data'}${extra}`}
-                    className={`flex h-5 w-9 items-center justify-center border font-bold ${STATE_CLASS[state]} ${dimmed}`}
-                  >
-                    <span aria-hidden>{STATE_GLYPH[state]}</span>
-                    <span className="sr-only">
-                      {TIMEFRAME_LABEL[tf]} {FILTER_LABEL[key]}:{' '}
-                      {verdict?.detail ?? 'no data'}
-                      {extra}
-                    </span>
-                  </span>
-                </td>
-              );
-            })}
-          </tr>
-        ))}
-
-        <tr>
-          <th
-            scope="row"
-            className="pr-1 text-right font-bold tracking-[0.08em] text-term-faint"
-          >
-            NW z
-          </th>
-          {SCAN_TIMEFRAMES.map((tf) => {
-            const r = reading(tf);
-            const nw = r?.nw;
-            const state = nw?.state ?? 'unknown';
-
-            const short =
-              nw && state !== 'unavailable' && nw.barsUsed < nw.barsWanted
-                ? ` — band over ${nw.barsUsed} of ${nw.barsWanted} bars`
-                : '';
-
-            return (
-              <td key={tf} className="px-0.5">
-                <span
-                  title={`${TIMEFRAME_LABEL[tf]} NW: ${NW_WORD[state]}${
-                    nw?.z !== null && nw?.z !== undefined
-                      ? `, z ${nw.z.toFixed(2)}`
-                      : ''
-                  }${short}`}
-                  className={`flex h-5 w-9 items-center justify-center border tabular-nums font-bold ${NW_CLASS[state]}`}
-                >
-                  <span aria-hidden>
-                    {nw?.z === null || nw?.z === undefined ? '—' : nw.z.toFixed(2)}
-                  </span>
-                  <span className="sr-only">
-                    {TIMEFRAME_LABEL[tf]} Nadaraya-Watson: {NW_WORD[state]}
-                    {nw?.z !== null && nw?.z !== undefined
-                      ? `, z ${nw.z.toFixed(2)}`
-                      : ''}
-                    {short}
-                  </span>
-                </span>
-              </td>
-            );
-          })}
-        </tr>
-      </tbody>
-    </table>
+    <span
+      className={`inline-flex items-center whitespace-nowrap border px-2 py-1 text-2xs font-bold uppercase tracking-[0.1em] ${BADGE_CLASS[badge]}`}
+    >
+      {OPTION_BADGE_LABEL[badge]}
+    </span>
   );
 }
 
-const head =
-  'whitespace-nowrap border-b border-term-edge bg-term-raised px-2.5 py-2 text-2xs font-bold uppercase tracking-[0.1em] text-term-dim';
-const cell = 'border-b border-term-line/60 px-2.5 py-2 align-top';
-
-function ResultRow({
-  row,
-  outcome,
-  mode,
-  nwSettings,
-  vwapAnchor,
-  trendEmaPeriod,
-  missing,
+/**
+ * The contract panel: the badge, the four numbers behind it, and the reasons.
+ *
+ * The numbers are always shown, even under an `unknown` badge, because "we
+ * could not read the spread" is a different and more useful statement than a
+ * blank panel.
+ */
+function OptionPanel({
+  quality,
+  onCheck,
+  checking,
+  error,
 }: {
-  row: ScanRow;
-  outcome: RowOutcome;
-  mode: StrictnessMode;
-  nwSettings: NwSettings;
-  vwapAnchor: Record<string, VwapAnchor>;
-  trendEmaPeriod: number;
-  /** Set on near-miss rows: the one filter that let it down. */
-  missing?: string;
+  quality: OptionQuality | null;
+  onCheck: () => void;
+  checking: boolean;
+  error: string | null;
 }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <>
-      <tr>
-        <th scope="row" className={`${cell} text-left font-bold text-term-text`}>
-          <TickerLink symbol={row.symbol} />
-        </th>
-        <td className={`${cell} text-right tabular-nums text-term-text`}>
-          {row.price === null ? '—' : formatPrice(row.price)}
-          <div className="text-2xs text-term-faint">{row.priceAsOf}</div>
-        </td>
-        <td className={`${cell} text-right tabular-nums font-bold text-term-text`}>
-          {row.rsScore.toFixed(0)}
-          <div className="text-2xs font-normal text-term-faint">#{row.rsRank}</div>
-        </td>
-        <td className={`${cell} text-term-dim`}>
-          <div className="text-2xs">EQ {row.equityTier ?? '—'}</div>
-          <div className="text-2xs">OPT {row.optionsTier ?? '—'}</div>
-        </td>
-        <td className={`${cell} text-right`}>
-          {row.regime === null ? (
-            <span className="text-2xs text-term-faint">unread</span>
-          ) : (
-            <>
-              <span
-                className={`text-2xs font-bold ${
-                  row.regime === 'positive' ? 'text-pos' : 'text-neg'
-                }`}
-              >
-                {row.regime}
-              </span>
-              {row.netGex !== null && (
-                <div className="text-2xs tabular-nums text-term-faint">
-                  {formatUsd(row.netGex)}
-                </div>
-              )}
-            </>
-          )}
-        </td>
-        <td className={cell}>
-          <div className="flex flex-wrap gap-1">
-            {SINGLE_FILTERS.map((key) => (
-              <Chip
-                key={key}
-                label={SINGLE_ABBREV[key]}
-                state={outcome.verdicts[key].state}
-                title={`${FILTER_LABEL[key]}: ${outcome.verdicts[key].detail}`}
-              />
-            ))}
-          </div>
-          {missing && (
-            <p className="mt-1.5 text-2xs leading-relaxed text-flip">
-              Missing: {missing}
-            </p>
-          )}
-        </td>
-        <td className={cell}>
-          <TimeframeGrid row={row} mode={mode} trendEmaPeriod={trendEmaPeriod} />
-        </td>
-        <td className={`${cell} text-right`}>
+  if (!quality) {
+    return (
+      <div className="border border-term-line bg-term-raised/40 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="label-xs">Option contract</span>
+          <span className="text-2xs text-term-faint">not checked yet</span>
           <button
             type="button"
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            className="border border-term-line px-1.5 py-0.5 text-2xs tracking-[0.1em] text-term-faint transition-colors hover:border-pos/50 hover:text-pos"
+            onClick={onCheck}
+            disabled={checking}
+            className="border border-pos/50 bg-pos/10 px-2.5 py-1 text-2xs font-bold tracking-[0.08em] text-pos transition-colors hover:bg-pos/20 disabled:opacity-40"
           >
-            {open ? 'Hide chart' : 'Chart'}
+            {checking ? 'Checking…' : 'Check the contract'}
           </button>
-        </td>
-      </tr>
+        </div>
+        <p className="mt-1.5 text-2xs leading-relaxed text-term-faint">
+          Only the top-ranked names are checked at scan time, to stay inside
+          the chain provider&rsquo;s daily window — the count is stated at the
+          top of this page. This one is checked on request.
+        </p>
+        {error && <p className="mt-1.5 text-2xs text-bear">{error}</p>}
+      </div>
+    );
+  }
 
-      {open && (
-        <tr>
-          <td colSpan={8} className="border-b border-term-line/60 px-2.5 pb-4 pt-1">
-            <ScannerChart
-              symbol={row.symbol}
-              magnets={row.magnets}
-              nwSettings={nwSettings}
-              vwapAnchor={vwapAnchor}
-              trendEmaPeriod={trendEmaPeriod}
-            />
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
+  const c = quality.contract;
 
-function ResultTable({
-  entries,
-  mode,
-  nwSettings,
-  vwapAnchor,
-  trendEmaPeriod,
-  caption,
-  showMissing = false,
-}: {
-  entries: Array<{ row: ScanRow; outcome: RowOutcome }>;
-  mode: StrictnessMode;
-  nwSettings: NwSettings;
-  vwapAnchor: Record<string, VwapAnchor>;
-  trendEmaPeriod: number;
-  caption: string;
-  showMissing?: boolean;
-}) {
   return (
-    <div className="scroll-term overflow-x-auto">
-      <table className="w-full border-separate border-spacing-0 text-xs">
-        <caption className="sr-only">{caption}</caption>
-        <thead>
-          <tr>
-            <th scope="col" className={`${head} text-left`}>Ticker</th>
-            <th scope="col" className={`${head} text-right`}>Price</th>
-            <th scope="col" className={`${head} text-right`}>RS</th>
-            <th scope="col" className={`${head} text-left`}>Liquidity</th>
-            <th scope="col" className={`${head} text-right`}>Gamma</th>
-            <th scope="col" className={`${head} text-left`}>Gates 1&ndash;5</th>
-            <th scope="col" className={`${head} text-left`}>Gates 6&ndash;7 &middot; NW z</th>
-            <th scope="col" className={head}>
-              <span className="sr-only">Chart</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map(({ row, outcome }) => (
-            <ResultRow
-              key={row.symbol}
-              row={row}
-              outcome={outcome}
-              mode={mode}
-              nwSettings={nwSettings}
-              vwapAnchor={vwapAnchor}
-              trendEmaPeriod={trendEmaPeriod}
-              missing={showMissing ? outcome.failingLabel : undefined}
-            />
-          ))}
-        </tbody>
-      </table>
+    <div className="border border-term-line bg-term-raised/40 px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="label-xs">Option contract</span>
+        <OptionBadge badge={quality.badge} />
+        <span className="text-2xs tabular-nums text-term-dim">
+          {contractSummary(c)}
+        </span>
+        <span className="ml-auto text-2xs text-term-faint">
+          {/* Provenance, stated on every badge. See OPTION_QUALITY_TOP_N. */}
+          {quality.source === 'scan'
+            ? 'checked at scan time'
+            : 'checked on request'}
+        </span>
+      </div>
+
+      {c && (
+        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-2xs sm:grid-cols-4">
+          <div>
+            <dt className="text-term-faint">Days to expiry</dt>
+            <dd className="tabular-nums text-term-text">{c.dte}</dd>
+          </div>
+          <div>
+            <dt className="text-term-faint">Delta</dt>
+            <dd className="tabular-nums text-term-text">
+              {c.delta === null ? 'unknown' : c.delta.toFixed(2)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-term-faint">Open interest</dt>
+            <dd className="tabular-nums text-term-text">
+              {c.openInterest === null
+                ? 'unknown'
+                : c.openInterest.toLocaleString('en-US')}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-term-faint">Spread (% of mid)</dt>
+            <dd className="tabular-nums text-term-text">
+              {c.spreadPctOfMid === null
+                ? 'unknown'
+                : `${c.spreadPctOfMid.toFixed(1)}%`}
+            </dd>
+          </div>
+        </dl>
+      )}
+
+      <ul className="mt-2 space-y-0.5">
+        {quality.reasons.map((reason) => (
+          <li key={reason} className="text-2xs leading-relaxed text-term-dim">
+            {reason}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
+// --- one result --------------------------------------------------------------
+
+function ResultCard({
+  row: initial,
+  outcome,
+  nwSettings,
+  trendEmaPeriod,
+}: {
+  row: ScanRow;
+  outcome: RowOutcome;
+  nwSettings: NwSettings;
+  trendEmaPeriod: number;
+}) {
+  const [chartOpen, setChartOpen] = useState(false);
+  const [quality, setQuality] = useState<OptionQuality | null>(initial.optionQuality);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // The row as rendered, with any on-click grade folded in, so `whyItMatched`
+  // and the watch line below it read the same contract the panel shows.
+  const row: ScanRow = useMemo(
+    () => ({ ...initial, optionQuality: quality }),
+    [initial, quality],
+  );
+
+  const lines = whyItMatched(row);
+
+  const check = async () => {
+    setChecking(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/scanner/quality?symbol=${encodeURIComponent(row.symbol)}`,
+      );
+      const body = (await response.json()) as {
+        quality?: OptionQuality;
+        error?: string;
+      };
+      if (!response.ok || !body.quality) {
+        setError(body.error ?? 'The contract could not be checked.');
+        return;
+      }
+      setQuality(body.quality);
+    } catch {
+      setError('The contract could not be checked — the request failed.');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <article className="border border-term-line bg-term-panel/60">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-term-line px-3.5 py-2.5">
+        <h3 className="flex items-baseline gap-2 text-base font-bold text-term-text">
+          <TickerLink symbol={row.symbol} />
+          <span className="text-sm tabular-nums text-term-dim">
+            {row.rsScore.toFixed(0)}/100
+          </span>
+        </h3>
+        <div className="flex items-center gap-2">
+          {quality && <OptionBadge badge={quality.badge} />}
+          <button
+            type="button"
+            onClick={() => setChartOpen((v) => !v)}
+            aria-expanded={chartOpen}
+            className="border border-term-line px-2 py-1 text-2xs tracking-[0.08em] text-term-faint transition-colors hover:border-pos/50 hover:text-pos"
+          >
+            {chartOpen ? 'Hide chart' : 'Chart'}
+          </button>
+        </div>
+      </div>
+
+      {/*
+        Why it matched, in plain English and in the order someone would ask.
+        The watch line is the last row and is always present — see
+        `buildWatchLine`, which returns a sentence rather than nothing when
+        there is nothing to flag.
+      */}
+      <dl className="space-y-1 px-3.5 py-3 text-xs">
+        {lines.map((line) => (
+          <div key={line.label} className="flex flex-wrap gap-x-2">
+            <dt
+              className={`w-20 shrink-0 font-bold tracking-[0.06em] ${
+                line.label === 'Watch' ? 'text-flip' : 'text-term-faint'
+              }`}
+            >
+              {line.label}:
+            </dt>
+            <dd
+              className={`min-w-0 flex-1 leading-relaxed ${
+                line.label === 'Watch' ? 'text-flip' : 'text-term-dim'
+              }`}
+            >
+              {line.text}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      <div className="space-y-2 px-3.5 pb-3">
+        <OptionPanel
+          quality={quality}
+          onCheck={check}
+          checking={checking}
+          error={error}
+        />
+
+        {/*
+          The name's own dealer positioning. Context text, not a gate — and the
+          single-name caveat travels with it every time it is shown.
+        */}
+        {row.regime !== null && (
+          <p className="text-2xs leading-relaxed text-term-faint">
+            <span className="label-xs mr-1.5">Positioning</span>
+            This name&rsquo;s own dealer positioning reads{' '}
+            <span className={row.regime === 'positive' ? 'text-pos' : 'text-neg'}>
+              {row.regime === 'positive' ? 'calm' : 'volatile'}
+            </span>
+            {row.netGex !== null && ` (${formatUsd(row.netGex)} net)`}. On a single
+            stock the assumption about which way dealers are positioned is far
+            weaker than it is on an index, so this is shown as context and is not
+            one of the gates.
+          </p>
+        )}
+
+        <div className="flex flex-wrap gap-1.5">
+          {FILTER_KEYS.map((key) => (
+            <GateChip key={key} gate={key} state={outcome.verdicts[key]?.state ?? 'unknown'} />
+          ))}
+        </div>
+      </div>
+
+      {chartOpen && (
+        <div className="border-t border-term-line px-3.5 pb-4 pt-3">
+          <ScannerChart
+            symbol={row.symbol}
+            magnets={row.magnets}
+            nwSettings={nwSettings}
+            trendEmaPeriod={trendEmaPeriod}
+          />
+        </div>
+      )}
+    </article>
+  );
+}
+
+// --- the board ---------------------------------------------------------------
+
 export function ScannerBoard({
   scan,
   nwSettings,
-  vwapAnchor,
   trendEmaPeriod,
   gammaTimeEt,
   scannedAtEt,
 }: {
   scan: ScanResult;
   nwSettings: NwSettings;
-  vwapAnchor: Record<string, VwapAnchor>;
   trendEmaPeriod: number;
   gammaTimeEt: string;
   /**
    * New York clock the scan actually ran at, computed on the server.
    *
    * The heading states this rather than the time the job was *scheduled* for.
-   * They are normally the same, and when they are not the reader needs to know
-   * — a VWAP reading taken at 10:30 is a different fact from one taken at
-   * 09:35, and printing the schedule over it would be a false statement about
-   * when these numbers were true.
+   * They are normally the same, and when they are not the reader needs to know.
    */
   scannedAtEt: string;
 }) {
-  const [mode, setMode] = useState<StrictnessMode>('all');
-
-  const { passed, nearMisses, all, biggestEliminator } = useMemo(
-    () => partition(scan.rows, mode),
-    [scan.rows, mode],
+  const { passed, all, biggestEliminator } = useMemo(
+    () => partition(scan.rows),
+    [scan.rows],
   );
 
   const gammaStamp = scan.gammaDate
@@ -444,169 +374,220 @@ export function ScannerBoard({
 
   return (
     <div className="space-y-4">
-      <div className="panel flex flex-wrap items-center justify-between gap-3 px-3.5 py-3">
-        <div className="min-w-0">
-          <p className="text-xs text-term-text">
-            <span className="font-bold">
-              Scanned at {scannedAtEt} ET · {passed.length} of {scan.universe} passed
-            </span>{' '}
-            <span className="text-term-dim">
-              · {scan.candidates} cleared RS {scan.rsMin} · {gammaStamp}
-            </span>
+      <div className="panel px-3.5 py-3">
+        <p className="text-xs text-term-text">
+          <span className="font-bold">
+            Scanned at {scannedAtEt} ET · {passed.length} of {scan.universe} passed
+          </span>{' '}
+          <span className="text-term-dim">
+            · {scan.candidates} cleared RS {scan.rsMin} · {gammaStamp}
+          </span>
+        </p>
+        {scannedAtEt !== scan.scheduledEt && (
+          <p className="mt-1 text-2xs text-flip">
+            Scheduled for {scan.scheduledEt} ET. It ran at {scannedAtEt}, so the
+            readings below were taken then.
           </p>
-          {scannedAtEt !== scan.scheduledEt && (
-            <p className="mt-1 text-2xs text-flip">
-              Scheduled for {scan.scheduledEt} ET. It ran at {scannedAtEt}, so the
-              VWAP readings below were taken then.
-            </p>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="label-xs">Agreement</span>
-          <div className="flex items-center gap-1">
-            {STRICTNESS_MODES.map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                aria-pressed={m === mode}
-                className={`border px-2 py-0.5 text-2xs font-bold tracking-[0.08em] transition-colors ${
-                  m === mode
-                    ? 'border-pos/70 bg-pos/15 text-pos'
-                    : 'border-term-line text-term-faint hover:border-pos/50 hover:text-term-dim'
-                }`}
-              >
-                {STRICTNESS_LABEL[m]}
-              </button>
-            ))}
-          </div>
-          <InfoTip
-            tip={{
-              label: 'Agreement',
-              plain:
-                'How many of the three timeframes must agree before VWAP, the trend EMA and Nadaraya-Watson count as passed.',
-              detail:
-                'All three is the strict reading and the default. Relaxing it does not re-scan anything — every filter state for every candidate was stored this morning, and this only changes how they are counted. The dimmed columns in the grid are the ones the current setting ignores.',
-            }}
-          />
-        </div>
+        )}
+        <p className="mt-1.5 text-2xs leading-relaxed text-term-faint">
+          Contracts were checked at scan time for the top {scan.qualityChecked}{' '}
+          ranked name{scan.qualityChecked === 1 ? '' : 's'}. Any result below
+          that is checked when you open it — the chain provider answers a
+          limited number of requests a day, and the morning gamma job has first
+          call on them.
+        </p>
       </div>
+
+      {/*
+        The five rules, stated in full and in plain English above the list.
+        Behind a tooltip they were, in effect, not stated at all.
+      */}
+      <section className="panel px-3.5 py-3">
+        <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-dim">
+          The five rules, all of which must pass
+        </h2>
+        <ol className="mt-2 space-y-1.5">
+          {FILTER_KEYS.map((key, i) => (
+            <li key={key} className="flex gap-2 text-xs leading-relaxed">
+              <span className="shrink-0 tabular-nums text-term-faint">{i + 1}.</span>
+              <span>
+                <span className="font-bold text-term-text">{FILTER_LABEL[key]}</span>
+                <span className="text-term-dim"> — {FILTER_EXPLANATION[key]}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-2.5 text-2xs leading-relaxed text-term-faint">
+          Names reporting earnings within the next 10 days are removed
+          altogether. Contracts are then checked between{' '}
+          {OPTION_WINDOW.minDte} and {OPTION_WINDOW.maxDte} days to expiry at a
+          delta of {OPTION_WINDOW.minDelta} to {OPTION_WINDOW.maxDelta}. A good
+          stock with an untradable contract is not a result worth having.
+        </p>
+      </section>
+
+      {scan.earningsExcluded.length > 0 && (
+        <p className="panel px-3.5 py-2.5 text-2xs leading-relaxed text-term-dim">
+          <span className="label-xs mr-1.5">Removed for earnings</span>
+          {scan.earningsExcluded
+            .map((e) => `${e.symbol} (${e.dateIso}, ${e.daysAway}d)`)
+            .join(' · ')}
+        </p>
+      )}
+
+      <p className="panel px-3.5 py-2.5 text-2xs leading-relaxed text-term-faint">
+        <span className="label-xs mr-1.5">Earnings dates</span>
+        {scan.earningsSource} Where a date could not be established the name is
+        kept and its watch line says so — an unknown date is never treated as
+        &ldquo;no earnings soon&rdquo;.
+      </p>
 
       {scan.gateReason ? (
         <div className="panel border-l-2 border-l-bear/60 px-4 py-8 text-center text-xs">
-          <p className="font-bold text-bear">SPY gamma is negative. The scan is empty.</p>
+          <p className="font-bold text-bear">
+            The market is in a volatile regime. The scan is empty.
+          </p>
           <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-dim">
-            Filter 5 is a single market-wide gate, and it is shut. In a negative
-            gamma regime dealers amplify moves rather than damping them, so a
-            list of individually strong-looking names is at its most misleading
-            exactly here. {scan.candidates} names cleared RS {scan.rsMin} and were
-            not carried further.
+            This is one market-wide gate and it is shut. When dealers amplify
+            moves rather than damping them, a list of individually
+            strong-looking names is at its most misleading. {scan.candidates}{' '}
+            names cleared RS {scan.rsMin} and were not carried further. There is
+            no setting that relaxes this: an empty list on a day like today is
+            the correct output.
           </p>
         </div>
       ) : passed.length === 0 ? (
         <div className="panel px-4 py-8 text-center text-xs">
           <p className="font-bold text-term-text">
-            No names passed today&rsquo;s filters.
+            No names passed today&rsquo;s five rules.
           </p>
           <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-dim">
             A zero-result day is a real answer, not a broken page.{' '}
             {biggestEliminator ? (
               <>
-                The filter that eliminated the most candidates was{' '}
+                The rule that eliminated the most candidates was{' '}
                 <span className="text-flip">
                   {FILTER_LABEL[biggestEliminator.key]}
                 </span>
-                , which knocked out {biggestEliminator.count} of {scan.candidates}.
+                , which knocked out {biggestEliminator.count} of{' '}
+                {scan.candidates}.
               </>
             ) : (
               <>No candidates cleared RS {scan.rsMin} to begin with.</>
             )}{' '}
-            The near-miss list below is what tells you whether the rules are too
-            tight.
+            Every candidate and its five gate states is below.
           </p>
         </div>
       ) : (
-        <section className="panel">
-          <ResultTable
-            entries={passed}
-            mode={mode}
-            nwSettings={nwSettings}
-            vwapAnchor={vwapAnchor}
-            trendEmaPeriod={trendEmaPeriod}
-            caption="Names passing all seven gates, ordered by daily Nadaraya-Watson z-score."
-          />
+        <section className="space-y-3">
+          <h2 className="sr-only">Names passing all five rules</h2>
+          {passed.map(({ row, outcome }) => (
+            <ResultCard
+              key={row.symbol}
+              row={row}
+              outcome={outcome}
+              nwSettings={nwSettings}
+              trendEmaPeriod={trendEmaPeriod}
+            />
+          ))}
         </section>
       )}
 
-      <details className="panel group" open={passed.length === 0 && nearMisses.length > 0}>
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-3.5 py-3 text-xs text-term-dim transition-colors hover:text-term-text [&::-webkit-details-marker]:hidden">
-          <span aria-hidden className="text-flip transition-transform group-open:rotate-90">
-            ▸
-          </span>
-          <span className="font-bold uppercase tracking-[0.14em] text-flip">
-            Passed all but one
-          </span>
-          <span className="text-term-faint">
-            {nearMisses.length} name{nearMisses.length === 1 ? '' : 's'} — the failing
-            filter is named on each
-          </span>
-        </summary>
-
-        {nearMisses.length === 0 ? (
-          <p className="border-t border-term-line px-3.5 py-6 text-center text-2xs text-term-faint">
-            Nothing missed by exactly one filter today.
-          </p>
-        ) : (
-          <ResultTable
-            entries={nearMisses}
-            mode={mode}
-            nwSettings={nwSettings}
-            vwapAnchor={vwapAnchor}
-            trendEmaPeriod={trendEmaPeriod}
-            caption="Candidates that failed exactly one filter, with the filter and timeframe named."
-            showMissing
-          />
-        )}
-      </details>
-
       {/*
-        Always present, and the reason is the SPY gate. When that is shut the
-        pass list is empty by definition and nothing misses by exactly one, so
-        without this section a gate-closed morning would render a page with no
-        rows on it at all — and every candidate's eight filter states, which
+        Always present. When the market gate is shut the pass list is empty by
+        definition, and without this a gate-closed morning would render a page
+        with no rows on it at all — every candidate's five gate states, which
         the scan computed and stored, would be invisible. A zero-result day has
         to show its working.
       */}
       <details className="panel group">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3.5 py-3 text-xs text-term-dim transition-colors hover:text-term-text [&::-webkit-details-marker]:hidden">
-          <span aria-hidden className="text-term-faint transition-transform group-open:rotate-90">
+          <span
+            aria-hidden
+            className="text-term-faint transition-transform group-open:rotate-90"
+          >
             ▸
           </span>
           <span className="font-bold uppercase tracking-[0.14em] text-term-dim">
             Every candidate scanned
           </span>
           <span className="text-term-faint">
-            {all.length} name{all.length === 1 ? '' : 's'} above RS {scan.rsMin}, with
-            all seven gate states and its NW z-score
+            {all.length} name{all.length === 1 ? '' : 's'} above RS {scan.rsMin},
+            with all five gate states
           </span>
         </summary>
 
         {all.length === 0 ? (
           <p className="border-t border-term-line px-3.5 py-6 text-center text-2xs text-term-faint">
-            No names cleared RS {scan.rsMin}, so nothing was carried into the rest of
-            the pipeline.
+            No names cleared RS {scan.rsMin}, so nothing was carried into the
+            rest of the pipeline.
           </p>
         ) : (
-          <ResultTable
-            entries={all}
-            mode={mode}
-            nwSettings={nwSettings}
-            vwapAnchor={vwapAnchor}
-            trendEmaPeriod={trendEmaPeriod}
-            caption="Every candidate above the relative-strength floor, with all seven gate states and its NW z-score."
-            showMissing
-          />
+          <div className="scroll-term overflow-x-auto border-t border-term-line">
+            <table className="w-full border-separate border-spacing-0 text-xs">
+              <caption className="sr-only">
+                Every candidate above the relative-strength floor, with all five
+                gate states.
+              </caption>
+              <thead>
+                <tr>
+                  <th
+                    scope="col"
+                    className="whitespace-nowrap border-b border-term-edge bg-term-raised px-2.5 py-2 text-left text-2xs font-bold uppercase tracking-[0.1em] text-term-dim"
+                  >
+                    Ticker
+                  </th>
+                  <th
+                    scope="col"
+                    className="whitespace-nowrap border-b border-term-edge bg-term-raised px-2.5 py-2 text-right text-2xs font-bold uppercase tracking-[0.1em] text-term-dim"
+                  >
+                    RS
+                  </th>
+                  <th
+                    scope="col"
+                    className="whitespace-nowrap border-b border-term-edge bg-term-raised px-2.5 py-2 text-left text-2xs font-bold uppercase tracking-[0.1em] text-term-dim"
+                  >
+                    Gates
+                  </th>
+                  <th
+                    scope="col"
+                    className="whitespace-nowrap border-b border-term-edge bg-term-raised px-2.5 py-2 text-left text-2xs font-bold uppercase tracking-[0.1em] text-term-dim"
+                  >
+                    What stopped it
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {all.map(({ row, outcome }) => (
+                  <tr key={row.symbol}>
+                    <th
+                      scope="row"
+                      className="border-b border-term-line/60 px-2.5 py-2 text-left align-top font-bold text-term-text"
+                    >
+                      <TickerLink symbol={row.symbol} />
+                    </th>
+                    <td className="border-b border-term-line/60 px-2.5 py-2 text-right align-top tabular-nums text-term-text">
+                      {row.rsScore.toFixed(0)}
+                    </td>
+                    <td className="border-b border-term-line/60 px-2.5 py-2 align-top">
+                      <div className="flex flex-wrap gap-1">
+                        {FILTER_KEYS.map((key) => (
+                          <GateChip
+                            key={key}
+                            gate={key}
+                            state={outcome.verdicts[key]?.state ?? 'unknown'}
+                          />
+                        ))}
+                      </div>
+                    </td>
+                    <td className="border-b border-term-line/60 px-2.5 py-2 align-top text-2xs leading-relaxed text-term-dim">
+                      {outcome.passes ? 'Nothing — it passed.' : outcome.failingLabel}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </details>
     </div>
