@@ -9,7 +9,7 @@ import { formatAsOf } from '@/lib/time';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
-  title: 'Relative Strength',
+  title: 'Stock Strength',
   description:
     'Every S&P 500 stock ranked 0-100 by how much it is outperforming the rest of the market over 1, 3 and 6 months.',
 };
@@ -46,7 +46,7 @@ export default async function StrengthPage() {
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-              Relative Strength
+              Stock Strength
             </h1>
             {/* Directly under the title, because the confusion it heads off —
                 a 95 sitting beside a red daily change — happens on first

@@ -41,15 +41,24 @@ interface NavItem {
  */
 const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: '◎' },
-  { href: '/strength', label: 'Strength', icon: '⇅' },
+  /*
+   * Several labels say the noun out loud rather than the desk shorthand:
+   * "Stock Strength", not "Strength"; "Options Flow", not "Flow"; "Track
+   * Record", not "Accuracy Log". The short forms read as jargon to someone who
+   * has not used the page yet, which is exactly who a nav label is for. No
+   * route moved, so nothing needs redirecting.
+   */
+  { href: '/strength', label: 'Stock Strength', icon: '⇅' },
   { href: '/scanner', label: 'Scanner', icon: '⌕' },
   // `/` and `/ticker` both land a symbol here, so they light the same item.
+  // Kept as "Decision" on purpose — it is the one page whose name is the
+  // question the reader arrived with. Its subtitle does the explaining.
   { href: '/decision', label: 'Decision', icon: '◈' },
   { href: '/watchlist', label: 'Watchlist', icon: '★' },
-  { href: '/flow', label: 'Flow', icon: '⇄' },
+  { href: '/flow', label: 'Options Flow', icon: '⇄' },
   { href: '/velocity', label: 'Velocity', icon: 'Δ' },
   // The log is the record; /history is the same record drawn against price.
-  { href: '/log', label: 'Accuracy Log', icon: '✓', match: ['/history'] },
+  { href: '/log', label: 'Track Record', icon: '✓', match: ['/history'] },
   // Digest and the morning post were one day's writing split over two pages.
   { href: '/daily', label: 'Daily', icon: '≡', match: ['/digest', '/post'] },
   { href: '/guide', label: 'Guide', icon: '?' },

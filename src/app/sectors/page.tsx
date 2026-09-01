@@ -66,7 +66,7 @@ function ViewToggle({ view }: { view: View }) {
 
   return (
     <div role="group" aria-label="View" className="flex flex-wrap items-center gap-1">
-      {tab('sectors', 'Sectors', 'The eleven market sectors, by how their score is changing')}
+      {tab('sectors', 'Sector Momentum', 'The eleven market sectors, by how their score is changing')}
       {tab('groups', 'Groups', 'Themed baskets — megacap tech, chips, the index ETFs')}
     </div>
   );

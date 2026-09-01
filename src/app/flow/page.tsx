@@ -15,7 +15,7 @@ import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { marketToday } from '@/lib/time';
 
 export const metadata: Metadata = {
-  title: 'Unusual Options Activity',
+  title: 'Options Flow',
   description:
     'Strikes trading heavily against their existing open interest across the tracked symbols.',
 };
@@ -85,7 +85,7 @@ export default async function FlowPage({ searchParams }: PageProps) {
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-              Unusual Options Activity
+              Options Flow
             </h1>
             <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
               {PAGE_DESCRIPTIONS['/flow']}
