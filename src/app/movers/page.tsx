@@ -10,7 +10,6 @@ import {
   MOVERS_EXPLANATION,
   REFRESH_SECONDS,
   getMovers,
-  secondsUntilRefresh,
 } from '@/lib/movers';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { getScannerView } from '@/lib/scanner';
@@ -19,9 +18,9 @@ import { sessionLabel } from '@/lib/staleness';
 import { formatAsOf } from '@/lib/time';
 
 export const metadata: Metadata = {
-  title: 'Moving today',
+  title: 'Moved last session',
   description:
-    'S&P 500 names up on the day on more than 1.5 times their own average volume, with the context to check each one against. Not a scanner result.',
+    'S&P 500 names that closed up on more than 1.5 times their own average volume in the last completed session, with the context to check each one against. Not a scanner result.',
 };
 
 export const dynamic = 'force-dynamic';
@@ -45,7 +44,6 @@ export default async function MoversPage() {
   const scannerPassed = scannerView?.scan ? partition(scannerView.scan.rows).passed.length : null;
 
   const staleness = snapshotStaleness(movers.capturedAt);
-  const nextIn = Math.max(0, Math.ceil(secondsUntilRefresh() / 60));
 
   return (
     <>
@@ -53,13 +51,13 @@ export default async function MoversPage() {
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <PageBar
-          title="Moving today"
+          title="Moved last session"
           description={PAGE_DESCRIPTIONS['/movers']}
-          meta={
-            movers.live
-              ? `Last refreshed ${movers.capturedEt} ET · next in ${nextIn} min`
-              : `Close of ${sessionLabel(movers.sessionDate)}`
-          }
+          /*
+            The session, not the refresh clock. This reading is a finished day,
+            so which day it is matters and when it was fetched does not.
+          */
+          meta={`Session of ${sessionLabel(movers.sessionDate)} · close`}
           asOfLabel={formatAsOf(new Date(movers.capturedAt))}
         />
 
@@ -127,12 +125,9 @@ export default async function MoversPage() {
           <div className="panel px-4 py-10 text-center text-xs">
             <p className="font-bold text-term-text">Nothing is moving on volume.</p>
             <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-dim">
-              {movers.gainers} of {movers.measured} names read were up on the
-              day, and none of them cleared {MIN_RELATIVE_VOLUME} times its own
-              average volume
-              {movers.live && movers.sessionProgress < 0.5
-                ? ' — which is common this early, because the volume figure is a running total measured against a whole day.'
-                : '.'}
+              {movers.gainers} of {movers.measured} names read closed up on{' '}
+              {sessionLabel(movers.sessionDate)}, and none of them cleared{' '}
+              {MIN_RELATIVE_VOLUME} times its own average volume.
             </p>
           </div>
         )}
@@ -158,18 +153,14 @@ export default async function MoversPage() {
 
           <p className="mt-2">
             <span className="text-term-dim">
-              Relative volume is a running total against a whole day.{' '}
+              Both sides of the volume ratio are complete days.{' '}
             </span>
-            The numerator is the shares traded so far today; the denominator is
-            the average of twenty complete sessions. It is deliberately not
-            scaled by how much of the session has elapsed — volume does not
-            arrive evenly, and prorating it linearly would roughly treble every
-            reading in the first half hour, on the part of the day when a
-            movers list most invites chasing. So the figure understates early
-            and is exact after the close.{' '}
-            {movers.live
-              ? `This session was ${Math.round(movers.sessionProgress * 100)}% elapsed when these were read.`
-              : 'This reading is a completed session, so it is the exact figure.'}
+            The numerator is every share traded in the session named above; the
+            denominator is the average of the twenty complete sessions before
+            it. Neither is a partial figure, so the number needs no allowance
+            made for the time of day it was read — which is the whole reason
+            this page reports a session that has closed rather than one still
+            running.
           </p>
 
           <p className="mt-2">
@@ -198,15 +189,14 @@ export default async function MoversPage() {
 
           <p className="mt-2">
             <span className="text-term-dim">
-              Refreshed every {Math.round(REFRESH_SECONDS / 60)} minutes during
-              market hours, on read.{' '}
+              Built on read, with no scheduled job and nothing stored.{' '}
             </span>
-            There is no scheduled job and nothing is stored: the reading is two
-            upstream requests and it is a snapshot of right now, so it can
-            always be taken again. Outside market hours the same call returns
-            the last session&rsquo;s final numbers, which is what a quote feed
-            serves once trading has stopped — labelled above as the close, never
-            as live.
+            One request for the session&rsquo;s share volumes, over price
+            history this project already keeps. The session shown is the one
+            that history is current to, so this page cannot get ahead of it, and
+            the reading is held for {Math.round(REFRESH_SECONDS / 60)} minutes
+            because a closed session has no way to change until the overnight
+            refresh lands the next one.
           </p>
 
           <p className="mt-2">

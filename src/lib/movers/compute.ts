@@ -1,7 +1,5 @@
 import 'server-only';
 
-import { fetchTradierQuotes, tradierToken } from '../breadth/tradier';
-import { operatorDetail } from '../errorText';
 import { marketSessionRules } from '../events';
 import { getDigestBySymbol, getRsResult } from '../rs';
 import { getMembership } from '../rs/membership';
@@ -10,8 +8,8 @@ import { DEFAULT_WEIGHTS, type DigestEntry } from '../rs/types';
 import { lookupEarnings } from '../scanner/earnings';
 import { formatEtClock } from '../scanner/schedule';
 import { peekStoredSectors, splitByMomentum } from '../sectors';
-import { inSession, lastCompletedSession, sessionFor } from '../staleness';
-import { marketNow, marketToday } from '../time';
+import { lastCompletedSession } from '../staleness';
+import { fetchGroupedDaily } from './groupedDaily';
 import {
   byChangeDescending,
   pctFrom,
@@ -22,23 +20,48 @@ import {
 import { MAX_MOVERS, type MoverRow, type MoversResult } from './types';
 
 /**
- * Build the intraday movers list.
+ * Build the last-completed-session movers list.
  *
- * ## Two upstream requests, and no third
+ * ## Why a finished session rather than a live one
  *
- * Everything except the live quotes and the earnings dates is read from
- * documents this project already stores, which is the whole reason a
- * fifteen-minute refresh is affordable:
+ * This reports the session that has closed, not the one in progress, and that
+ * is a deliberate choice about what the app is for rather than a fallback.
  *
- * 1. **Tradier batch quotes**, one POST for the whole universe — the same
- *    call the breadth sweep makes, extended to carry session volume. That is
- *    where today's price and today's share count come from.
- * 2. **Tradier fundamentals calendar**, one GET, and only for the fifteen
- *    names that actually made the list. Asking for all five hundred would be
- *    eleven requests to answer a question about fifteen rows.
+ * A live intraday list of what is running right now is a day-trading
+ * instrument: it invites acting on a move while it is happening, and its
+ * relative-volume figure is a running total against a whole-day average, so
+ * the number is structurally understated all morning and only becomes exact
+ * at the close. The rest of this project is built for swing decisions made on
+ * daily bars. A finished session fits that: every figure on the page is final,
+ * the volume ratio is a whole day over an average of whole days, and nothing
+ * on it can change while it is being read.
  *
- * Membership, the RS ranking, the moving averages, the twenty-session volume
- * baseline and the sector momentum are all stored reads and cost nothing.
+ * The page is named for what it shows. It is not "moving today".
+ *
+ * ## One upstream request
+ *
+ * 1. **Polygon grouped daily bars**, one GET for the whole US market, read for
+ *    the session's share volume. See `groupedDaily.ts` — that endpoint is the
+ *    one figure this project does not already store.
+ *
+ * Everything else is a stored read and costs nothing: membership, the RS
+ * ranking, the moving averages, the twenty-session volume baseline, the
+ * session's percentage change and the sector momentum all come out of the RS
+ * digest and the sectors snapshot.
+ *
+ * The earnings warning is a second request, and only for the handful of names
+ * that made the list. It has no non-Tradier source, so in production it
+ * resolves to "unknown" for every row and the row says so — see
+ * `scanner/earnings.ts`.
+ *
+ * ## The digest sets the session, and everything is checked against it
+ *
+ * `sessionDate` is the digest's own `asOfDate`, not a date computed from the
+ * clock. The percentage change comes from the digest and the volume comes from
+ * Polygon, so the two have to describe the same day or the ratio is a
+ * comparison between two different sessions wearing one date. Asking the
+ * provider for exactly the digest's session, and refusing when the digest
+ * cannot name one, is what keeps that from happening quietly.
  *
  * ## The universe is not widened, on purpose
  *
@@ -49,46 +72,16 @@ import { MAX_MOVERS, type MoverRow, type MoversResult } from './types';
  *
  * ## What relative volume here is, exactly
  *
- * Today's cumulative share volume divided by the twenty-session average of
- * whole days. The numerator is a running total and the denominator is a whole
- * day, so the reading rises through the session and an 11:00 figure is
- * structurally lower than the same name's 15:30 figure.
- *
- * It is left that way rather than scaled by elapsed time. Prorating a full-day
- * average linearly would assume volume arrives evenly, and it does not — the
- * first half hour is several times its linear share — so a linear denominator
- * would roughly triple every reading at the open, on the one part of the day
- * when a movers list most invites chasing. Understating early is the harmless
- * direction: it holds names off the list, it never puts them on it. The
- * session progress is published beside the number so the caveat is visible
- * rather than buried here, and after the close the figure is the honest
- * full-day one.
+ * The session's total share volume divided by the twenty-session average of
+ * whole days. Both sides are complete days, so the figure is exact rather than
+ * a running total that has to be read with the clock in mind. That caveat, and
+ * the session-progress number that used to carry it, are gone with the live
+ * reading that needed them.
  */
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(1, Math.max(0, value));
-}
-
-/**
- * How far through the session `now` is, 0-1.
- *
- * 1 outside a session, where the reading is a completed day rather than a
- * partial one — the relative-volume caveat does not apply to a full day.
- */
-function sessionProgressAt(now: Date): number {
-  const rules = marketSessionRules();
-  if (!inSession(now, rules)) return 1;
-  const session = sessionFor(marketNow(now).date, rules);
-  const span = session.closeMs - session.openMs;
-  if (!(span > 0)) return 1;
-  return clamp01((now.getTime() - session.openMs) / span);
-}
 
 /** An empty reading that still carries the clock and the reason. */
 function nothing(
   now: Date,
-  live: boolean,
   sessionDate: string,
   universe: number,
   requests: number,
@@ -98,9 +91,7 @@ function nothing(
     rows: [],
     capturedAt: now.toISOString(),
     capturedEt: formatEtClock(now),
-    live,
     sessionDate,
-    sessionProgress: sessionProgressAt(now),
     measured: 0,
     universe,
     gainers: 0,
@@ -123,62 +114,62 @@ interface Candidate {
 
 export async function computeMovers(now: Date = new Date()): Promise<MoversResult> {
   const rules = marketSessionRules();
-  const live = inSession(now, rules);
-  const sessionDate = live ? marketToday(now) : lastCompletedSession(now, rules).date;
   const notes: string[] = [];
 
   const membership = await getMembership();
   const symbols = membership.members.map((m) => m.symbol);
-
-  if (!tradierToken()) {
-    /*
-     * There is no Yahoo fallback here, and that is deliberate rather than an
-     * omission. The spark endpoint the breadth sweep falls back to carries a
-     * price series and no volume at all, so the one gate this list applies
-     * could not be applied — and a movers list with the volume gate silently
-     * switched off is precisely the thing this feature must never become.
-     */
-    return nothing(now, live, sessionDate, symbols.length, 0, [
-      'TRADIER_TOKEN is not set, so no quotes could be read. There is no ' +
-        'fallback feed carrying share volume, and the relative-volume gate is ' +
-        'the only thing separating this list from a list of arbitrary prints, ' +
-        'so nothing is shown rather than an ungated list.',
-    ]);
-  }
-
-  let quotes: Awaited<ReturnType<typeof fetchTradierQuotes>>['quotes'];
-  let requests = 1;
-  try {
-    const result = await fetchTradierQuotes(symbols);
-    quotes = result.quotes;
-    if (result.unmatched.length > 0) {
-      notes.push(
-        `${result.unmatched.length} symbols on the membership list were not ` +
-          `recognised by the quote feed and are not counted: ${result.unmatched.join(', ')}.`,
-      );
-    }
-  } catch (error) {
-    /*
-     * The detail goes to the log, not to the page. `fetch()` collapses every
-     * connection-level failure into "fetch failed" and puts the real reason in
-     * `cause`, so logging `error.message` alone reports nothing a reader or an
-     * operator can act on — a refused socket, a DNS miss and a TLS chain that
-     * will not verify all arrive looking identical.
-     */
-    console.warn('[movers] quote feed failed:', operatorDetail(error));
-
-    return nothing(now, live, sessionDate, symbols.length, requests, [
-      'The quote feed did not answer, so there is no reading for this ' +
-        'refresh. Nothing is shown rather than a list with its one gate ' +
-        'unapplied; the next refresh tries again.',
-    ]);
-  }
 
   const [digests, rs, sectors] = await Promise.all([
     getDigestBySymbol().catch(() => new Map<string, DigestEntry>()),
     getRsResult(DEFAULT_WEIGHTS).catch(() => null),
     peekStoredSectors().catch(() => null),
   ]);
+
+  /*
+   * The digest names the session, because the digest is what the percentage
+   * change is read from. Falling back to a date derived from the clock would
+   * let the page ask the provider for a day the stored side knows nothing
+   * about, and then divide one session's volume by another session's average.
+   */
+  const digestDates = new Set<string>();
+  for (const entry of digests.values()) digestDates.add(entry.asOfDate);
+  const storedSession = [...digestDates].sort().pop() ?? null;
+
+  if (storedSession === null) {
+    return nothing(now, lastCompletedSession(now, rules).date, symbols.length, 0, [
+      'No stored price history is available yet, so no session can be ' +
+        'reported. The relative-strength refresh fills this overnight, a ' +
+        'quarter of the index at a time.',
+    ]);
+  }
+
+  const sessionDate = storedSession;
+
+  /*
+   * Shards rotate one at a time, so a shard that has not run since the last
+   * close still carries the session before it. Those names are counted out
+   * rather than mixed in: a row whose change came from Monday and whose volume
+   * came from Tuesday would look like an ordinary row.
+   */
+  const staleDigests = [...digestDates].filter((d) => d !== sessionDate);
+  if (staleDigests.length > 0) {
+    notes.push(
+      `Some stored history is still one session behind (${staleDigests
+        .sort()
+        .join(', ')}), and those names are left out of this reading rather ` +
+        'than mixed into it. The overnight refresh brings them up.',
+    );
+  }
+
+  const grouped = await fetchGroupedDaily(sessionDate);
+  let requests = 1;
+
+  if (!grouped.ok) {
+    return nothing(now, sessionDate, symbols.length, requests, [
+      `${grouped.reason} Nothing is shown rather than a list with its one ` +
+        'gate unapplied.',
+    ]);
+  }
 
   const sectorOf = sectorMap(membership.members);
   const rsBySymbol = new Map(rs?.rows.map((r) => [r.symbol, r]) ?? []);
@@ -200,26 +191,37 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
   }
 
   const candidates: Candidate[] = [];
+  let measured = 0;
   let gainers = 0;
   let noVolumeBaseline = 0;
 
-  for (const quote of quotes.values()) {
-    const changePct = ((quote.last - quote.prevClose) / quote.prevClose) * 100;
+  for (const symbol of symbols) {
+    const digest = digests.get(symbol);
+    // No stored history, or history that stops before the session being
+    // reported. Either way there is no percentage change for this day.
+    if (!digest || digest.asOfDate !== sessionDate) continue;
+    if (digest.changePct === null) continue;
+
+    measured += 1;
+
+    // The digest holds the change as a fraction; every figure downstream of
+    // here is a percentage.
+    const changePct = digest.changePct * 100;
 
     // Gainers only in this branch. A losers list is a different page with a
     // different set of warnings on it, deferred for the same reason puts are.
     if (!(changePct > 0)) continue;
     gainers += 1;
 
-    const baseline = digests.get(quote.symbol)?.avgVolume20 ?? null;
-    const volume = quote.volume ?? null;
+    const baseline = digest.avgVolume20 ?? null;
+    const volume = grouped.bars.get(symbol)?.volume ?? null;
 
     if (volume === null || baseline === null || !(baseline > 0)) {
       /*
        * Cannot be graded, so it cannot qualify. Counted and reported rather
        * than dropped in silence: an ungradeable name is a gap in this
        * project's data, not a name that failed the gate, and the two must not
-       * look the same to a reader wondering why a name they can see moving is
+       * look the same to a reader wondering why a name they can see moved is
        * not here.
        */
       noVolumeBaseline += 1;
@@ -228,10 +230,13 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
 
     if (!qualifies(changePct, volume, baseline)) continue;
 
+    const last = digest.close;
     candidates.push({
-      symbol: quote.symbol,
-      last: quote.last,
-      prevClose: quote.prevClose,
+      symbol,
+      last,
+      // Recovered from the close and the session's own change, so it is the
+      // same two numbers the percentage came from rather than a third source.
+      prevClose: last / (1 + digest.changePct),
       changePct,
       volume,
       avgVolume20: baseline,
@@ -258,12 +263,11 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
     const ema200 = digest?.ema200 ?? null;
 
     /*
-     * The averages are measured against the LIVE price, not the digest's
-     * stored close. The stored close is yesterday's, and a name that gapped up
-     * through its 200-day average this morning would otherwise be shown as
-     * below it in the same row that said it was up seven percent. The averages
-     * themselves are yesterday's, which is what a 200-day average is — one
-     * more session moves it by a rounding error.
+     * Price and averages are all the reported session's own, out of the same
+     * digest entry, so a row cannot say a name closed up seven percent and
+     * place it against an average from a different day. When the reading was
+     * live this had to reach for the intraday price instead, and the mismatch
+     * that created is one more thing a finished session removes.
      */
     const pctFrom200 = pctFrom(c.last, ema200);
     const pctFrom20 = pctFrom(c.last, ema20);
@@ -323,10 +327,8 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
     rows,
     capturedAt: now.toISOString(),
     capturedEt: formatEtClock(now),
-    live,
     sessionDate,
-    sessionProgress: sessionProgressAt(now),
-    measured: quotes.size,
+    measured,
     universe: symbols.length,
     gainers,
     qualified,

@@ -55,7 +55,7 @@ const NAV: NavItem[] = [
    * questions and the scanner's is the stronger one; a reader scanning this
    * list should meet the rules before they meet the movers.
    */
-  { href: '/movers', label: 'Moving Today', icon: '↗' },
+  { href: '/movers', label: 'Moved Last Session', icon: '↗' },
   // `/` and `/ticker` both land a symbol here, so they light the same item.
   // Kept as "Decision" on purpose — it is the one page whose name is the
   // question the reader arrived with. Its subtitle does the explaining.

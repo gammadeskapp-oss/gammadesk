@@ -8,7 +8,8 @@ import type { Gics } from '../rs/universe';
  * It is not the scanner, and nothing here may ever be presented as scanner
  * output. The scanner answers "which names pass five hard rules", and it is
  * built to return nothing on a day when nothing passes. This answers a
- * different and much weaker question — "what is moving right now" — and it
+ * different and much weaker question — "what moved in the last completed
+ * session" — and it
  * applies exactly one gate, on volume, for exactly one reason: a large move on
  * thin volume is not a move, it is a print.
  *
@@ -48,9 +49,9 @@ export { EXTENDED_PCT } from '../scanner/types';
  * reviewer can see in one place that the list describes itself as having met
  * no quality bar.
  */
-export const MOVERS_HEADING = 'Moving today';
+export const MOVERS_HEADING = 'Moved last session';
 export const MOVERS_EXPLANATION =
-  'Moving today — these met no quality bar. They are moving, and here is what to check.';
+  'Moved last session — these met no quality bar. They moved, and here is what to check.';
 
 /**
  * Why a row carries a warning.
@@ -128,32 +129,22 @@ export interface MoversResult {
   capturedAt: string;
   /** New York wall clock of the same instant, `HH:MM`. */
   capturedEt: string;
-  /** True when that instant fell inside a trading session. */
-  live: boolean;
   /**
-   * The session these numbers describe, `YYYY-MM-DD`.
+   * The completed session these numbers describe, `YYYY-MM-DD`.
    *
-   * Outside market hours this is the last completed session and the reading is
-   * its close, which the page is required to label as the close rather than as
-   * anything live.
+   * Always a session that has closed — this list never reports the day in
+   * progress. It is the RS digest's own `asOfDate` rather than a date derived
+   * from the clock, because the digest is where the percentage change comes
+   * from and the two must not be able to disagree. The page is required to
+   * show it: a reader has to be able to see which day they are looking at.
    */
   sessionDate: string;
 
-  /**
-   * How far through the session the capture was, 0-1.
-   *
-   * Published because it is the single biggest caveat on the relative-volume
-   * column: the denominator is a full day's average and the numerator is a
-   * running total, so an 11:00 reading is structurally low. 1 outside market
-   * hours, where the figure is the honest full-day one.
-   */
-  sessionProgress: number;
-
-  /** Constituents that produced a usable quote. */
+  /** Constituents with stored history for that session. */
   measured: number;
   /** Symbols in the universe this run asked for. */
   universe: number;
-  /** Names that were up on the day before the volume gate was applied. */
+  /** Names that were up on the session before the volume gate was applied. */
   gainers: number;
   /** Of those, how many cleared `MIN_RELATIVE_VOLUME`. */
   qualified: number;

@@ -139,13 +139,13 @@ export default async function ScannerPage() {
             */}
             <p className="mx-auto mt-3 max-w-2xl leading-relaxed text-term-dim">
               This is a real answer, not a gap. If what you want is simply what
-              is moving today, that is a separate page with a much weaker
-              filter:{' '}
+              moved in the last completed session, that is a separate page with
+              a much weaker filter:{' '}
               <a
                 href="/movers"
                 className="underline decoration-dotted hover:text-term-text"
               >
-                Moving Today
+                Moved Last Session
               </a>
               . Nothing on it has passed these rules.
             </p>
