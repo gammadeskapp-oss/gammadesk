@@ -197,13 +197,32 @@ export function AnalogueTable({
             </table>
           </div>
 
-          <p className="text-2xs leading-relaxed text-term-faint">
-            Returns are close to close from the session that completed the
-            condition, on split-adjusted prices, excluding dividends. DD is the
-            deepest close inside the window. Horizons with a smaller n have
-            matches whose window has not finished yet; those are left out of
-            that row rather than counted early.
-          </p>
+          {/*
+            Two of these three lines exist because the number above them reads
+            as something other than what it is:
+
+            "Return" reads as total return, and these exclude dividends.
+            "Worst drawdown" reads as intraday, and this one is measured on
+            closes — so it is shallower than the hole felt at the time, and a
+            reader comparing it against a chart's wick would think the engine
+            was understating. Saying so is cheaper than being disbelieved.
+          */}
+          <div className="space-y-1 text-2xs leading-relaxed text-term-faint">
+            <p>
+              Price returns, excludes dividends — close to close from the
+              session that completed the condition, on split-adjusted prices.
+            </p>
+            <p>
+              Drawdown is measured on closes, not intraday lows: the deepest
+              close inside the window against the entry close. An intraday
+              figure would be deeper.
+            </p>
+            <p>
+              Horizons with a smaller n have matches whose window has not
+              finished yet; those are left out of that row rather than counted
+              early.
+            </p>
+          </div>
         </>
       )}
     </section>
