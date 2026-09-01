@@ -130,6 +130,26 @@ export default async function ScannerPage() {
                 </>
               )}
             </p>
+            {/*
+              A link, and deliberately not a list. /movers answers a different
+              and much weaker question, and embedding its rows under this
+              heading on the mornings this page is empty is exactly how a
+              movers list becomes mistaken for scanner output. The reader has
+              to leave this page to see them.
+            */}
+            <p className="mx-auto mt-3 max-w-2xl leading-relaxed text-term-dim">
+              This is a real answer, not a gap. If what you want is simply what
+              is moving today, that is a separate page with a much weaker
+              filter:{' '}
+              <a
+                href="/movers"
+                className="underline decoration-dotted hover:text-term-text"
+              >
+                Moving Today
+              </a>
+              . Nothing on it has passed these rules.
+            </p>
+
             <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-faint">
               {gamma?.date
                 ? `Candidate gamma was last refreshed for ${gamma.date} (${Object.keys(gamma.symbols).length} chains).`

@@ -30,7 +30,7 @@ interface NavItem {
 }
 
 /*
- * Nine entries, in the order a session actually runs: the market backdrop,
+ * Ten entries, in the order a session actually runs: the market backdrop,
  * then what is strong, then one name in depth, then the things you keep an eye
  * on, then the written-up day, then the manual.
  *
@@ -50,6 +50,12 @@ const NAV: NavItem[] = [
    */
   { href: '/strength', label: 'Stock Strength', icon: '⇅' },
   { href: '/scanner', label: 'Scanner', icon: '⌕' },
+  /*
+   * Directly under the scanner and never above it. The two answer different
+   * questions and the scanner's is the stronger one; a reader scanning this
+   * list should meet the rules before they meet the movers.
+   */
+  { href: '/movers', label: 'Moving Today', icon: '↗' },
   // `/` and `/ticker` both land a symbol here, so they light the same item.
   // Kept as "Decision" on purpose — it is the one page whose name is the
   // question the reader arrived with. Its subtitle does the explaining.

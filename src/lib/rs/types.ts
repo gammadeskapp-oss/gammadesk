@@ -135,6 +135,35 @@ export interface DigestEntry {
    * simply has no RSI and the column shows a dash until that shard next runs.
    */
   rsi14?: number | null;
+
+  /**
+   * The two moving averages the intraday movers list reads, on the same
+   * series the returns are measured on.
+   *
+   * EMA rather than SMA, and 20/200 rather than any other pair, because the
+   * scanner's trend gate and its extended flag already use exactly these —
+   * `readExtension` in `scanner/evaluate.ts` and `trendEmaPeriod` in
+   * `config.ts`. Two pages calling the same stock extended and not-extended
+   * on the same afternoon would be worse than the column being absent.
+   *
+   * Optional and deliberately not guarded by a schema bump, for the reason
+   * spelled out on `rsi14` above: bumping `RS_SCHEMA` rejects the stored bar
+   * documents too and would throw away years of price history to add a
+   * column. A shard that predates these simply has no averages, and the
+   * movers list reports the reading as unknown until that shard next runs.
+   */
+  ema20?: number | null;
+  ema200?: number | null;
+
+  /**
+   * Mean daily SHARE volume over the last 20 sessions.
+   *
+   * Shares, not dollars — `avgDollarVolume` above is the dollar figure and it
+   * answers a different question. Relative volume is today's share count
+   * against the name's own usual share count, and dividing a dollar total by
+   * a share total would produce a number that moved with price.
+   */
+  avgVolume20?: number | null;
 }
 
 export interface DigestShard {

@@ -26,6 +26,8 @@ export const PAGE_DESCRIPTIONS: Record<string, string> = {
   '/montecarlo':
     'Thousands of simulated price paths, to show the spread of outcomes.',
   '/flow': 'Unusual options activity, ranked by size relative to the usual.',
+  '/movers':
+    "What's moving right now, on volume — with the context to check each name against. Not a scanner result.",
   '/scanner':
     "This morning's S&P 500 names that pass all five rules, each with its option contract graded.",
   '/scanner/history':
