@@ -6,7 +6,7 @@ import { summarise } from '@/lib/log/types';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 export const metadata: Metadata = {
-  title: 'Accuracy Log',
+  title: 'Track Record',
   description:
     'Daily record of GammaDesk’s gamma flip level and magnet strikes for SPY, settled against the session that followed.',
 };
@@ -27,7 +27,7 @@ export default async function LogPage() {
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-              Accuracy Log
+              Track Record
             </h1>
             <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
               {PAGE_DESCRIPTIONS['/log']}

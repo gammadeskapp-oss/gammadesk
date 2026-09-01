@@ -45,12 +45,13 @@ export async function GET(request: Request) {
 
   try {
     const result = await runScanner();
-    const { passed, nearMisses } = partition(result.rows, 'all');
+    const { passed } = partition(result.rows);
 
     const summary = result.gateReason
-      ? `Scan empty: SPY gamma negative. ${result.candidates} candidates evaluated, ${nearMisses.length} blocked only by that.`
-      : `Scanned ${result.candidates} of ${result.universe} — ${passed.length} passed, ` +
-        `${nearMisses.length} missed by one. Gamma as of ${result.gammaRefreshedAt ? result.gammaDate : 'no same-day refresh'}.`;
+      ? `Scan empty: SPY is in a volatile regime. ${result.candidates} candidates evaluated.`
+      : `Scanned ${result.candidates} of ${result.universe} — ${passed.length} passed all five gates, ` +
+        `${result.earningsExcluded.length} removed for earnings, ${result.qualityChecked} contracts graded. ` +
+        `Gamma as of ${result.gammaRefreshedAt ? result.gammaDate : 'no same-day refresh'}.`;
 
     if (wantsText) {
       return new NextResponse(`${summary}\n`, {
@@ -65,11 +66,14 @@ export async function GET(request: Request) {
       scannedAt: result.scannedAt,
       universe: result.universe,
       candidates: result.candidates,
-      passed: passed.map((p) => p.row.symbol),
-      nearMisses: nearMisses.map((p) => ({
-        symbol: p.row.symbol,
-        missing: p.outcome.failingLabel,
+      passed: passed.map((entry) => ({
+        symbol: entry.row.symbol,
+        rs: entry.row.rsScore,
+        option: entry.row.optionQuality?.badge ?? 'not checked',
       })),
+      earningsExcluded: result.earningsExcluded,
+      earningsSource: result.earningsSource,
+      qualityChecked: result.qualityChecked,
       spyRegime: result.spyRegime,
       gateReason: result.gateReason,
       gammaDate: result.gammaDate,

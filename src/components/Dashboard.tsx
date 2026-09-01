@@ -8,9 +8,10 @@ import { ExplainPanel } from './ExplainPanel';
 import { PageBar } from './PageBar';
 import { PositioningSearch } from './PositioningSearch';
 import { PositioningTable } from './PositioningTable';
+import { ResearchCards } from './ResearchCards';
 import { ReadMode, useReadMode } from './ReadMode';
 import { nearestStrongWall } from '@/lib/simple/walls';
-import { SimpleRead } from './SimpleRead';
+import { VerdictLead, WhatToWatch } from './SimpleRead';
 import { MethodologyDrawer } from './MethodologyDrawer';
 import { StaleDataBanner, mutedIf } from './StaleDataBanner';
 import { SummaryStrip } from './SummaryStrip';
@@ -46,6 +47,14 @@ interface DashboardProps {
    * already are.
    */
   contextRow: React.ReactNode;
+  /**
+   * The one research line that sits under the verdict — how carefully to read
+   * today, never what to hold.
+   *
+   * Built on the server, in `lib/simple/research.ts`, because it needs the
+   * breadth reading and this component is given only the option book.
+   */
+  researchLine: string;
 }
 
 /** `24m 10s` style countdown to the next server-side data refresh. */
@@ -83,6 +92,7 @@ export function Dashboard({
   staleness,
   methodology,
   contextRow,
+  researchLine,
 }: DashboardProps) {
   const [metric, setMetric] = useState<MetricKey>('gex');
   const [explain, setExplain] = useState(false);
@@ -94,12 +104,57 @@ export function Dashboard({
 
   const reload = () => startTransition(() => router.refresh());
 
+  /*
+   * The one input both halves of the plain-English read are built from. Shared
+   * rather than written out twice, so the verdict at the top of the page and
+   * the "what to watch" note further down can never describe different books.
+   */
+  const simpleInput = {
+    symbol: data.symbol,
+    regime: data.summary.regime,
+    flipLevel: data.summary.flipLevel,
+    aboveFlip:
+      data.summary.flipLevel === null
+        ? null
+        : data.summary.spot > data.summary.flipLevel,
+    // Same helper /decision uses, so both pages name the same level — the
+    // summary's magnet is the *biggest* wall, which can sit far above the one
+    // price actually runs into first.
+    magnetAbove: nearestStrongWall(strikeGex, data.summary.spot, 'above')?.strike ?? null,
+    magnetBelow: nearestStrongWall(strikeGex, data.summary.spot, 'below')?.strike ?? null,
+  } as const;
+
   return (
     <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
       {/* Above everything, full width, before the reader meets a single number. */}
       <StaleDataBanner staleness={staleness} />
 
+      {/*
+        ## Why the verdict is first, and the page title is not
+
+        This block used to sit fifth, under a title, a jargon subtitle, a
+        search box and two backdrop cards. On a 390px phone that put the one
+        sentence the whole app exists to say below the fold — a first-time
+        reader scrolled past a wall of chrome to reach the answer, or more
+        often did not reach it at all.
+
+        So the order is now: the verdict, the levels it refers to, and one line
+        on how carefully to read today. Everything that qualifies that read —
+        the title, the timestamp, the ticker box, breadth, the quotes and the
+        event row — follows it, in the order someone checks a claim they have
+        already been given rather than the order a page is conventionally built.
+
+        It is rendered outside `ReadMode` on purpose. The advanced view is the
+        same book in more detail, not a different day, and a reader who has
+        switched to the tables should still be told what the day is.
+      */}
+      <div className={mutedIf(staleness.stale)}>
+        <VerdictLead input={simpleInput} research={researchLine} headingLevel={1} />
+      </div>
+
       <PageBar
+        // Demoted to an `h2`: the verdict above is this page's `h1` now.
+        titleLevel={2}
         title={mode === 'simple' ? `${data.symbol} Today` : `${data.symbol} Dealer Positioning`}
         description={PAGE_DESCRIPTIONS['/']}
         asOfLabel={data.meta.asOfLabel}
@@ -108,16 +163,16 @@ export function Dashboard({
       <PositioningSearch initial={data.symbol} />
 
       {/*
-        Above the ticker's own read, because it is the frame that read should
-        be taken in: a clean level on a day when nothing is participating is a
-        different thing from the same level on a broad one.
+        The frame the verdict should be taken in: a clean level on a day when
+        nothing is participating is a different thing from the same level on a
+        broad one. Below the verdict rather than above it — it qualifies a read
+        the reader has now already had.
       */}
       <div className="space-y-2">{contextRow}</div>
 
       {/*
-        Above the read, and outside the mode toggle, because it qualifies both
-        views equally — the simple wording is if anything the easier one to
-        take at face value.
+        Outside the mode toggle, because it qualifies both views equally — the
+        simple wording is if anything the easier one to take at face value.
       */}
       <DealerConventionNote symbol={data.symbol} />
 
@@ -126,27 +181,7 @@ export function Dashboard({
         the toggle remembers which side the reader chose.
       */}
       <div className={mutedIf(staleness.stale)}>
-      <ReadMode
-        simple={
-          <SimpleRead
-            input={{
-              symbol: data.symbol,
-              regime: data.summary.regime,
-              flipLevel: data.summary.flipLevel,
-              aboveFlip:
-                data.summary.flipLevel === null
-                  ? null
-                  : data.summary.spot > data.summary.flipLevel,
-              // Same helper /decision uses, so both pages name the same
-              // level — the summary's magnet is the *biggest* wall, which
-              // can sit far above the one price actually runs into first.
-              magnetAbove: nearestStrongWall(strikeGex, data.summary.spot, 'above')?.strike ?? null,
-              magnetBelow: nearestStrongWall(strikeGex, data.summary.spot, 'below')?.strike ?? null,
-            }}
-          />
-        }
-        advanced={<Advanced />}
-      />
+        <ReadMode simple={<WhatToWatch input={simpleInput} />} advanced={<Advanced />} />
       </div>
 
       {/*
@@ -155,6 +190,14 @@ export function Dashboard({
         stay fully legible.
       */}
       <MethodologyDrawer methodology={methodology} anchor="levels" />
+
+      {/*
+        Last on the page, which is the point: the reader has had the verdict
+        and the backdrop, and this is where they go next. On a phone it also
+        stands in for a nav bar there is no room for — the same grid is in the
+        mobile menu.
+      */}
+      <ResearchCards />
     </main>
   );
 

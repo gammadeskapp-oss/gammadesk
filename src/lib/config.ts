@@ -6,7 +6,6 @@
 
 import 'server-only';
 
-import type { VwapAnchor } from './scanner/types';
 
 function num(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -222,14 +221,19 @@ export const config = {
   get scanner() {
     return {
       /**
-       * Composite RS score a name must clear to be a candidate.
+       * Composite RS score a name must clear.
        *
-       * This is the gate for the whole pipeline — nothing downstream ever sees
-       * a name below it, including the near-miss list. Raising it shrinks the
-       * gamma refresh proportionally, which is the constraint that matters:
-       * see `gammaRefreshBudget` below.
+       * This is both the first gate and the bound on the whole pipeline —
+       * nothing downstream ever sees a name below it. At 90 the candidate list
+       * is around 27 names, which leaves real headroom in the Cboe window for
+       * the option-quality checks the scan now also spends chains on; see
+       * `gammaRefreshBudget` below and `OPTION_QUALITY_TOP_N`.
+       *
+       * It was 82. Ninety is the number the rule is actually stated as — "in
+       * the top tenth of the market" — and a floor that does not match the
+       * sentence describing it is a floor nobody can check.
        */
-      rsMin: num(process.env.GAMMADESK_SCAN_RS_MIN, 82),
+      rsMin: num(process.env.GAMMADESK_SCAN_RS_MIN, 90),
 
       /**
        * When the scan runs, as New York wall-clock `HH:MM`.
@@ -239,9 +243,10 @@ export const config = {
        * scan means editing both, and the page states the time it was told
        * about rather than the time it ran, so a mismatch is visible.
        *
-       * 9:35 is deliberately early and deliberately noisy. Five minutes of
-       * session VWAP is five minutes of the day's worst tape; a name can sit
-       * above VWAP at 9:35 and below it at 9:40. The page says so.
+       * 9:35 is deliberately early. Every rule is measured on daily bars and
+       * on a chain quoted before the open, so the list itself does not swing
+       * on the first few minutes — but the prices shown beside it are that
+       * early, and the page says so.
        */
       scanTimeEt: (process.env.GAMMADESK_SCAN_TIME_ET ?? '09:35').trim(),
       /** When the candidate gamma refresh runs, same caveat. */
@@ -271,20 +276,6 @@ export const config = {
         60,
         Math.max(5, num(process.env.GAMMADESK_SCAN_GAMMA_BUDGET, 55)),
       ),
-
-      /**
-       * Which VWAP anchor each timeframe uses.
-       *
-       * A session anchor on a daily bar series is meaningless — every bar is
-       * its own session, so VWAP would equal the typical price and the filter
-       * would be a coin toss. The week anchor gives 4H and daily something to
-       * actually measure against. Stated in the UI, not just here.
-       */
-      vwapAnchor: {
-        '1h': (process.env.GAMMADESK_SCAN_VWAP_1H ?? 'session') as VwapAnchor,
-        '4h': (process.env.GAMMADESK_SCAN_VWAP_4H ?? 'week') as VwapAnchor,
-        '1D': (process.env.GAMMADESK_SCAN_VWAP_1D ?? 'week') as VwapAnchor,
-      },
 
       /** Trend EMA the price must sit above for filter 7. */
       trendEmaPeriod: Math.max(

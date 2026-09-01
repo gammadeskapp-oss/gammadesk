@@ -2,14 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { nadarayaWatson, type NwSettings } from '@/lib/scanner/nadarayaWatson';
-import { anchoredVwap, type SeriesBar } from '@/lib/scanner/series';
+import { type SeriesBar } from '@/lib/scanner/series';
 import {
   hasNw,
   SCAN_TIMEFRAMES,
   TIMEFRAME_LABEL,
   type Magnet,
   type ScanTimeframe,
-  type VwapAnchor,
 } from '@/lib/scanner/types';
 import { ema } from '@/lib/ticker/indicators';
 
@@ -49,7 +48,6 @@ const COLOR = {
   ema13: '#ff5c5c', // red
   ema50: '#f5d90a', // yellow
   ema200: '#3ddc84', // green
-  vwap: '#4c8dff', // thin blue
   nw: '#3ddc84', // green band
   magnet: '#f0a500',
   grid: '#161d2c',
@@ -70,7 +68,6 @@ export function ScannerChart({
   symbol,
   magnets,
   nwSettings,
-  vwapAnchor,
   trendEmaPeriod,
   initialTimeframe = '1D',
 }: {
@@ -78,8 +75,6 @@ export function ScannerChart({
   /** Largest positive-GEX strikes from the 08:30 refresh. */
   magnets: Magnet[];
   nwSettings: NwSettings;
-  /** Which anchor each timeframe's VWAP resets on, from config. */
-  vwapAnchor: Record<string, VwapAnchor>;
   trendEmaPeriod: number;
   initialTimeframe?: ScanTimeframe;
 }) {
@@ -89,7 +84,6 @@ export function ScannerChart({
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const loading = !error && (data?.timeframe !== timeframe || data?.symbol !== symbol);
-  const anchor = vwapAnchor[timeframe] ?? 'session';
 
   useEffect(() => {
     const controller = new AbortController();
@@ -212,7 +206,13 @@ export function ScannerChart({
         line(ema(closes, 13), COLOR.ema13, LineStyle.Solid);
         line(ema(closes, 50), COLOR.ema50, LineStyle.Solid);
         line(ema(closes, trendEmaPeriod), COLOR.ema200, LineStyle.Solid);
-        line(anchoredVwap(bars, anchor), COLOR.vwap, LineStyle.Dashed);
+        /*
+         * No VWAP. It left the scan with the filter it belonged to: anchored
+         * on a session five minutes old it was a coin toss, and drawing a line
+         * the scan no longer reads would imply it still counted for something
+         * here. It stays on /decision, where the reader is watching one name
+         * on a live chart.
+         */
 
         /*
          * The Nadaraya-Watson envelope, drawn from the same function the scan
@@ -260,7 +260,7 @@ export function ScannerChart({
       disposed = true;
       cleanup?.();
     };
-  }, [data, magnets, nwSettings, anchor, trendEmaPeriod, timeframe]);
+  }, [data, magnets, nwSettings, trendEmaPeriod, timeframe]);
 
   return (
     <div className="space-y-2">
@@ -284,8 +284,6 @@ export function ScannerChart({
         </div>
         <p className="text-2xs text-term-faint">
           {data?.asOfLabel ? `Bars to ${data.asOfLabel}` : ''}
-          {' · '}
-          {anchor}-anchored VWAP
           {!hasNw(timeframe) && ' · no NW band at this interval'}
         </p>
       </div>
@@ -314,7 +312,6 @@ export function ScannerChart({
           ['13 EMA', COLOR.ema13],
           ['50 EMA', COLOR.ema50],
           [`${trendEmaPeriod} EMA`, COLOR.ema200],
-          ['VWAP', COLOR.vwap],
           ...(hasNw(timeframe)
             ? ([['NW band', COLOR.nw]] as Array<[string, string]>)
             : []),

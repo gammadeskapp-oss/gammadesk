@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { ScannerBoard } from '@/components/ScannerBoard';
+import { ScannerRunRate } from '@/components/ScannerRunRate';
 import { InfoTip } from '@/components/InfoTip';
 import { getBreadth } from '@/lib/breadth';
 import { breadthSentence } from '@/lib/breadth/wording';
@@ -11,9 +12,9 @@ import { formatEtClock } from '@/lib/scanner/schedule';
 import { formatAsOf } from '@/lib/time';
 
 export const metadata: Metadata = {
-  title: 'Morning Scanner',
+  title: 'Scanner',
   description:
-    'A fixed set of seven filters applied to the S&P 500 each morning, checked across three timeframes and ranked by Nadaraya-Watson extension.',
+    "Five hard rules applied to the S&P 500 each morning, with the option contract checked on every name that passes.",
 };
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +30,7 @@ export default async function ScannerPage() {
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <PageBar
-          title="Morning Scanner"
+          title="Scanner"
           description={PAGE_DESCRIPTIONS['/scanner']}
           meta={
             scan
@@ -46,8 +47,8 @@ export default async function ScannerPage() {
           It is here because it explains the shape of the list — a morning
           where almost nothing is participating produces few candidates, and
           knowing that is different from concluding the scan is broken. It is
-          deliberately NOT a filter: nothing downstream reads it, no row is
-          included or excluded by it, and the seven filters are still seven.
+          deliberately NOT a rule: nothing downstream reads it, no row is
+          included or excluded by it, and the five rules are still five.
         */}
         {breadth?.computed && (
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-2xs text-term-faint">
@@ -58,7 +59,7 @@ export default async function ScannerPage() {
             </span>
             <span>{breadthSentence(breadth.computed)}</span>
             <span className="text-term-dim">
-              Context only — it is not one of the filters.
+              Context only — it is not one of the rules.
             </span>
           </p>
         )}
@@ -70,11 +71,12 @@ export default async function ScannerPage() {
         <div className="panel border-l-2 border-l-flip/60 px-3.5 py-3 text-xs leading-relaxed">
           <p className="text-term-text">
             <span className="font-bold text-flip">
-              At {schedule.scanEt} ET the session VWAP is five minutes old.{' '}
+              This runs at {schedule.scanEt} ET, minutes into the session.{' '}
             </span>
-            Those five minutes are the noisiest trading of the day. A name can
-            sit above VWAP at {schedule.scanEt} and below it five minutes later.
-            The list is real, and this early it is jumpy.
+            Everything here is measured on daily bars and on a chain quoted
+            before the open, so the list does not swing on the first few
+            minutes of trading — but the prices beside it are that early, and
+            the day has barely started.
           </p>
           <p className="mt-2 text-term-dim">
             This page reports which names passed a fixed rule set. It does not
@@ -82,6 +84,13 @@ export default async function ScannerPage() {
             target or stop anywhere on it.
           </p>
         </div>
+
+        {/*
+          Above the list, because a shortlist of three cannot be read without
+          it: three out of a typical twenty is a thin day, three out of a
+          typical four is an ordinary one, and the list itself cannot say which.
+        */}
+        <ScannerRunRate counts={view.counts} average={view.averagePassed} />
 
         {scan ? (
           <ScannerBoard
@@ -91,7 +100,6 @@ export default async function ScannerPage() {
               lookback: view.nw.lookback,
               mult: view.nw.mult,
             }}
-            vwapAnchor={view.vwapAnchor}
             trendEmaPeriod={view.trendEmaPeriod}
             gammaTimeEt={schedule.gammaEt}
             scannedAtEt={formatEtClock(new Date(scan.scannedAt))}
@@ -140,23 +148,24 @@ export default async function ScannerPage() {
           <h2 className="label-xs">How this is built</h2>
 
           <p className="mt-1.5">
-            <span className="text-term-dim">Seven gates, all of which must pass. </span>
-            Relative strength above {view.rsMin}; the move volume-confirmed;
-            equity liquidity HIGH and options liquidity MEDIUM or better; the
-            ticker&rsquo;s own dealer gamma regime positive; SPY&rsquo;s gamma
-            regime positive; and price above VWAP and above the{' '}
-            {view.trendEmaPeriod} EMA. Every gate&rsquo;s state is shown for
-            every ticker — passed, failed, or unknown — rather than only the
-            final verdict.
+            <span className="text-term-dim">Five rules, all of which must pass. </span>
+            Relative strength above {view.rsMin}; price above the{' '}
+            {view.trendEmaPeriod}-day average; the move volume-confirmed;
+            equity liquidity HIGH and options liquidity MEDIUM or better; and
+            SPY in a calm regime. Every rule&rsquo;s state is shown for every
+            ticker — passed, failed, or unknown — rather than only the final
+            verdict.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
-              Nadaraya-Watson is the eighth reading and is not a gate.{' '}
+              Then two things that are not rules.{' '}
             </span>
-            Nothing fails the scan on it. It orders the names that got through
-            instead, by how far price has extended above its own band — see
-            below for why it cannot sensibly be a filter.
+            A name reporting earnings within 10 calendar days is removed
+            outright. A name trading far above its 20-day average is flagged as
+            extended and kept — being extended is what a strong name does, and
+            rejecting on it would throw away the strongest names in the list
+            for being strong.
           </p>
 
           <p className="mt-2">
@@ -165,9 +174,9 @@ export default async function ScannerPage() {
             </span>
             Only names above RS {view.rsMin} have their option chains refreshed
             at {schedule.gammaEt} ET, and only they have bars pulled at{' '}
-            {schedule.scanEt}. That also bounds the near-miss list below: it
-            covers candidates that cleared RS {view.rsMin} and then missed one
-            other filter, not names that narrowly missed the RS floor itself.
+            {schedule.scanEt}. That also bounds the &ldquo;every candidate
+            scanned&rdquo; list below: it covers names that cleared RS{' '}
+            {view.rsMin}, not names that narrowly missed the floor itself.
           </p>
 
           <p className="mt-2">
@@ -182,28 +191,62 @@ export default async function ScannerPage() {
             names is about fifty chains, which fits one window with little to
             spare; {schedule.gammaEt}{' '}
             is also after open interest publishes, so it is the freshest the
-            data gets all day. If the {schedule.gammaEt} job did not run, filters
-            4 and 5 read unknown and nothing passes.
+            data gets all day. If the {schedule.gammaEt} job did not run, the
+            liquidity and market-regime gates read unknown and nothing passes.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
-              SPY&rsquo;s gamma regime is a single market-wide gate.{' '}
+              The market regime is a single market-wide gate, and it is hard.{' '}
             </span>
-            When it is negative the scan returns nothing, with that stated,
-            rather than a list of individually strong charts in a regime where
-            dealers amplify moves.
+            When SPY&rsquo;s regime is not calm the scan returns nothing, with
+            that stated, rather than a list of individually strong charts in a
+            regime where dealers amplify moves. There is deliberately no
+            setting that turns this into a score penalty: such a control exists
+            only to produce results on the days that should not have any.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
-              VWAP is anchored per timeframe: {view.vwapAnchor['1h']} on 1H,{' '}
-              {view.vwapAnchor['4h']} on 4H, {view.vwapAnchor['1D']} on daily.{' '}
+              Three rules were removed, and one was narrowed.{' '}
             </span>
-            A session anchor on a daily series is meaningless — every daily bar
-            is its own session, so the VWAP would be that bar&rsquo;s own typical
-            price and the comparison would be a coin toss. The anchors are
-            configurable.
+            VWAP left the scan entirely — anchored on a session minutes old it
+            was a coin toss, and on a daily series it was very nearly that
+            bar&rsquo;s own typical price. Nadaraya-Watson is a line on the
+            chart now and gates nothing. A name&rsquo;s own gamma regime is
+            context text on its card rather than a gate, because the
+            single-stock dealer-sign assumption is the weakest thing here and
+            was quietly deleting names on the strength of it. And the trend
+            gate is the daily {view.trendEmaPeriod}-day average only: &ldquo;above
+            the 200-day average&rdquo; is a claim a reader can go and check.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              Earnings inside 10 calendar days remove a name outright.{' '}
+            </span>
+            Holding an option through a report is a different trade from the
+            one every rule above tests for. Dates come from Tradier&rsquo;s
+            fundamentals calendar — the event calendar this site keeps is macro
+            only and carries no company dates. Where no date can be
+            established the name is kept and its watch line says the date is
+            unknown; an unknown date is never read as &ldquo;no earnings
+            soon&rdquo;.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              The contract is checked, not just the stock.{' '}
+            </span>
+            A name can clear every rule above and still have a chain nobody
+            should touch. Each passing name is graded on the best call between
+            30 and 60 days out at a delta of 0.55 to 0.70: Excellent, Tradable,
+            Caution or Avoid, with the days to expiry, delta, open interest and
+            bid/ask spread shown beside it. Where the spread or the open
+            interest is missing the badge reads Unknown — never green over
+            incomplete data. The top ten ranked names are graded at{' '}
+            {schedule.scanEt}; the rest are graded when you open them, because
+            the chain provider answers a limited number of requests a day.
           </p>
 
           <p className="mt-2">
@@ -222,19 +265,23 @@ export default async function ScannerPage() {
 
           <p className="mt-2">
             <span className="text-term-dim">
-              Why it ranks instead of filtering.{' '}
+              Why it neither filters nor ranks.{' '}
             </span>
             The endpoint estimator fits each bar from the bars up to it, so it
             hugs recent price closely. The band width, though, is the average
             absolute deviation across the whole {view.nw.lookback}-bar window.
             The quantity being tested is therefore structurally much smaller
             than the quantity setting the threshold, and price clears the band
-            only rarely — requiring it on several timeframes at once returned
-            nothing on almost every day. So the reading is kept and the cut is
-            dropped. The column shows{' '}
-            <span className="text-term-dim">z = (close &minus; centre) &divide; half-band</span>
-            : 1 is the upper edge, 0 the centre line, &minus;1 the lower edge.
-            Qualifying names are sorted by their daily z, highest first.
+            only rarely — requiring it returned nothing on almost every day. It
+            briefly decided the order of the list instead, which gave a reading
+            about one name against its own regression more authority over the
+            reader&rsquo;s attention than it earns. It is a line on the chart
+            now. The list is ordered by relative strength, which is the number
+            the list is built around and one you can check on{' '}
+            <a href="/strength" className="text-term-dim underline decoration-dotted">
+              Stock Strength
+            </a>
+            .
           </p>
 
           <p className="mt-2">
@@ -247,29 +294,32 @@ export default async function ScannerPage() {
             negligible past a few dozen bars — but the edges would be measured
             over the wrong window, and the edges are the entire reading. 4H
             shows a dash rather than a number computed from half the sample. It
-            still carries VWAP and the {view.trendEmaPeriod} EMA, which need far
-            fewer bars and are unaffected. A source with two years of 4-hour
-            history would bring it back.
+            still carries the {view.trendEmaPeriod} EMA, which needs far fewer
+            bars and is unaffected. A source with two years of 4-hour history
+            would bring it back.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">Unknown is never folded into failed. </span>
             A gate that could not be computed — a chain that did not answer, a
-            4-hour series without {view.trendEmaPeriod} bars — excludes the
-            ticker exactly as a failure does, but is shown grey and the reason
-            is given. Missing data masquerading as a bearish reading is the
+            daily series without {view.trendEmaPeriod} bars, an option whose
+            spread was not quoted — excludes the ticker exactly as a failure
+            does, but is shown grey and the reason is given. Missing data masquerading as a bearish reading is the
             single most misleading thing this page could do.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
-              The strictness toggle never re-scans anything.{' '}
+              There is no strictness toggle, and no near-miss list.{' '}
             </span>
-            Every filter state for every candidate is computed once at{' '}
-            {schedule.scanEt} ET and stored. Switching between all-three, any-2
-            and daily-only only changes how those stored states are counted,
-            which is why the pass list and the near-miss list can never
-            disagree.
+            Both are gone. An adjustable agreement setting could report the
+            same name as passing or failing depending on a control the reader
+            had probably not noticed, and a near-miss list is a list of names
+            that did not pass presented next to names that did. Five hard
+            rules, one list. Every rule state for every candidate is still
+            computed once at {schedule.scanEt} ET and stored, and every
+            candidate is shown with its five states under &ldquo;every
+            candidate scanned&rdquo;.
           </p>
 
           {gamma && scan && gamma.date !== scan.date && (

@@ -35,7 +35,7 @@ const PAGES: { href: string; name: string; blurb: string }[] = [
   },
   {
     href: '/strength',
-    name: 'Strength',
+    name: 'Stock Strength',
     blurb: 'Every stock we track scored out of 100 and ranked, strongest to weakest.',
   },
   {
@@ -45,7 +45,7 @@ const PAGES: { href: string; name: string; blurb: string }[] = [
   },
   {
     href: '/flow',
-    name: 'Flow',
+    name: 'Options Flow',
     blurb:
       'Strikes that traded far more than usual today. It tells you something happened, not what to do.',
   },
@@ -57,7 +57,7 @@ const PAGES: { href: string; name: string; blurb: string }[] = [
   },
   {
     href: '/log',
-    name: 'Accuracy Log',
+    name: 'Track Record',
     blurb:
       'The site’s own report card. What it said each morning, and what the market actually did after.',
   },

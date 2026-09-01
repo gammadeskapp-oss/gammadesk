@@ -23,8 +23,16 @@ export function PositioningSearch({ initial = '' }: { initial?: string }) {
     <SymbolSearch
       inputId="positioning-ticker"
       label="Ticker symbol"
-      placeholder="ANY OPTIONABLE TICKER — SPY, APPLE, NVIDIA…"
-      submitLabel="Load chain"
+      /*
+        Sentence case, and not the shouted uppercase the other three boxes
+        use, because this one sits on the front door and reviewers did not
+        recognise it as a ticker search at all. "LOAD CHAIN" named an internal
+        operation — the option chain — that a first-time reader has no word
+        for; "Check ticker" names what they came to do.
+      */
+      placeholder="Enter any ticker — SPY, NVDA, TSLA"
+      submitLabel="Check ticker"
+      plainCase
       pendingLabel="Loading…"
       pending={pending}
       initial={initial}

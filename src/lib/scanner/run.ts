@@ -8,23 +8,34 @@ import { DEFAULT_MIN_DOLLAR_VOLUME, DEFAULT_WEIGHTS, type RsRow } from '../rs/ty
 import { runScan } from '../scanUniverse';
 import { ema } from '../ticker/indicators';
 import { marketToday } from '../time';
+import { archiveScan } from './archive';
+import { readExtension } from './evaluate';
+import { lookupEarnings } from './earnings';
+import { excludedForEarnings } from './earningsRules';
 import { readTodaysGamma } from './gamma';
 import { nwState } from './nadarayaWatson';
-import { anchoredVwap, lastDefined, type SeriesBar } from './series';
+import { gradeSymbol } from './optionChain';
+import { lastDefined, type SeriesBar } from './series';
 import {
+  EARNINGS_EXCLUSION_DAYS,
+  FILTER_KEYS,
   hasNw,
+  OPTION_QUALITY_TOP_N,
   SCAN_TIMEFRAMES,
+  type FilterKey,
   type FilterVerdict,
   type GammaEntry,
   type LiquidityTier,
   type ScanResult,
   type ScanRow,
   type ScanTimeframe,
-  type SingleFilterKey,
   type StoredGamma,
   type StoredScans,
   type TimeframeReading,
 } from './types';
+
+/** The short average the extended flag is measured against. */
+const EXTENSION_EMA_PERIOD = 20;
 
 /**
  * The 9:35 ET scan.
@@ -32,12 +43,12 @@ import {
  * Filter 1 runs first and everything downstream sees only its survivors —
  * that is not an optimisation, it is what makes the job possible at all. The
  * gamma refresh an hour earlier only covered names above the RS floor, and the
- * bar phase here costs three upstream series per candidate, so widening filter
- * 1 widens both.
+ * bar phase here costs three upstream series per candidate, so lowering the
+ * floor widens both.
  *
- * Every filter is resolved for every candidate and stored, including for
- * names that clearly fail. The near-miss section and the strictness toggle are
- * both derived from that stored detail at render time, so neither costs a
+ * Every gate is resolved for every candidate and stored, including for names
+ * that clearly fail — "every candidate scanned" is rendered from that stored
+ * detail, which is what lets a zero-result morning show its working without a
  * re-scan.
  */
 
@@ -88,15 +99,13 @@ function optionsTierOf(entry: GammaEntry): LiquidityTier {
 
 // --- filters 6, 7, 8 ---------------------------------------------------------
 
-/** A timeframe we could not read at all. Unknown throughout, with the reason. */
+/** A timeframe we could not read at all, with the reason. */
 function unreadable(timeframe: ScanTimeframe, reason: string): TimeframeReading {
-  const unknown: FilterVerdict = { state: 'unknown', detail: 'no bars' };
   return {
     timeframe,
     close: null,
-    vwapAnchor: config.scanner.vwapAnchor[timeframe],
-    vwap: null,
     ema: null,
+    ema20: null,
     nw: {
       // `unavailable` where there is no band by design, `unknown` where there
       // should have been one and the bars did not arrive. Different facts.
@@ -108,7 +117,6 @@ function unreadable(timeframe: ScanTimeframe, reason: string): TimeframeReading 
       barsUsed: 0,
       barsWanted: config.scanner.nw.lookback,
     },
-    verdicts: { vwap: unknown, ema: unknown },
     bars: null,
     error: reason,
   };
@@ -133,12 +141,11 @@ function bandZ(close: number | null, point: { mid: number; upper: number } | nul
 
 function readTimeframe(timeframe: ScanTimeframe, bars: SeriesBar[]): TimeframeReading {
   const tuning = config.scanner;
-  const anchor = tuning.vwapAnchor[timeframe];
   const closes = bars.map((b) => b.c);
   const close = closes[closes.length - 1] ?? null;
 
-  const vwap = lastDefined(anchoredVwap(bars, anchor));
   const trendEma = lastDefined(ema(closes, tuning.trendEmaPeriod));
+  const shortEma = lastDefined(ema(closes, EXTENSION_EMA_PERIOD));
 
   /*
    * The band is computed only where the history supports it — see
@@ -150,41 +157,16 @@ function readTimeframe(timeframe: ScanTimeframe, bars: SeriesBar[]): TimeframeRe
     : null;
 
   /*
-   * Every one of these returns `unknown` rather than `fail` when the input is
-   * missing. A 200 EMA needs 200 bars and a 4-hour series does not always have
-   * them; reporting that as "price is below its 200 EMA" would be a statement
-   * about the market made entirely out of a gap in the data.
-   */
-  const vwapVerdict: FilterVerdict =
-    close === null || vwap === null
-      ? { state: 'unknown', detail: 'no VWAP' }
-      : close > vwap
-        ? { state: 'pass', detail: `above ${anchor} VWAP` }
-        : { state: 'fail', detail: `below ${anchor} VWAP` };
-
-  const emaVerdict: FilterVerdict =
-    close === null || trendEma === null
-      ? {
-          state: 'unknown',
-          detail: `under ${tuning.trendEmaPeriod} bars`,
-        }
-      : close > trendEma
-        ? { state: 'pass', detail: `above ${tuning.trendEmaPeriod} EMA` }
-        : { state: 'fail', detail: `below ${tuning.trendEmaPeriod} EMA` };
-
-  /*
-   * No NW verdict. It is a score now, not a gate: nothing here can fail the
-   * scan on where price sits relative to the band, because the endpoint
-   * estimator hugs recent price while the band is set by the window-average
-   * deviation, and requiring price to clear it eliminated everything nearly
-   * every day. `nw.z` carries the reading and the board ranks on it.
+   * No verdicts here any more. The only trend gate is the daily 200-day
+   * average, resolved once in `singleVerdicts`; VWAP left the scan entirely,
+   * and the band is a line on the chart. What this returns is drawing
+   * material and the bar counts that qualify it.
    */
   return {
     timeframe,
     close,
-    vwapAnchor: anchor,
-    vwap,
     ema: trendEma,
+    ema20: shortEma,
     nw: {
       state: nw?.state ?? 'unavailable',
       z: bandZ(close, nw?.point ?? null),
@@ -194,7 +176,6 @@ function readTimeframe(timeframe: ScanTimeframe, bars: SeriesBar[]): TimeframeRe
       barsUsed: nw?.barsUsed ?? 0,
       barsWanted: nw?.barsWanted ?? tuning.nw.lookback,
     },
-    verdicts: { vwap: vwapVerdict, ema: emaVerdict },
     bars: bars.length,
   };
 }
@@ -235,25 +216,31 @@ function singleVerdicts(
   gamma: StoredGamma | null,
   entry: GammaEntry | undefined,
   spy: GammaEntry | undefined,
-): { verdicts: Record<SingleFilterKey, FilterVerdict>; tiers: {
+  daily: TimeframeReading | undefined,
+): { verdicts: Record<FilterKey, FilterVerdict>; tiers: {
   equity: LiquidityTier | null;
   options: LiquidityTier | null;
 } } {
   const tuning = config.tradeability;
 
-  // Filter 1. Every row here has already cleared it; the verdict exists so the
-  // page can show every gate state for every ticker rather than all of them
-  // minus the one that is true by construction.
-  const rs: FilterVerdict = { state: 'pass', detail: `RS ${row.score.toFixed(0)}` };
+  /*
+   * Gate 1. Every row here has already cleared the floor, so this is true by
+   * construction — but it is still tested rather than asserted, because a
+   * page that shows a reader a gate state has to have actually evaluated it.
+   */
+  const rs: FilterVerdict =
+    row.score >= config.scanner.rsMin
+      ? { state: 'pass', detail: `RS ${row.score.toFixed(0)}, outperforming most of the market` }
+      : { state: 'fail', detail: `RS ${row.score.toFixed(0)}, below the ${config.scanner.rsMin} floor` };
 
   // Filter 2. `null` means there was not enough history to tell, which is not
   // the same as unconfirmed and is not recorded as such.
   const volume: FilterVerdict =
     row.confirmation === null
-      ? { state: 'unknown', detail: 'not enough history' }
+      ? { state: 'unknown', detail: 'not enough history to compare against its normal volume' }
       : row.confirmation === 'confirmed'
-        ? { state: 'pass', detail: 'CONF' }
-        : { state: 'fail', detail: 'UNCONF' };
+        ? { state: 'pass', detail: 'trading above its own normal volume' }
+        : { state: 'fail', detail: 'not trading above its normal volume' };
 
   // Filter 3. Equity comes from the RS digest's own turnover figure, so it
   // costs nothing; the options tier comes from the chain the 8:30 job already
@@ -263,37 +250,60 @@ function singleVerdicts(
 
   let liquidity: FilterVerdict;
   if (optionsTier === null) {
-    liquidity = { state: 'unknown', detail: `equity ${equityTier}, options unread` };
+    liquidity = {
+      state: 'unknown',
+      detail: `shares ${equityTier.toLowerCase()}, but the options chain was not read`,
+    };
   } else {
-    const detail = `equity ${equityTier}, options ${optionsTier}`;
+    const detail = `shares ${equityTier.toLowerCase()}, options ${optionsTier.toLowerCase()}`;
     const ok = equityTier === 'HIGH' && TIER_RANK[optionsTier] >= TIER_RANK.MEDIUM;
     liquidity = { state: ok ? 'pass' : 'fail', detail };
   }
 
-  // Filters 4 and 5. A missing chain is unknown, never a fail — the scan must
-  // not report "dealers are short gamma here" when what happened is that Cboe
-  // did not answer.
-  const gammaVerdict: FilterVerdict = !entry
-    ? {
-        state: 'unknown',
-        detail: gamma ? 'chain not read at 08:30' : 'no same-day refresh',
-      }
-    : entry.regime === 'positive'
-      ? { state: 'pass', detail: 'positive' }
-      : { state: 'fail', detail: 'negative' };
+  /*
+   * Gate 4: the 200-day average, on the daily series and nowhere else.
+   *
+   * `unknown` rather than `fail` when the history is short. A 200-day average
+   * needs 200 daily bars, and a recent listing does not have them; reporting
+   * that as "below its 200-day average" would be a statement about the market
+   * assembled entirely out of a gap in the data. Unknown keeps it off the
+   * list exactly as a fail would, and says why.
+   */
+  const emaVerdict: FilterVerdict =
+    !daily || daily.close === null || daily.ema === null
+      ? {
+          state: 'unknown',
+          detail: `fewer than ${config.scanner.trendEmaPeriod} daily bars, so the long-term trend could not be read`,
+        }
+      : daily.close > daily.ema
+        ? { state: 'pass', detail: 'above the 200-day average, so the long-term trend is up' }
+        : { state: 'fail', detail: 'below the 200-day average' };
 
+  /*
+   * Gate 5, the one market-wide gate. A SPY chain that could not be read is
+   * unknown, never a fail — the scan must not report "the market is in a
+   * volatile regime" when what happened is that Cboe did not answer.
+   *
+   * The name's own gamma is deliberately not a gate. It is carried on the row
+   * as context text instead: the single-name dealer-sign assumption is the
+   * weakest thing this app rests on, and quietly deleting names on the
+   * strength of it was giving that assumption more authority than it has.
+   */
   const spyVerdict: FilterVerdict = !spy
-    ? { state: 'unknown', detail: 'SPY chain not read' }
+    ? { state: 'unknown', detail: 'the SPY chain could not be read, so the market regime is unknown' }
     : spy.regime === 'positive'
-      ? { state: 'pass', detail: 'SPY positive' }
-      : { state: 'fail', detail: 'SPY negative' };
+      ? { state: 'pass', detail: 'SPY is in a calm regime' }
+      : { state: 'fail', detail: 'SPY is in a volatile regime' };
+
+  void gamma;
+  void entry;
 
   return {
     verdicts: {
       rs,
+      ema: emaVerdict,
       volume,
       liquidity,
-      gamma: gammaVerdict,
       spyGamma: spyVerdict,
     },
     tiers: { equity: equityTier, options: optionsTier },
@@ -334,19 +344,23 @@ export async function runScanner(): Promise<ScanResult> {
   }
 
   /*
-   * Filter 5 is a single market-wide gate. When it is shut the answer is an
-   * empty scan *with the reason attached*, not a list of names that each look
-   * fine on their own — in a negative-gamma regime dealers amplify moves, and
-   * a page of strong-looking charts is at its most misleading exactly then.
+   * The market regime is a single market-wide gate, and it is hard. When it
+   * is shut the answer is an empty scan *with the reason attached*, not a list
+   * of names that each look fine on their own — in a volatile regime dealers
+   * amplify moves, and a page of strong-looking charts is at its most
+   * misleading exactly then. There is no softening toggle: a zero-result day
+   * is the correct output, and an option that turns the market gate into a
+   * score penalty exists only to produce results on days that should not have
+   * any.
    *
-   * A SPY chain that could not be read is deliberately not treated as a
-   * closed gate. Nothing will pass either way, because filter 5 reports
-   * unknown, but the scan still runs so the near-miss section can say what
-   * everything else did.
+   * A SPY chain that could not be read is deliberately not treated as a closed
+   * gate. Nothing will pass either way, because the gate reports unknown, but
+   * the scan still runs so "every candidate scanned" can say what everything
+   * else did.
    */
   const gateReason =
     spy && spy.regime !== 'positive'
-      ? 'SPY gamma is negative, so filter 5 fails for every name in the universe. The scan is empty on purpose rather than by accident.'
+      ? 'SPY is in a volatile regime, so the market gate fails for every name in the universe. The scan is empty on purpose rather than by accident.'
       : null;
 
 
@@ -358,27 +372,35 @@ export async function runScanner(): Promise<ScanResult> {
     async (symbol) => {
       const row = candidates.find((r) => r.symbol === symbol)!;
       const entry = gamma?.symbols[symbol];
-      const { verdicts, tiers } = singleVerdicts(row, gamma, entry, spy);
 
       /*
-       * The bar phase runs even when the SPY gate is shut, and it is worth
+       * The bar phase runs even when the market gate is shut, and it is worth
        * saying why it is worth the requests on a day when nothing can pass.
        *
        * A closed gate makes the pass list empty by definition. What it must
-       * not also do is make the page useless: on a zero-result day the
-       * near-miss list is the whole point, because it is what says whether the
-       * rules are too tight. Skipping the bars would leave every candidate
-       * failing filter 5 *and* carrying three unknown timeframe filters, so
-       * nothing would qualify as missing by exactly one and the section would
-       * be empty on precisely the day it matters most.
+       * not also do is make the page useless: on a zero-result day "every
+       * candidate scanned" is the whole point, because it is what says whether
+       * the market was the problem or the rules were. Skipping the bars would
+       * leave every candidate carrying an unknown trend gate on top of the
+       * failed market gate, so that section would report nothing on precisely
+       * the day it matters most.
        *
-       * Run them, and a strong name on a negative-gamma morning shows up as a
-       * near-miss with "SPY gamma" named as the one thing that stopped it —
-       * which is the true and useful statement. These are Yahoo bar series and
-       * do not touch the Cboe quota that constrains the 08:30 job.
+       * These are Yahoo bar series and do not touch the Cboe quota that
+       * constrains the 08:30 job.
        */
       const timeframes = await readTimeframes(symbol);
       if (timeframes.every((t) => t.bars === null)) barFailures.push(symbol);
+
+      const daily = timeframes.find((t) => t.timeframe === '1D');
+      const { verdicts, tiers } = singleVerdicts(row, gamma, entry, spy, daily);
+
+      /*
+       * The 20-day average comes off the daily bars already in hand, so the
+       * extended flag costs nothing. Computed here rather than in the board so
+       * the flag is stored with the scan and cannot drift if the thresholds
+       * move later.
+       */
+      const extension = readExtension(daily?.close ?? null, daily?.ema20 ?? null);
 
       rows.push({
         symbol,
@@ -393,6 +415,11 @@ export async function runScanner(): Promise<ScanResult> {
         magnets: entry?.magnets ?? [],
         single: verdicts,
         timeframes,
+        // Filled in below, once every candidate has been read: the earnings
+        // lookup is one batched request for the whole list, not one per name.
+        earnings: { state: 'unknown', dateIso: null, daysAway: null, source: 'not looked up' },
+        extension,
+        optionQuality: null,
       });
     },
     {
@@ -470,15 +497,100 @@ export async function runScanner(): Promise<ScanResult> {
 
   if (barFailures.length > 0) {
     notes.push(
-      `${barFailures.length} candidates returned no bars on any timeframe: ${barFailures.join(', ')}. Their timeframe filters are unknown.`,
+      `${barFailures.length} candidates returned no bars on any timeframe: ${barFailures.join(', ')}. Their 200-day average gate is unknown rather than failed.`,
+    );
+  }
+
+  /*
+   * ## Earnings, and the exclusion
+   *
+   * One batched lookup for every candidate, after the bar phase and before
+   * anything is ranked. See `earnings.ts` for why this is Tradier's
+   * fundamentals calendar and not the macro calendar in `lib/events`, which
+   * carries no per-company dates.
+   *
+   * A name reporting inside the window is removed outright, not flagged. An
+   * options position held over an earnings report is a different trade from
+   * the one every filter above was testing for, and a shortlist that mixes the
+   * two is the most expensive thing this page could get wrong.
+   *
+   * A name whose date could not be established is *kept*, with the uncertainty
+   * on its watch line. Excluding those would empty the page every day the
+   * fundamentals endpoint is unavailable, which on this token is most of them.
+   * `excludedForEarnings` reads the state rather than the day count precisely
+   * so that unknown can never be mistaken for far-away.
+   */
+  const scanDate = marketToday();
+  const earnings = await lookupEarnings(rows.map((r) => r.symbol), scanDate);
+
+  for (const row of rows) {
+    row.earnings = earnings.bySymbol.get(row.symbol) ?? {
+      state: 'unknown',
+      dateIso: null,
+      daysAway: null,
+      source: 'not looked up',
+    };
+  }
+
+  const earningsExcluded: ScanResult['earningsExcluded'] = [];
+  const kept: ScanRow[] = [];
+  for (const row of rows) {
+    if (excludedForEarnings(row.earnings) && row.earnings.dateIso && row.earnings.daysAway !== null) {
+      earningsExcluded.push({
+        symbol: row.symbol,
+        dateIso: row.earnings.dateIso,
+        daysAway: row.earnings.daysAway,
+      });
+      continue;
+    }
+    kept.push(row);
+  }
+
+  if (earningsExcluded.length > 0) {
+    notes.push(
+      `${earningsExcluded.length} name${earningsExcluded.length === 1 ? ' was' : 's were'} removed for reporting earnings within ${EARNINGS_EXCLUSION_DAYS} days: ${earningsExcluded
+        .map((e) => `${e.symbol} (${e.dateIso})`)
+        .join(', ')}.`,
+    );
+  }
+
+  const ranked = kept.sort((a, b) => b.rsScore - a.rsScore);
+
+  /*
+   * ## The option-quality gate, top ten only
+   *
+   * This is the one part of the scan that spends the Cboe quota, and the 08:30
+   * gamma refresh has already spent most of the window. Ten chains is
+   * affordable every day; fifty is not, and one per candidate would put the
+   * run over on its own.
+   *
+   * So the ten strongest names that cleared all five gates are graded here,
+   * and everything else is graded on demand through `/api/scanner/quality`.
+   * Each result records which of the two it got, and the page says so — a
+   * badge whose provenance is invisible is a badge the reader cannot weigh.
+   *
+   * Only names that actually passed are graded. Spending a chain on a name
+   * that failed the trend gate buys nothing: it is not going on the list.
+   */
+  const toGrade = ranked
+    .filter((row) => FILTER_KEYS.every((key) => row.single[key]?.state === 'pass'))
+    .slice(0, OPTION_QUALITY_TOP_N);
+
+  for (const row of toGrade) {
+    row.optionQuality = await gradeSymbol(row.symbol, row.earnings, 'scan');
+  }
+
+  if (toGrade.length > 0) {
+    notes.push(
+      `Option contracts were checked at scan time for the top ${toGrade.length} ranked name${toGrade.length === 1 ? '' : 's'}. The rest are checked when you open them, to stay inside the chain provider's daily window.`,
     );
   }
 
   const result: ScanResult = {
-    date: marketToday(),
+    date: scanDate,
     scannedAt: new Date().toISOString(),
     scheduledEt: tuning.scanTimeEt,
-    rows: rows.sort((a, b) => b.rsScore - a.rsScore),
+    rows: ranked,
     universe,
     candidates: candidates.length,
     rsMin: tuning.rsMin,
@@ -488,6 +600,9 @@ export async function runScanner(): Promise<ScanResult> {
     gammaRefreshedAt: gamma?.refreshedAt ?? null,
     barFailures,
     barSkipped: outcome.skipped,
+    earningsExcluded,
+    earningsSource: earnings.source,
+    qualityChecked: toGrade.length,
     notes,
   };
 
@@ -502,6 +617,15 @@ export async function runScanner(): Promise<ScanResult> {
     // scan has not been stored, which is true and visible, rather than serving
     // an older day's list under today's heading.
   }
+
+  /*
+   * The archive is written on every path, including the mornings that produce
+   * nothing. A run-rate that silently skipped its zeros would answer "how many
+   * names pass on the days when names pass", which is not a question anyone
+   * has — and would flatter the rule set on exactly the days it is doing its
+   * job. See `archive.ts`; it never throws.
+   */
+  await archiveScan(result);
 
   return result;
 }

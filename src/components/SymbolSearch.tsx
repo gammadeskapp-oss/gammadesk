@@ -65,6 +65,15 @@ export interface SymbolSearchProps {
   clearOnSubmit?: boolean;
   /** Blocks submit for a reason outside the text, e.g. a full watchlist. */
   disabled?: boolean;
+  /**
+   * Drop the uppercase, wide-tracked terminal treatment from this box.
+   *
+   * The house style shouts, which suits a box reached from inside the work.
+   * The front door's box is the one a first-time reader meets before anything
+   * else, and reviewers read the shouted version as a command line rather than
+   * a ticker search — so that one asks for plain sentence case instead.
+   */
+  plainCase?: boolean;
 }
 
 export function SymbolSearch({
@@ -81,6 +90,7 @@ export function SymbolSearch({
   validate,
   clearOnSubmit = false,
   disabled: blocked = false,
+  plainCase = false,
 }: SymbolSearchProps) {
   const listId = `${useId()}-list`;
 
@@ -226,12 +236,19 @@ export function SymbolSearch({
 
   const big = size === 'lg';
 
+  // Only the tracking differs: the typed text is still forced to upper case by
+  // `autoCapitalize` and the change handler, because a ticker is upper case.
+  // It is the *placeholder* that has to read as a sentence.
   const inputClass = big
-    ? 'min-w-0 flex-1 border border-term-edge bg-term-panel px-3.5 py-2.5 text-sm tracking-[0.14em] text-term-text placeholder:text-term-faint focus:border-pos/60 focus:outline-none focus:ring-1 focus:ring-pos/40'
+    ? `min-w-0 flex-1 border border-term-edge bg-term-panel px-3.5 py-2.5 text-sm text-term-text placeholder:text-term-faint focus:border-pos/60 focus:outline-none focus:ring-1 focus:ring-pos/40 ${
+        plainCase ? '' : 'tracking-[0.14em]'
+      }`
     : 'w-44 border border-term-edge bg-term-panel px-3 py-1.5 text-xs tracking-[0.12em] text-term-text placeholder:text-term-faint focus:border-pos/60 focus:outline-none';
 
   const buttonClass = big
-    ? 'border border-pos/50 bg-pos/10 px-5 py-2.5 text-xs font-bold uppercase tracking-[0.16em] text-pos transition-colors hover:bg-pos/20 disabled:opacity-40'
+    ? `border border-pos/50 bg-pos/10 px-5 py-2.5 text-xs font-bold text-pos transition-colors hover:bg-pos/20 disabled:opacity-40 ${
+        plainCase ? 'tracking-normal' : 'uppercase tracking-[0.16em]'
+      }`
     : 'border border-term-line bg-term-panel/60 px-3 py-1.5 text-2xs uppercase tracking-[0.14em] text-term-dim transition-colors hover:border-term-edge hover:text-term-text disabled:opacity-40';
 
   const submitDisabled =

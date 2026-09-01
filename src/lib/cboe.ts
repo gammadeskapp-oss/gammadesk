@@ -43,7 +43,15 @@ function chainUrl(symbol: string): string {
   return `${CDN}/${encodeURIComponent(file)}.json`;
 }
 
-interface CboeContract {
+/**
+ * One contract exactly as the CDN publishes it.
+ *
+ * Exported because the scanner's option-quality gate needs `bid`, `ask` and
+ * `volume`, none of which survive into `NormalisedContract` — that shape is
+ * built for the exposure maths, which only ever needed open interest and a
+ * vol. See `scanner/optionChain.ts`.
+ */
+export interface CboeContract {
   option?: string;
   bid?: number;
   ask?: number;
@@ -125,11 +133,25 @@ function parseTimestamp(raw: string | undefined): Date {
   return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] ?? 0)));
 }
 
-export async function fetchCboeSnapshot(
-  symbolOverride?: string,
-): Promise<ChainSnapshot> {
+/** The CDN payload, validated but not yet interpreted. */
+export interface CboeRaw {
+  symbol: string;
+  spot: number;
+  quoteDate: Date;
+  contracts: CboeContract[];
+}
+
+/**
+ * Fetch and validate one chain, stopping short of any interpretation.
+ *
+ * Split out of `fetchCboeSnapshot` so the scanner's contract check can read
+ * bid/ask off the same payload without going through the IV surface and the
+ * strike-window trim, neither of which it wants: it is looking for one call
+ * 30-60 days out, not a table of dealer exposure. Same URL, same headers, same
+ * error contract — one place for all of that to be wrong.
+ */
+export async function fetchCboeRaw(symbolOverride?: string): Promise<CboeRaw> {
   const symbol = symbolOverride ?? config.symbol;
-  const notes: string[] = [];
 
   let response: Response;
   try {
@@ -183,6 +205,15 @@ export async function fetchCboeSnapshot(
   if (raw.length === 0) {
     throw new ChainError(`Cboe returned no ${symbol} option contracts.`, 200);
   }
+
+  return { symbol, spot, quoteDate: parseTimestamp(payload.timestamp), contracts: raw };
+}
+
+export async function fetchCboeSnapshot(
+  symbolOverride?: string,
+): Promise<ChainSnapshot> {
+  const notes: string[] = [];
+  const { symbol, spot, quoteDate, contracts: raw } = await fetchCboeRaw(symbolOverride);
 
   const now = new Date();
   const quotes: RawQuote[] = [];
@@ -260,7 +291,7 @@ export async function fetchCboeSnapshot(
 
   return {
     spot,
-    quoteDate: parseTimestamp(payload.timestamp),
+    quoteDate,
     contracts,
     requests: 1,
     activity: { volume: chainVolume, openInterest: chainOpenInterest },

@@ -15,7 +15,7 @@ import { snapshotStaleness } from '@/lib/events';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 
 export const metadata: Metadata = {
-  title: 'Blended Magnets Forecast',
+  title: 'Forecast',
   description:
     'Monte Carlo simulation of forward price paths for any ticker, bent toward dealer positioning magnets.',
 };
@@ -59,7 +59,13 @@ export default async function ForecastPage({ searchParams }: PageProps) {
         {staleness && <StaleDataBanner staleness={staleness} />}
 
         <PageBar
-          title="Blended Magnets Forecast"
+          /*
+            Just "Forecast". "Blended Magnets" is the method, and the method
+            belongs in the methodology drawer — as a page title it asked a
+            first-time reader to learn two terms before they had seen a number.
+            The subtitle now says what the page produces instead.
+          */
+          title="Forecast"
           description={PAGE_DESCRIPTIONS['/forecast']}
           meta={
             data
@@ -173,7 +179,7 @@ export default async function ForecastPage({ searchParams }: PageProps) {
           </ul>
 
           <p className="mt-3 border-t border-term-line pt-3 text-2xs text-term-faint">
-            The <a href="/log" className="text-term-dim underline decoration-dotted">Accuracy Log</a>{' '}
+            The <a href="/log" className="text-term-dim underline decoration-dotted">Track Record</a>{' '}
             exists precisely because claims like these should be scored rather
             than trusted.
           </p>

@@ -1,11 +1,20 @@
 import 'server-only';
 
 import { config } from '../config';
+import { dailyCounts, readArchive, averagePerDay, type DailyCount } from './archive';
 import { peekScannerGamma } from './gamma';
 import { readLatestScan, readTodaysScan } from './run';
-import type { ScanResult, ScanTimeframe, StoredGamma, VwapAnchor } from './types';
+import type { ScanResult, StoredGamma } from './types';
 
 export { storeStatus } from '../jsonStore';
+export {
+  archiveScan,
+  readArchive,
+  dailyCounts,
+  averagePerDay,
+  ARCHIVE_KEEP_DAYS,
+} from './archive';
+export type { ArchivedDay, ArchivedName, DailyCount } from './archive';
 export { refreshScannerGamma, readTodaysGamma, peekScannerGamma } from './gamma';
 export { runScanner, scanCandidates, readTodaysScan, readLatestScan } from './run';
 
@@ -34,14 +43,24 @@ export interface ScannerView {
   rsMin: number;
   nw: { bandwidth: number; lookback: number; mult: number; minBars: number };
   trendEmaPeriod: number;
-  vwapAnchor: Record<ScanTimeframe, VwapAnchor>;
+  /**
+   * How many names passed each archived morning, newest first.
+   *
+   * On the page above the list, because the single most useful thing to know
+   * about a shortlist of three is whether three is a normal day or a thin one.
+   */
+  counts: DailyCount[];
+  /** Mean over the archived window, gate-shut zeros included. */
+  averagePassed: number | null;
 }
 
 export async function getScannerView(): Promise<ScannerView> {
-  const [scan, latest, gamma] = await Promise.all([
+  const [scan, latest, gamma, archive] = await Promise.all([
     readTodaysScan(),
     readLatestScan(),
     peekScannerGamma(),
+    // A stored read, so it costs the scan nothing.
+    readArchive().catch(() => []),
   ]);
 
   const tuning = config.scanner;
@@ -59,6 +78,7 @@ export async function getScannerView(): Promise<ScannerView> {
       minBars: tuning.nw.minBars,
     },
     trendEmaPeriod: tuning.trendEmaPeriod,
-    vwapAnchor: { ...tuning.vwapAnchor },
+    counts: dailyCounts(archive),
+    averagePassed: averagePerDay(archive),
   };
 }
