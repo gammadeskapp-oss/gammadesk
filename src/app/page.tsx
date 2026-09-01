@@ -4,6 +4,7 @@ import { Dashboard } from '@/components/Dashboard';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { PositioningSearch } from '@/components/PositioningSearch';
+import { ResearchCards } from '@/components/ResearchCards';
 import { ChainError } from '@/lib/chainSource';
 import { config } from '@/lib/config';
 import { getPositioningView, normaliseSymbol } from '@/lib/positioning';
@@ -166,6 +167,13 @@ export default async function HomePage({ searchParams }: PageProps) {
               </p>
             </div>
           )}
+
+          {/*
+            Also on the failure path. When the chain is down the reader still
+            came here to research something, and a dead-end page with one error
+            message on it is the worst possible front door.
+          */}
+          <ResearchCards />
         </main>
       )}
 

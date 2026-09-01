@@ -8,6 +8,7 @@ import { ExplainPanel } from './ExplainPanel';
 import { PageBar } from './PageBar';
 import { PositioningSearch } from './PositioningSearch';
 import { PositioningTable } from './PositioningTable';
+import { ResearchCards } from './ResearchCards';
 import { ReadMode, useReadMode } from './ReadMode';
 import { nearestStrongWall } from '@/lib/simple/walls';
 import { VerdictLead, WhatToWatch } from './SimpleRead';
@@ -189,6 +190,14 @@ export function Dashboard({
         stay fully legible.
       */}
       <MethodologyDrawer methodology={methodology} anchor="levels" />
+
+      {/*
+        Last on the page, which is the point: the reader has had the verdict
+        and the backdrop, and this is where they go next. On a phone it also
+        stands in for a nav bar there is no room for — the same grid is in the
+        mobile menu.
+      */}
+      <ResearchCards />
     </main>
   );
 

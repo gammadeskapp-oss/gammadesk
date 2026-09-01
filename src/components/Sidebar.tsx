@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
+import { ResearchCards } from './ResearchCards';
 
 /**
  * Left navigation.
@@ -209,7 +210,19 @@ export function Sidebar() {
       >
         {brand}
 
-        <div className="mt-1 flex-1 overflow-y-auto">{nav}</div>
+        <div className="mt-1 flex-1 space-y-4 overflow-y-auto pb-4">
+          {nav}
+
+          {/*
+            The front door's research grid, repeated here. `lg:hidden` because
+            this is the phone's answer to not having a persistent nav bar — on
+            a desktop the sidebar above is already permanently visible and a
+            second copy of the same seven links would be noise.
+          */}
+          <div className="border-t border-term-line pt-4 lg:hidden">
+            <ResearchCards variant="list" onNavigate={() => setDrawerOpen(false)} />
+          </div>
+        </div>
 
         <div className="border-t border-term-line p-2">
           {/* Collapse is a large-screen affordance; the drawer has its own. */}
