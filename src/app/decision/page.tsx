@@ -17,6 +17,7 @@ import type { BreadthReading } from '@/lib/breadth/types';
 import { regimeDisplay, regimeOfMood } from '@/lib/regime';
 import { config } from '@/lib/config';
 import { TradeabilityPanel } from '@/components/TradeabilityPanel';
+import { ChainError } from '@/lib/chainSource';
 import { DecisionError, getDecision, type DecisionResult } from '@/lib/decision';
 import { exposureIsReliable, type Check, type Grade } from '@/lib/decision/types';
 import { getForecast } from '@/lib/forecast';
@@ -152,10 +153,13 @@ function Decision({
   breadth,
   retests,
   methodology,
+  stale,
 }: {
   data: DecisionResult;
   breadth: BreadthReading | null;
   retests: RetestFeedData | null;
+  /** Graded by the caller, so this and the banner cannot disagree. */
+  stale: boolean;
   /*
    * Null when the chain snapshot behind the decision could not be re-read.
    * The decision itself survives that — it was built from a cached copy — but
@@ -220,7 +224,17 @@ function Decision({
             </span>
             <span>{c.symbol} spot · from the positioning book</span>
             <span className="text-term-dim">
-              as of {c.asOfLabel} · delayed 15 min
+              as of {c.quoteDateLabel}
+              {/*
+                Only on a book that is actually current. "Delayed 15 min" is a
+                claim about the feed's lag behind the market, and it is true
+                only while the feed is keeping up: on a thin name whose chain
+                the provider has not rewritten since the weekend, the same
+                words assert a quarter-hour of lag over a book that is days
+                old. The banner above already says how old — this line must
+                not quietly contradict it.
+              */}
+              {!stale && ' · delayed 15 min'}
             </span>
           </span>
         }
@@ -457,15 +471,59 @@ export default async function DecisionPage({ searchParams }: PageProps) {
   const query = (params.ticker ?? params.symbol)?.trim() || config.symbol;
 
   let data: DecisionResult | null = null;
-  let error: string | null = null;
+  /*
+   * The failure, split into the sentence and the paragraph under it.
+   *
+   * These were one hardcoded pair, and the pair asserted that the ticker had
+   * no listed options. That is true of exactly one of the ways this can fail.
+   * When the on-demand chain budget refuses a fetch — a busy minute, nothing
+   * to do with the symbol — a reader asking about a perfectly well listed
+   * stock was told the market does not list options on it, and invited to go
+   * try SPY instead. A misleading answer given confidently is worse than an
+   * unhelpful one, because there is nothing in it to make the reader doubt it.
+   *
+   * So the three states are kept apart. `ChainError.publicMessage` owns the
+   * wording for the two upstream ones (see lib/errorText.ts, checked by
+   * `npm run verify:errors`); only the follow-on paragraph is chosen here,
+   * because only this page knows what else is still on screen.
+   */
+  let error: { message: string; detail: React.ReactNode } | null = null;
+
+  /** The paragraph under the headline: what to do, given what went wrong. */
+  const chartStillBelow =
+    'The context, levels and conviction checks all come from the option chain, so they are unavailable — but the chart does not need options and is still below.';
 
   try {
     data = await getDecision(query);
   } catch (e) {
-    error =
-      e instanceof DecisionError
-        ? e.message
-        : `Could not read the option chain for ${query}.`;
+    if (e instanceof DecisionError) {
+      error = { message: e.message, detail: 'Check the spelling and try again.' };
+    } else if (e instanceof ChainError && e.status === 429) {
+      // Nothing is wrong with the ticker, so nothing here may suggest there
+      // is — no "try SPY", which would read as "this name is the problem".
+      error = {
+        message: e.publicMessage,
+        detail: `${chartStillBelow} Reloading in a moment is likely to work; this is a limit on how many different chains can be pulled at once, not a verdict on ${query}.`,
+      };
+    } else if (e instanceof ChainError) {
+      error = {
+        message: e.publicMessage,
+        detail: (
+          <>
+            {chartStillBelow} Try{' '}
+            <Link href="/decision?ticker=SPY" className="text-pos underline decoration-dotted">
+              SPY
+            </Link>{' '}
+            to see whether the feed is answering at all.
+          </>
+        ),
+      };
+    } else {
+      error = {
+        message: `Could not read the option chain for ${query}.`,
+        detail: chartStillBelow,
+      };
+    }
   }
 
   // Sanitised here too, because on the failure path there is no result object
@@ -526,22 +584,17 @@ export default async function DecisionPage({ searchParams }: PageProps) {
           title="Decision"
           description={PAGE_DESCRIPTIONS['/decision']}
           meta="one screen, top to bottom"
-          asOfLabel={data?.context.asOfLabel}
+          /* The book's stamp, not the render clock — see DecisionContext. */
+          asOfLabel={data?.context.quoteDateLabel}
         />
 
         <DecisionSearch initial={data?.context.symbol ?? query} />
 
         {error && (
           <div className="panel border-l-2 border-l-bear/60 px-4 py-4">
-            <p className="text-xs font-bold text-bear">{error}</p>
-            <p className="mt-1.5 text-2xs text-term-dim">
-              The context, levels and conviction checks all come from the option
-              chain, so they are unavailable — but the chart does not need
-              options and is still below. Try{' '}
-              <Link href="/decision?symbol=SPY" className="text-pos underline decoration-dotted">
-                SPY
-              </Link>{' '}
-              if this name has no listed options.
+            <p className="text-xs font-bold text-bear">{error.message}</p>
+            <p className="mt-1.5 text-2xs leading-relaxed text-term-dim">
+              {error.detail}
             </p>
           </div>
         )}
@@ -579,6 +632,7 @@ export default async function DecisionPage({ searchParams }: PageProps) {
                 breadth={breadth}
                 retests={retests}
                 methodology={methodology}
+                stale={Boolean(staleness?.stale)}
               />
             }
           />

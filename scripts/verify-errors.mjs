@@ -151,9 +151,9 @@ ok(
   detailed.publicMessage !== detailed.message,
 );
 
-// --- the wording distinguishes the two cases a reader can act on -------------
+// --- the wording distinguishes the cases a reader can act on -----------------
 
-section('An outage and an unlisted ticker read differently');
+section('An outage, an unlisted ticker and a refusal read differently');
 
 const outage = new ChainError('x', 0).publicMessage;
 const unwell = new ChainError('x', 503).publicMessage;
@@ -167,6 +167,19 @@ ok(
   );
 ok('an unlisted ticker says so', /ticker/i.test(missing), missing);
 ok('and is not confused with an outage', missing !== outage);
+
+/*
+ * Being refused for volume is a third state, and the one most easily mistaken
+ * for the second. A reader who is told their ticker has no options published,
+ * when the truth is that the allowance ran out a moment ago, has been told
+ * something false about the market rather than merely something unhelpful.
+ */
+const busy = new ChainError('x', 429).publicMessage;
+const unusable = new ChainError('x', 200).publicMessage;
+
+ok('being rate limited reads as its own state', busy !== missing && busy !== unusable && busy !== outage, busy);
+ok('and does not claim the ticker has nothing listed', !/no options|not published|isn't available/i.test(busy), busy);
+ok('and says the wait is temporary', /wait|moment|again/i.test(busy), busy);
 
 // --- result ------------------------------------------------------------------
 

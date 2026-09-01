@@ -165,6 +165,7 @@ async function build(symbol: string): Promise<DecisionResult> {
     magnetAbove: asWall(nearestStrongWall(strikeGex, spot, 'above'), spot),
     magnetBelow: asWall(nearestStrongWall(strikeGex, spot, 'below'), spot),
     asOfLabel: positioning.meta.asOfLabel,
+    quoteDateLabel: positioning.meta.quoteDateLabel,
     quoteDateIso: positioning.meta.quoteDateIso,
   };
 

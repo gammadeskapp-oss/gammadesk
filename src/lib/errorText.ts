@@ -41,6 +41,19 @@ export function publicChainMessage(status: number): string {
     return 'No options data is published for this ticker.';
   }
 
+  /*
+   * Refused for volume, not for content. This is the one failure here that is
+   * not about the data at all: the chain exists, it is very likely already
+   * readable, and the only thing wrong is that too many distinct symbols were
+   * asked for inside one window. Folding it into the sentence below would tell
+   * a reader their ticker has nothing published when in fact it has plenty —
+   * a false claim about the market, made by us, in the one place a reader has
+   * no way to check it. So it says what actually happened and what to do.
+   */
+  if (status === 429) {
+    return 'Too many different tickers were requested just now. Wait a moment and try this one again — tickers already loaded are still instant.';
+  }
+
   // Anything else arrived and was unusable. The reader does not need to know
   // which of the several ways that can happen actually happened.
   return "Today's data isn't available yet.";
