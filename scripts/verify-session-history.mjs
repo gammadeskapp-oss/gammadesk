@@ -173,6 +173,65 @@ ok('the values are still kept', stale.sectors.length === 2);
 ok('a matching snapshot is current', sectorsAreCurrent(full) === true);
 ok('a null sector half is never current', sectorsAreCurrent(emptySweep) === false);
 
+// --- the two failure paths the sectors route has to survive ---------------
+/*
+ * These are the reasons the history write lives in /api/sectors/refresh rather
+ * than in the digest job ten minutes later. Both model what `recordSession`
+ * receives in each case; the route decides which one it hands over.
+ */
+
+// OVERRUN. The refresh is still running when something else wants the row, so
+// the store still holds yesterday's document. Under the old plan the digest
+// job would have read exactly this and stamped it as tonight's sector state.
+const overrun = buildSessionRow({
+  date: '2026-09-01',
+  breadth: breadth(),
+  sectors: sectors('2026-08-31', LIVE_SECTORS),
+  now: NOW,
+});
+ok('an overrun records the session', overrun.date === '2026-09-01');
+ok('breadth survives an overrun', overrun.breadth?.pctAbovePriorClose === 48);
+ok('the stale sector half is not passed off as tonight', sectorsAreCurrent(overrun) === false);
+eq('and its real date is preserved', overrun.sectorsAsOf, '2026-08-31');
+
+// THROW. The refresh failed outright, so the route passes no snapshot and
+// `recordSession` falls back to the stored one. Same shape as the overrun —
+// which is the point: a row is still written either way, and the session's
+// breadth is never lost to a sector failure.
+const threw = buildSessionRow({
+  date: '2026-09-01',
+  breadth: breadth(),
+  sectors: sectors('2026-08-31', LIVE_SECTORS),
+  now: NOW,
+});
+ok('a throw still records the session', threw.date === '2026-09-01');
+ok('breadth survives a throw', threw.breadth !== null);
+ok('the sector half is flagged, not silently trusted', sectorsAreCurrent(threw) === false);
+
+// THROW WITH NOTHING STORED AT ALL. Nothing to fall back to, so the sector
+// half is null — and the row is still written, because the breadth half is
+// the part that cannot be recovered tomorrow.
+const threwEmpty = buildSessionRow({
+  date: '2026-09-01',
+  breadth: breadth(),
+  sectors: null,
+  now: NOW,
+});
+ok('a row is written with no sectors at all', threwEmpty.date === '2026-09-01');
+ok('breadth is still captured', threwEmpty.breadth?.pctAbovePriorClose === 48);
+ok('the sector half is null', threwEmpty.sectors === null);
+ok('and never reads as current', sectorsAreCurrent(threwEmpty) === false);
+
+// The success path the route now guarantees: the snapshot handed over is the
+// one just computed, so its date matches by construction.
+const handedOver = buildSessionRow({
+  date: '2026-09-01',
+  breadth: breadth(),
+  sectors: sectors('2026-09-01', LIVE_SECTORS),
+  now: NOW,
+});
+ok('a handed-over snapshot is current', sectorsAreCurrent(handedOver) === true);
+
 // --- upsert ----------------------------------------------------------------
 const empty = { schema: SESSION_HISTORY_SCHEMA, rows: [] };
 const one = upsertRow(empty, full);

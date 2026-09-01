@@ -3,6 +3,7 @@ import 'server-only';
 import { createJsonStore } from '../jsonStore';
 import { getBreadth } from '../breadth';
 import { peekStoredSectors } from '../sectors';
+import type { SectorsSnapshot } from '../sectors/types';
 import { marketToday } from '../time';
 import {
   buildSessionRow,
@@ -64,7 +65,28 @@ export interface RecordResult {
  * missing row and a null field mean different things, and only one of them can
  * be recovered later.
  */
-export async function recordSession(now: Date = new Date()): Promise<RecordResult> {
+export async function recordSession(
+  options: {
+    now?: Date;
+    /**
+     * The snapshot the caller has just computed.
+     *
+     * Passed by `/api/sectors/refresh`, which holds the fresh object in
+     * memory. Handing it over rather than re-reading the store is what makes
+     * the ordering a guarantee instead of a ten-minute bet: there is no window
+     * in which this could pick up a different document than the one that was
+     * just written.
+     *
+     * Omit it — do not pass null — to fall back to the stored snapshot. That
+     * is the right behaviour when the refresh failed: yesterday's document,
+     * correctly stamped with yesterday's `asOfDate` and so failing
+     * `sectorsAreCurrent`, is a more useful record than nothing at all. It is
+     * what the app was actually showing that evening.
+     */
+    sectors?: SectorsSnapshot;
+  } = {},
+): Promise<RecordResult> {
+  const { now = new Date(), sectors: provided } = options;
   const date = marketToday(now);
 
   const [breadth, sectors] = await Promise.all([
@@ -73,10 +95,11 @@ export async function recordSession(now: Date = new Date()): Promise<RecordResul
       `peekStoredSectors`, not `getSectorsSnapshot`. The latter recomputes when
       nothing is stored, which would spend upstream calls from inside a job
       whose whole premise is that it only copies readings other jobs already
-      produced. If the refresh failed tonight, the honest record is a null
-      sector half — not a second, differently-sourced computation.
+      produced. If the refresh failed tonight, the honest record is the stale
+      stored snapshot, flagged as stale — not a second, differently-sourced
+      computation.
     */
-    peekStoredSectors().catch(() => null),
+    provided ? Promise.resolve(provided) : peekStoredSectors().catch(() => null),
   ]);
 
   const row = buildSessionRow({ date, breadth, sectors, now });
