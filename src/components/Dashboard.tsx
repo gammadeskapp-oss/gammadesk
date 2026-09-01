@@ -176,13 +176,20 @@ export function Dashboard({
         Outside the muted wrapper on purpose. When today's numbers are stale,
         the offer to go and check how yesterday's read settled is more useful
         than ever, not less.
+
+        Set in the accent colour at the body size rather than as fine print.
+        The first version of this used the smallest, faintest pair of tokens in
+        the app and was invisible in practice — which defeats the whole point
+        of asking the question, since the reader who most needs the record is
+        the one not already looking for it.
       */}
-      <p className="text-2xs text-term-faint">
+      <p className="text-xs">
         <a
           href="/log"
-          className="underline decoration-dotted underline-offset-2 hover:text-term-dim"
+          className="inline-flex items-center gap-1.5 font-bold text-flip underline decoration-dotted underline-offset-4 hover:text-term-text"
         >
           Did yesterday&rsquo;s read hold up?
+          <span aria-hidden>&rarr;</span>
         </a>
       </p>
 
