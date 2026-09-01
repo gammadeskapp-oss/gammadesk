@@ -119,13 +119,22 @@ interface YahooChartResponse {
   };
 }
 
-/** Yahoo accepts only a fixed set of range tokens, so snap to the nearest. */
+/**
+ * Yahoo accepts only a fixed set of range tokens, so snap to the nearest.
+ *
+ * `max` is deliberately not among them. Asked for `range=max&interval=1d`,
+ * Yahoo answers with MONTHLY bars — 404 rows for SPY rather than 8,453, with
+ * `dataGranularity: "1mo"` and no error — and nothing downstream can tell them
+ * from daily ones. Ten years is the longest range token that still returns
+ * sessions, so a caller asking for more gets ten years of real daily bars
+ * instead of thirty years of silently wrong ones. Anything that genuinely
+ * needs decades uses `analogues/deepBars.ts`, which asks by period instead.
+ */
 function yahooRange(years: number): string {
   if (years <= 1) return '1y';
   if (years <= 2) return '2y';
   if (years <= 5) return '5y';
-  if (years <= 10) return '10y';
-  return 'max';
+  return '10y';
 }
 
 async function fromYahoo(
