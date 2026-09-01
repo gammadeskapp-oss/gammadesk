@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { cached } from '../cache';
+import { operatorDetail } from '../errorText';
 import { allTrackedSymbols } from '../groups/definitions';
 import { createJsonStore } from '../jsonStore';
 
@@ -290,19 +291,11 @@ async function fetchUpstream(): Promise<SymbolDirectory> {
       // Logged rather than swallowed: a silent fall through to the next source
       // is exactly how you end up not knowing the primary has been broken for
       // a month.
-      console.warn(`[symbols] source "${source.name}" failed:`, describe(error));
+      console.warn(`[symbols] source "${source.name}" failed:`, operatorDetail(error));
     }
   }
 
   throw lastError;
-}
-
-/** fetch() failures hide the useful part in `cause`. */
-function describe(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const cause = (error as { cause?: { code?: string; message?: string } }).cause;
-  const detail = cause?.code ?? cause?.message;
-  return detail ? `${error.message} (${detail})` : error.message;
 }
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -352,7 +345,7 @@ export async function getSymbolDirectory(): Promise<SymbolDirectory> {
   try {
     return await cached('symbols.directory', MEMORY_TTL_SECONDS, load);
   } catch (error) {
-    console.warn('[symbols] serving the built-in stub:', describe(error));
+    console.warn('[symbols] serving the built-in stub:', operatorDetail(error));
     return builtinFallback();
   }
 }

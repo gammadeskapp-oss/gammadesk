@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { fetchTradierQuotes, tradierToken } from '../breadth/tradier';
+import { operatorDetail } from '../errorText';
 import { marketSessionRules } from '../events';
 import { getDigestBySymbol, getRsResult } from '../rs';
 import { getMembership } from '../rs/membership';
@@ -157,9 +158,19 @@ export async function computeMovers(now: Date = new Date()): Promise<MoversResul
       );
     }
   } catch (error) {
+    /*
+     * The detail goes to the log, not to the page. `fetch()` collapses every
+     * connection-level failure into "fetch failed" and puts the real reason in
+     * `cause`, so logging `error.message` alone reports nothing a reader or an
+     * operator can act on — a refused socket, a DNS miss and a TLS chain that
+     * will not verify all arrive looking identical.
+     */
+    console.warn('[movers] quote feed failed:', operatorDetail(error));
+
     return nothing(now, live, sessionDate, symbols.length, requests, [
-      'The quote feed did not answer, so there is no reading for this refresh: ' +
-        `${error instanceof Error ? error.message : String(error)}.`,
+      'The quote feed did not answer, so there is no reading for this ' +
+        'refresh. Nothing is shown rather than a list with its one gate ' +
+        'unapplied; the next refresh tries again.',
     ]);
   }
 

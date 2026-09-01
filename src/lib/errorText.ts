@@ -58,3 +58,33 @@ export function publicChainMessage(status: number): string {
   // which of the several ways that can happen actually happened.
   return "Today's data isn't available yet.";
 }
+
+/**
+ * The operator's half of the split above.
+ *
+ * `fetch()` reports every connection-level failure as the same five
+ * characters — "fetch failed" — and hides what actually happened in `cause`:
+ * the DNS miss, the refused socket, the TLS chain that would not verify. A
+ * message logged without it names no cause and cannot be acted on, which is
+ * how a broken feed stays broken.
+ *
+ * This is for logs only. It is deliberately not the text any page renders —
+ * see `publicChainMessage` for that side, and `verify:errors` for the check
+ * that keeps the two from merging.
+ */
+export function operatorDetail(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+
+  const parts: string[] = [error.message];
+  let cause: unknown = (error as { cause?: unknown }).cause;
+
+  // Bounded: a cause chain is normally one deep, and a cycle must not hang a
+  // log line.
+  for (let depth = 0; cause instanceof Error && depth < 4; depth += 1) {
+    const code = (cause as { code?: string }).code;
+    parts.push(code ? `${code}: ${cause.message}` : cause.message);
+    cause = (cause as { cause?: unknown }).cause;
+  }
+
+  return parts.join(' <- ');
+}
