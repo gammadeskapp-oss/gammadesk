@@ -14,7 +14,7 @@ import {
 } from '@/lib/movers';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { getScannerView } from '@/lib/scanner';
-import { partition } from '@/lib/scanner/evaluate';
+import { DEFAULT_FILTERS, scoreAndJudge } from '@/lib/scanner/score';
 import { sessionLabel } from '@/lib/staleness';
 import { formatAsOf } from '@/lib/time';
 
@@ -42,7 +42,17 @@ export default async function MoversPage() {
    * whole feature is built to avoid.
    */
   const scannerView = await getScannerView().catch(() => null);
-  const scannerPassed = scannerView?.scan ? partition(scannerView.scan.rows).passed.length : null;
+  /*
+   * Counted at the scanner's shipped defaults, deliberately. The scanner's own
+   * page lets a reader move every cutoff; this line is a cross-reference to it,
+   * and a cross-reference that moved with someone else's slider would be
+   * telling this page's reader something they cannot check.
+   */
+  const scannerPassed = scannerView?.scan
+    ? scoreAndJudge(scannerView.scan.rows, DEFAULT_FILTERS).filter(
+        (entry) => entry.passes && !entry.earningsExcluded,
+      ).length
+    : null;
 
   const staleness = snapshotStaleness(movers.capturedAt);
   const nextIn = Math.max(0, Math.ceil(secondsUntilRefresh() / 60));
@@ -108,8 +118,8 @@ export default async function MoversPage() {
           ) : (
             <p className="mt-1.5 text-term-dim">
               <span className="font-bold text-term-text">
-                {scannerPassed} {scannerPassed === 1 ? 'name' : 'names'} passed all five
-                rules today.
+                {scannerPassed} {scannerPassed === 1 ? 'name' : 'names'} passed
+                all five rules today, at the scanner&rsquo;s default settings.
               </span>{' '}
               Those are on{' '}
               <a href="/scanner" className="underline decoration-dotted hover:text-term-text">

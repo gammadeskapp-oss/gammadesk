@@ -1,67 +1,30 @@
 /**
- * Turning a stored row into a verdict, and into the sentences beside it.
+ * The sentences beside the numbers.
  *
- * Client-safe and deliberately pure. The scan resolves every gate for every
- * candidate once, at scan time; this file decides what those states amount to
- * and writes the plain-English account of them, so the badge, the watch line
- * and the pass list are all derived from one set of numbers and cannot
- * disagree with each other.
+ * Client-safe and deliberately pure. `score.ts` decides what a row's readings
+ * amount to at the reader's settings; this file writes the plain-English
+ * account of them, so the badges, the watch line and the detail row are all
+ * derived from one set of numbers and cannot disagree with each other.
  *
- * ## Five gates, all hard, no toggle
+ * ## Nothing here is a verdict
  *
- * There is no strictness mode and no near-miss list. The seven-gate,
- * three-timeframe, adjustable-agreement version could report the same name as
- * passing or failing depending on a control the reader had probably not
- * noticed, which is a worse failure than being too strict. A name clears all
- * five or it is not on the page — and a morning that clears nobody is a real
- * answer about the market, not a broken scan.
+ * It used to hold `evaluateRow`, `partition` and the four alignment badges —
+ * all of which resolved *stored* pass/fail states into a pass list. There is
+ * no pass list any more. Every one of the 503 scored names is ranked and the
+ * top of the ranking is always rendered, with each of its five rules shown
+ * green or red against thresholds the reader owns. So the judging moved to
+ * `score.ts`, where it is a function of the reader's settings, and what is
+ * left here is the writing.
  */
 
-import {
-  ALIGNMENT_KEYS,
-  EARNINGS_EXCLUSION_DAYS,
-  EXTENDED_PCT,
-  FILTER_KEYS,
-  FILTER_LABEL,
-  type AlignmentBadge,
-  type AlignmentKey,
-  type FilterKey,
-  type FilterState,
-  type FilterVerdict,
-  type ScanRow,
-  type WatchLine,
-} from './types';
+import { EXTENDED_PCT, type ScanRow } from './types';
 import { contractSummary } from './optionQuality';
-
-export interface RowOutcome {
-  verdicts: Record<FilterKey, FilterVerdict>;
-  /** True only when all five gates are `pass`. `unknown` is not a pass. */
-  passes: boolean;
-  /** Gates that are not `pass`, in display order. */
-  failing: FilterKey[];
-  /** Human phrase naming what stopped it, for the diagnostic list. */
-  failingLabel: string;
-}
-
-export function evaluateRow(row: ScanRow): RowOutcome {
-  const verdicts = row.single;
-
-  const failing = FILTER_KEYS.filter((key) => verdicts[key]?.state !== 'pass');
-
-  return {
-    verdicts,
-    passes: failing.length === 0,
-    failing,
-    failingLabel: failing
-      .map((key) => `${FILTER_LABEL[key]} (${verdicts[key]?.detail ?? 'no reading'})`)
-      .join('; '),
-  };
-}
+import type { FilterSettings, ScoredRow } from './score';
 
 // --- the watch line ----------------------------------------------------------
 
 /**
- * The risks attached to one result.
+ * The risks attached to one row.
  *
  * ## Why this can never return nothing
  *
@@ -73,7 +36,10 @@ export function evaluateRow(row: ScanRow): RowOutcome {
  * Order is worst-first: the reader's attention goes to the top of the list, so
  * the thing most likely to cost them something has to be there.
  */
-export function buildWatchLine(row: ScanRow): WatchLine {
+export function buildWatchLine(
+  row: ScanRow,
+  bufferDays: number,
+): { items: string[]; text: string } {
   const items: string[] = [];
 
   // --- earnings -------------------------------------------------------------
@@ -87,14 +53,11 @@ export function buildWatchLine(row: ScanRow): WatchLine {
      */
     items.push('earnings date unknown — a report inside the next two weeks cannot be ruled out');
   } else if (earnings.daysAway !== null && earnings.dateIso !== null) {
-    if (earnings.daysAway <= EARNINGS_EXCLUSION_DAYS) {
-      // Should not reach the page — the scan excludes these — but a stored
-      // row read back on a later day can drift into the window, and it must
-      // say so rather than going quiet.
+    if (earnings.daysAway >= 0 && earnings.daysAway <= bufferDays) {
       items.push(
-        `earnings in ${earnings.daysAway} day${earnings.daysAway === 1 ? '' : 's'} (${earnings.dateIso})`,
+        `earnings in ${earnings.daysAway} day${earnings.daysAway === 1 ? '' : 's'} (${earnings.dateIso}) — inside your ${bufferDays}-day buffer`,
       );
-    } else if (earnings.daysAway <= 30) {
+    } else if (earnings.daysAway >= 0 && earnings.daysAway <= 30) {
       items.push(`earnings in ${earnings.daysAway} days`);
     }
   }
@@ -118,13 +81,13 @@ export function buildWatchLine(row: ScanRow): WatchLine {
       items.push('the option contract could not be graded');
     }
   } else {
-    items.push('the option contract has not been checked yet');
+    items.push('the option contract has not been checked — unknown, not cleared');
   }
 
   // --- the single-name gamma caveat ----------------------------------------
   if (row.regime === 'negative') {
     items.push(
-      "this name's own dealer positioning reads negative, which is context rather than a gate",
+      "this name's own dealer positioning reads negative, which is context rather than a rule",
     );
   }
 
@@ -134,219 +97,57 @@ export function buildWatchLine(row: ScanRow): WatchLine {
   };
 }
 
-// --- alignment badges --------------------------------------------------------
+// --- why it is where it is ---------------------------------------------------
 
-/**
- * The four badges, each resolved from its own evidence and nothing else.
- *
- * No badge reads another badge, none is weighted, and none is suppressed when
- * it comes out red. The point of a four-badge row is that a reader can see
- * disagreement between them at a glance; a row engineered to agree with itself
- * would be decoration.
- *
- * `unknown` is used where the evidence is absent, and it is never green. See
- * `ALIGNMENT_KEYS` for why that third state has to exist.
- */
-export function alignmentBadges(row: ScanRow): AlignmentBadge[] {
-  const badge = (key: AlignmentKey, state: FilterState, detail: string): AlignmentBadge => ({
-    key,
-    state,
-    detail,
-  });
-
-  const out: AlignmentBadge[] = [];
-
-  // --- market: the one market-wide gate ------------------------------------
-  const market = row.single.spyGamma;
-  out.push(
-    badge(
-      'market',
-      market?.state ?? 'unknown',
-      market?.detail ?? 'the market regime could not be read',
-    ),
-  );
-
-  /*
-   * --- momentum: the volume gate, qualified by how far it has already run ---
-   *
-   * Confirmed volume is what makes it green. Being extended does not turn it
-   * red — the move is still confirmed — but it is named in the detail, because
-   * "confirmed" and "confirmed and already 8% past its 20-day average" are not
-   * the same thing to act on.
-   */
-  const volume = row.single.volume;
-  const extendedNote =
-    row.extension.extended && row.extension.pctAbove20Ema !== null
-      ? `, and already ${row.extension.pctAbove20Ema.toFixed(0)}% above its 20-day average`
-      : '';
-  out.push(
-    badge(
-      'momentum',
-      volume?.state ?? 'unknown',
-      `${volume?.detail ?? 'volume could not be read'}${extendedNote}`,
-    ),
-  );
-
-  /*
-   * --- trend: the long average and the short one, pointing the same way ----
-   *
-   * The gate is the 200-day alone. This badge is stricter on purpose: a name
-   * above its 200-day but under its 20-day has a long trend that is up and a
-   * short one that is not, and that disagreement is exactly the thing four
-   * badges exist to show.
-   */
-  const trendGate = row.single.ema;
-  const pct = row.extension.pctAbove20Ema;
-
-  if (!trendGate || trendGate.state === 'unknown' || pct === null) {
-    out.push(
-      badge(
-        'trend',
-        'unknown',
-        trendGate?.state === 'unknown'
-          ? trendGate.detail
-          : 'the 20-day average could not be read, so the two trends cannot be compared',
-      ),
-    );
-  } else if (trendGate.state === 'fail') {
-    out.push(badge('trend', 'fail', trendGate.detail));
-  } else if (pct >= 0) {
-    out.push(
-      badge('trend', 'pass', 'above both the 200-day and the 20-day averages'),
-    );
-  } else {
-    out.push(
-      badge(
-        'trend',
-        'fail',
-        `above the 200-day average but ${Math.abs(pct).toFixed(0)}% below its 20-day — the long trend is up, the short one is not`,
-      ),
-    );
-  }
-
-  /*
-   * --- options: the contract, which is the one thing the gates never saw ---
-   *
-   * Green for Excellent and Tradable only. Caution is amber-in-spirit and red
-   * here, because this badge answers a yes/no question — is there something
-   * worth trading — and "the spread is wide and the open interest is thin" is
-   * a no.
-   */
-  const quality = row.optionQuality;
-  if (!quality) {
-    out.push(badge('options', 'unknown', 'the contract has not been checked yet'));
-  } else if (quality.badge === 'excellent' || quality.badge === 'tradable') {
-    out.push(badge('options', 'pass', quality.reasons[0] ?? 'the contract is tradable'));
-  } else if (quality.badge === 'unknown') {
-    out.push(badge('options', 'unknown', quality.reasons[0] ?? 'the contract could not be graded'));
-  } else {
-    out.push(badge('options', 'fail', quality.reasons[0] ?? 'the contract scored poorly'));
-  }
-
-  // Returned in the declared order, always all four, never filtered.
-  return ALIGNMENT_KEYS.map((key) => out.find((b) => b.key === key)!);
-}
-
-// --- why it matched ----------------------------------------------------------
-
-/** One labelled line of the plain-English account of a result. */
+/** One labelled line of the plain-English account of a row. */
 export interface MatchLine {
   label: string;
   text: string;
 }
 
 /**
- * The reasons a name is on the list, in the order someone would ask them.
+ * The account of one row, in the order someone would ask for it.
  *
- * Trend, then strength, then participation, then the market it sits in, then
- * the contract, then the risks. Written from the stored readings rather than
- * from the score, so the account and the number cannot come apart.
+ * Trend, then strength, then participation, then the contract, then the risks.
+ * Written from the same verdicts the badges are drawn from, so the sentence
+ * and the colour beside it cannot come apart — which was the point of doing
+ * both from one place.
+ *
+ * The heading is deliberately not "why it matched". Most rows on this page did
+ * not match; they are simply the closest things to matching, and a label that
+ * said otherwise would be the page recommending them.
  */
-export function whyItMatched(row: ScanRow): MatchLine[] {
+export function whyItRanks(scored: ScoredRow, settings: FilterSettings): MatchLine[] {
+  const { row, verdicts } = scored;
+
   const lines: MatchLine[] = [
-    { label: 'Trend', text: row.single.ema?.detail ?? 'no reading' },
+    { label: 'Trend', text: verdicts.ema.detail },
     {
       label: 'Strength',
-      text: `outperforming most of the market (RS ${row.rsScore.toFixed(0)}, #${row.rsRank})`,
+      text: `${verdicts.rs.detail} — #${row.metrics.rsRank} in the index`,
     },
-    { label: 'Volume', text: row.single.volume?.detail ?? 'no reading' },
-    { label: 'Market', text: row.single.spyGamma?.detail ?? 'no reading' },
+    { label: 'Volume', text: verdicts.volume.detail },
+    { label: 'Liquidity', text: verdicts.liquidity.detail },
   ];
 
   const quality = row.optionQuality;
   lines.push({
     label: 'Options',
     text: quality
-      ? `${contractSummary(quality.contract)} — ${badgeWord(quality.badge)}`
-      : 'not checked yet — open the result to grade the contract',
+      ? `${contractSummary(quality.contract)} — ${titleCase(quality.badge)}`
+      : 'not checked — only the top names by score are graded at scan time; open this one to grade it',
   });
 
-  lines.push({ label: 'Watch', text: buildWatchLine(row).text });
+  lines.push({ label: 'Watch', text: buildWatchLine(row, settings.earningsBufferDays).text });
 
   return lines;
 }
 
-function badgeWord(badge: string): string {
-  return badge.charAt(0).toUpperCase() + badge.slice(1);
+function titleCase(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
 }
 
-// --- partitioning ------------------------------------------------------------
-
-export interface Partitioned {
-  /** Everything that cleared all five gates, strongest relative strength first. */
-  passed: Array<{ row: ScanRow; outcome: RowOutcome }>;
-  /** Every candidate evaluated, strongest first, whatever the verdict. */
-  all: Array<{ row: ScanRow; outcome: RowOutcome }>;
-  /** How many candidates each gate eliminated, counted independently. */
-  eliminatedBy: Record<FilterKey, number>;
-  /**
-   * The gate that knocked out the most candidates.
-   *
-   * On a zero-result day this is the most useful thing on the page: it is what
-   * tells the reader whether the market was the problem or the rules were.
-   */
-  biggestEliminator: { key: FilterKey; count: number } | null;
-}
-
-export function partition(rows: ScanRow[]): Partitioned {
-  const passed: Partitioned['passed'] = [];
-  const all: Partitioned['all'] = [];
-  const eliminatedBy = {} as Record<FilterKey, number>;
-
-  for (const row of rows) {
-    const outcome = evaluateRow(row);
-    for (const key of outcome.failing) eliminatedBy[key] = (eliminatedBy[key] ?? 0) + 1;
-
-    all.push({ row, outcome });
-    if (outcome.passes) passed.push({ row, outcome });
-  }
-
-  /*
-   * Ranked on relative strength, which is the reading the list is built
-   * around and the one the reader can check on /strength.
-   *
-   * It used to rank on the Nadaraya-Watson z-score. That put a band-position
-   * reading — how far one name has run from its own recent regression — in
-   * charge of the order of the shortlist, which is more authority than the
-   * reading earns and more than the page ever explained.
-   */
-  const byRs = (a: { row: ScanRow }, b: { row: ScanRow }) =>
-    b.row.rsScore - a.row.rsScore;
-
-  let biggestEliminator: Partitioned['biggestEliminator'] = null;
-  for (const [key, count] of Object.entries(eliminatedBy) as Array<[FilterKey, number]>) {
-    if (!biggestEliminator || count > biggestEliminator.count) {
-      biggestEliminator = { key, count };
-    }
-  }
-
-  return {
-    passed: passed.sort(byRs),
-    all: all.sort(byRs),
-    eliminatedBy,
-    biggestEliminator,
-  };
-}
+// --- extension ---------------------------------------------------------------
 
 /** Extension, computed from a close and its 20-day average. Null-safe. */
 export function readExtension(

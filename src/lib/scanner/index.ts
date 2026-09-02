@@ -22,14 +22,17 @@ export { runScanner, scanCandidates, readTodaysScan, readLatestScan } from './ru
  * The read path for /scanner.
  *
  * Reads storage and nothing else. Unlike every other page here, a visit must
- * never be able to trigger the work: the scan spends fifty Cboe chains and a
- * hundred and fifty bar series, and it is only meaningful at the time it was
- * scheduled for. A page load at 2pm that quietly re-ran the scan would print a
- * different list from the one the morning job produced, under the morning's
- * heading.
+ * never be able to trigger the work: the scan spends a batch of Cboe chains,
+ * and it is only meaningful at the time it was scheduled for. A page load at
+ * 2pm that quietly re-ran the scan would print a different list from the one
+ * the morning job produced, under the morning's heading.
  *
  * So when today's scan is missing, this says so and shows when the last one
  * ran. That is a real answer, and the manual endpoint is how it gets fixed.
+ *
+ * The scored snapshot is shipped whole to the browser, which is what lets
+ * every control on the page re-filter instantly without a request. See
+ * `ScanResult` for why the document holds readings and never verdicts.
  */
 export interface ScannerView {
   /** Today's scan, or null when it has not run or could not be stored. */
@@ -40,14 +43,20 @@ export interface ScannerView {
   gamma: StoredGamma | null;
   /** Wall-clock times the two jobs are scheduled for, from config. */
   schedule: { gammaEt: string; scanEt: string };
+  /** The relative-strength cutoff the controls open on. */
   rsMin: number;
+  /** How many names the scan grades contracts for, and so how many rows show. */
+  contractTopN: number;
   nw: { bandwidth: number; lookback: number; mult: number; minBars: number };
   trendEmaPeriod: number;
   /**
-   * How many names passed each archived morning, newest first.
+   * How many names passed all five rules each archived morning, at the shipped
+   * defaults, newest first.
    *
    * On the page above the list, because the single most useful thing to know
-   * about a shortlist of three is whether three is a normal day or a thin one.
+   * about a shortlist of three is whether three is a normal day or a thin one
+   * — and because the list itself no longer answers it: the page renders its
+   * top rows whether or not any of them passed.
    */
   counts: DailyCount[];
   /** Mean over the archived window, gate-shut zeros included. */
@@ -71,6 +80,7 @@ export async function getScannerView(): Promise<ScannerView> {
     gamma,
     schedule: { gammaEt: tuning.gammaTimeEt, scanEt: tuning.scanTimeEt },
     rsMin: tuning.rsMin,
+    contractTopN: tuning.contractTopN,
     nw: {
       bandwidth: tuning.nw.bandwidth,
       lookback: tuning.nw.lookback,

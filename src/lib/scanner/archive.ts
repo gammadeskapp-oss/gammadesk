@@ -1,9 +1,11 @@
 import 'server-only';
 
 import { createJsonStore } from '../jsonStore';
-import { alignmentBadges, buildWatchLine, partition } from './evaluate';
+import { buildWatchLine } from './evaluate';
+import { DEFAULT_FILTERS, scoreAndJudge } from './score';
+import { EARNINGS_EXCLUSION_DAYS, RULE_KEYS } from './types';
 import type {
-  AlignmentBadge,
+  FilterState,
   OptionContract,
   OptionQualityBadge,
   ScanResult,
@@ -14,14 +16,16 @@ import type {
  *
  * ## Why this is a second store and not just a longer `keepDays`
  *
- * The scan document carries every candidate with its timeframe readings and
- * its magnets — a few hundred kilobytes a day, most of it drawing material for
- * a chart nobody reopens a week later. Keeping ninety days of that to answer
- * "how many names passed on Tuesday" would be the wrong trade.
+ * The scan document carries every scored name in the index with its readings
+ * and its magnets — a few hundred kilobytes a day, most of it raw material the
+ * browser filters against on the morning it was written and nobody reopens a
+ * week later. Keeping ninety days of that to answer "how many names passed on
+ * Tuesday" would be the wrong trade.
  *
- * So this stores the answers rather than the workings: the names that passed,
- * their scores, their four badges, and the option numbers **as they were at
- * scan time**. A few hundred bytes a day, which can be kept for a quarter.
+ * So this stores the answers rather than the workings: the names that passed
+ * at the shipped defaults, their scores, their five rule states, and the
+ * option numbers **as they were at scan time**. A few hundred bytes a day,
+ * which can be kept for a quarter.
  *
  * ## Frozen on purpose
  *
@@ -38,8 +42,9 @@ import type {
  * the number of names it actually clears on an ordinary day, and that is not
  * knowable from one morning — a floor that yields twenty-seven candidates and
  * three passes is a different instrument from one that yields twenty. The
- * count is stored every day, on every path, including the days the market gate
- * was shut and the answer was zero.
+ * count is stored every day, on every path, including the days the answer is
+ * zero — which is now a statement about the market rather than about the page,
+ * because the page renders its ranked list either way.
  */
 
 const archiveStore = createJsonStore<StoredArchive>(
@@ -54,10 +59,20 @@ const archiveStore = createJsonStore<StoredArchive>(
 /** One name, as it stood on the morning it passed. */
 export interface ArchivedName {
   symbol: string;
+  /** The composite 0-100 score at the shipped weights. */
   score: number;
+  /** Position in the index by relative strength. */
   rank: number;
-  /** The four alignment badges, frozen. */
-  badges: Array<{ key: AlignmentBadge['key']; state: AlignmentBadge['state'] }>;
+  /**
+   * The rule states, frozen.
+   *
+   * Keys are `RuleKey` for anything written from this version on. Documents
+   * archived before the rebuild carry the four old alignment keys instead
+   * (`market`, `momentum`, `trend`, `options`), which is why this is a plain
+   * string rather than a union — a record that could not be read back is not
+   * a record. The history page labels whichever it finds.
+   */
+  badges: Array<{ key: string; state: FilterState }>;
   optionBadge: OptionQualityBadge | null;
   /** The graded contract, or null when none was graded that morning. */
   contract: OptionContract | null;
@@ -75,12 +90,22 @@ export interface ArchivedDay {
   scannedAt: string;
   /** The number this file exists for. */
   passed: number;
-  /** Candidates that cleared the RS floor and were carried into the rest. */
+  /**
+   * Names scored that morning.
+   *
+   * Before the rebuild this was the count that cleared the relative-strength
+   * floor — a couple of dozen. It is now the whole scoreable index, because
+   * nothing is dropped for being weak, so the ratio it forms with `passed`
+   * changed meaning on that date. The history page says so.
+   */
   candidates: number;
   universe: number;
   rsMin: number;
   spyRegime: 'positive' | 'negative' | null;
-  /** Set when the market gate was shut, so a zero reads as a reason. */
+  /**
+   * Set only on days archived before the market regime stopped being a gate.
+   * Null on every morning since. See `archiveScan`.
+   */
   gateReason: string | null;
   /** Names removed for reporting inside the earnings window. */
   earningsExcluded: number;
@@ -102,30 +127,50 @@ export interface StoredArchive {
  */
 export const ARCHIVE_KEEP_DAYS = 90;
 
-/** Freeze one finished scan into the archive. Never throws. */
+/**
+ * Freeze one finished scan into the archive. Never throws.
+ *
+ * ## Recorded at the shipped defaults, always
+ *
+ * The page's cutoffs are the reader's now, but the archive's are not and must
+ * not be. The question this store exists to answer — does this rule set clear
+ * a workable number of names on an ordinary day — is only answerable if
+ * "passed" means one fixed thing across the whole window. A history recorded
+ * at whatever the sliders happened to be set to would be ninety days of
+ * incomparable numbers.
+ */
 export async function archiveScan(result: ScanResult): Promise<void> {
-  const { passed } = partition(result.rows);
+  const judged = scoreAndJudge(result.rows, DEFAULT_FILTERS);
+  const passed = judged.filter(
+    (entry) => entry.passes && !entry.earningsExcluded,
+  );
 
   const day: ArchivedDay = {
     date: result.date,
     scannedAt: result.scannedAt,
     passed: passed.length,
-    candidates: result.candidates,
+    candidates: result.scored,
     universe: result.universe,
     rsMin: result.rsMin,
     spyRegime: result.spyRegime,
-    gateReason: result.gateReason,
+    /*
+     * Always null from this version on. The market regime stopped being a gate
+     * — it is a banner — so no morning is "gate shut" any more. The field stays
+     * so the days archived before the rebuild, which genuinely were, still read
+     * correctly on the run-rate strip.
+     */
+    gateReason: null,
     earningsExcluded: result.earningsExcluded.length,
     qualityChecked: result.qualityChecked,
-    names: passed.map(({ row }) => ({
+    names: passed.map(({ row, score, verdicts }) => ({
       symbol: row.symbol,
-      score: row.rsScore,
-      rank: row.rsRank,
-      badges: alignmentBadges(row).map((b) => ({ key: b.key, state: b.state })),
+      score: score.total,
+      rank: row.metrics.rsRank,
+      badges: RULE_KEYS.map((key) => ({ key, state: verdicts[key].state })),
       optionBadge: row.optionQuality?.badge ?? null,
       contract: row.optionQuality?.contract ?? null,
       optionSource: row.optionQuality?.source ?? null,
-      watch: buildWatchLine(row).text,
+      watch: buildWatchLine(row, EARNINGS_EXCLUSION_DAYS).text,
       earningsDateIso: row.earnings.dateIso,
     })),
   };

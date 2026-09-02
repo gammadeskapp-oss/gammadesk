@@ -29,7 +29,7 @@ export const PAGE_DESCRIPTIONS: Record<string, string> = {
   '/movers':
     "What's moving right now, on volume — with the context to check each name against. Not a scanner result.",
   '/scanner':
-    "This morning's S&P 500 names that pass all five rules, each with its option contract graded.",
+    'The S&P 500 scored against five rules and ranked, with every rule shown passed, failed or not measured.',
   '/scanner/history':
     'Every past morning the scanner ran, and how many names it produced each day.',
   '/strength':
