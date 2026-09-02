@@ -302,7 +302,7 @@ section('Every condition in the brief is present exactly once');
 }
 
 
-section('Episodes are derived from the overlap count, not estimated');
+section('Episodes are anchored, never chained off the previous match');
 {
   const bars = series(new Array(400).fill(0).map((_, i) => 100 + i));
   // Two clusters: three matches close together, then two more much later.
@@ -314,6 +314,85 @@ section('Episodes are derived from the overlap count, not estimated');
     'episodes and overlaps account for every match',
     h.episodes + h.overlapping === matches.length,
   );
+}
+{
+  /*
+   * The regression this whole section exists for.
+   *
+   * Sixty matches spaced ten sessions apart. Chaining off the previous match
+   * calls that ONE episode, because no single gap reaches 42 — which is how
+   * SPY ended up reporting 624 three-up-closes as 8 independent readings, with
+   * one "stretch" running from 2010 to 2022. Anchoring gives one observation
+   * per 42 sessions, which is what the number is supposed to mean.
+   */
+  const bars = series(new Array(900).fill(0).map((_, i) => 100 + i));
+  const dense = Array.from({ length: 60 }, (_, i) => i * 10);
+  const matches = buildMatches(bars, dense);
+  const episodes = toEpisodes(matches);
+
+  ok('a dense run is not one episode', episodes.length > 1,
+    `got ${episodes.length}`);
+  // Matches at 0,10,...,590. Anchors at 0,42*k rounded up to a match: every
+  // fifth match, so 0,50,100,... up to 550 — twelve of them.
+  eq('it is one observation per window', episodes.length, 12);
+  eq('and the honesty count agrees', honestyOf(matches).episodes, 12);
+}
+{
+  /*
+   * The structural invariant, asserted over a spread of spacings. Anchors must
+   * be at least a full window apart and no episode may span a window, or the
+   * count is not measuring independence at all.
+   */
+  const bars = series(new Array(2000).fill(0).map((_, i) => 100 + i));
+  for (const spacing of [1, 3, 7, 13, 41, 42, 43, 90]) {
+    const idx = [];
+    for (let i = 0; i < 1500; i += spacing) idx.push(i);
+    const matches = buildMatches(bars, idx);
+    const episodes = toEpisodes(matches);
+    const anchors = episodes.map((e) => e.anchorIndex);
+
+    let minGap = Infinity;
+    for (let i = 1; i < anchors.length; i += 1) {
+      minGap = Math.min(minGap, anchors[i] - anchors[i - 1]);
+    }
+    ok(`anchors stay a window apart at spacing ${spacing}`,
+      anchors.length < 2 || minGap >= LONGEST, `min gap ${minGap}`);
+
+    // Every member of an episode must sit inside its anchor's own window.
+    const byIndex = new Map(matches.map((m) => [m.index, m]));
+    let widest = 0;
+    for (let i = 0; i < episodes.length; i += 1) {
+      const start = episodes[i].anchorIndex;
+      const endIdx = byIndex.get(
+        idx.filter((x) => x >= start && (i + 1 === episodes.length
+          || x < episodes[i + 1].anchorIndex)).pop(),
+      ).index;
+      widest = Math.max(widest, endIdx - start);
+    }
+    ok(`no episode spans a whole window at spacing ${spacing}`,
+      widest < LONGEST, `widest span ${widest}`);
+  }
+}
+{
+  /*
+   * A denser pattern can never yield fewer independent observations than a
+   * sparser one drawn from the same window. Chaining broke exactly this: 3-up
+   * reported 8 episodes against 4-up's 61, and a subset cannot out-count its
+   * superset.
+   */
+  const bars = series(new Array(1200).fill(0).map((_, i) => 100 + i));
+  const sparse = [];
+  for (let i = 0; i < 1000; i += 30) sparse.push(i);
+  const dense = [];
+  for (let i = 0; i < 1000; i += 10) dense.push(i);
+  ok('every sparse match is also a dense match',
+    sparse.every((i) => dense.includes(i)));
+
+  const sparseEpisodes = honestyOf(buildMatches(bars, sparse)).episodes;
+  const denseEpisodes = honestyOf(buildMatches(bars, dense)).episodes;
+  ok('so the denser pattern cannot have fewer episodes',
+    denseEpisodes >= sparseEpisodes,
+    `dense ${denseEpisodes} < sparse ${sparseEpisodes}`);
 }
 {
   const bars = series(new Array(400).fill(0).map((_, i) => 100 + i));

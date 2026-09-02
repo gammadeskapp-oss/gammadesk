@@ -57,19 +57,42 @@ export function outcomesAt(bars: Bar[], index: number): Outcome[] {
 }
 
 export function buildMatches(bars: Bar[], indices: number[]): Match[] {
-  return indices.map((index, i) => ({
-    date: bars[index].date,
-    index,
-    close: bars[index].close,
-    outcomes: outcomesAt(bars, index),
-    /*
-     * Overlap is measured against the immediately preceding match only. Two
-     * matches 42 sessions apart share no forward window; three matches inside
-     * one window each overlap the one before, which counts two of the three as
-     * dependent — the honest reading, and the one the page states.
-     */
-    overlapsPrevious: i > 0 && index - indices[i - 1] < LONGEST,
-  }));
+  /*
+   * Overlap is measured against the last ANCHOR, not against the previous
+   * match, and that distinction is the whole of this function.
+   *
+   * Measuring against the previous match chains transitively: if every match
+   * is within 42 sessions of the one before it, the entire run collapses into
+   * a single "episode" no matter how long it lasts. On SPY that produced one
+   * three-up-closes episode running from July 2010 to November 2022 — twelve
+   * years called one stretch of market — and reported 624 occurrences as 8
+   * independent readings. It also inverted the counts against each other: 3-up
+   * came out with FEWER episodes than 4-up, which cannot be true of a denser
+   * pattern and was the visible symptom.
+   *
+   * Anchoring instead gives what the number is supposed to mean. Walk the
+   * matches in order, take the first as an anchor, skip everything inside its
+   * 42-day forward window, take the next match beyond it as the next anchor.
+   * Anchors are then at least 42 sessions apart by construction, so their
+   * forward windows never overlap, and the count is the number of genuinely
+   * independent observations. Every episode also spans less than 42 sessions,
+   * which is the invariant `verify:analogues` asserts.
+   */
+  let lastAnchor = Number.NEGATIVE_INFINITY;
+
+  return indices.map((index) => {
+    const isAnchor = index - lastAnchor >= LONGEST;
+    if (isAnchor) lastAnchor = index;
+
+    return {
+      date: bars[index].date,
+      index,
+      close: bars[index].close,
+      outcomes: outcomesAt(bars, index),
+      /** True for a match sitting inside an earlier anchor's window. */
+      overlapsPrevious: !isAnchor,
+    };
+  });
 }
 
 function statsFor(matches: Match[], horizon: number): HorizonStats {

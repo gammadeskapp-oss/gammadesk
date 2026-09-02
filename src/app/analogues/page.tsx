@@ -337,7 +337,20 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                     */}
                     {filtered?.tooThin ? (
                       <div className="panel space-y-2 px-4 py-6 text-center">
-                        <p className="text-sm font-bold text-flip">
+                        {/*
+                          A withheld panel still has to say what it is about.
+                          Without the name and the rule this reads as a broken
+                          component rather than as the finding it is: the
+                          pattern was looked for, found, counted, and there was
+                          not enough of it.
+                        */}
+                        <p className="text-xs font-bold uppercase tracking-[0.14em] text-term-text">
+                          {selected.label}
+                        </p>
+                        <p className="mx-auto max-w-lg text-2xs leading-relaxed text-term-dim">
+                          {selected.rule}
+                        </p>
+                        <p className="pt-1 text-sm font-bold text-flip">
                           Too thin to read.
                         </p>
                         <p className="mx-auto max-w-lg text-xs leading-relaxed text-term-dim">

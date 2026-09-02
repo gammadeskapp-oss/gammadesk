@@ -63,8 +63,9 @@ export interface Match {
    */
   outcomes: Outcome[];
   /**
-   * True when a previous match falls within 42 sessions of this one. The
-   * overlap count is the number of matches for which this is true.
+   * True when this match sits inside an earlier anchor's 42-day window, so it
+   * is not an independent observation. False makes it an anchor, and the
+   * episode count is the number of anchors.
    */
   overlapsPrevious: boolean;
 }
