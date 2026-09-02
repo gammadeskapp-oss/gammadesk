@@ -34,6 +34,19 @@ import type { BaselineStats, ConditionResult } from './types';
 export const SMALL_GAP_PP = 0.5;
 export const CLEAR_GAP_PP = 1.5;
 
+/**
+ * Percentage points of 42-day median gap before the headline verdict stops
+ * saying "about the same".
+ *
+ * Deliberately the same number as `CLEAR_GAP_PP` — one threshold decides both
+ * the headline and the detail line, so the two can never disagree in front of
+ * the reader. It is printed on the page beside the verdict, because a reader
+ * who cannot see the threshold cannot judge the word that came out of it.
+ *
+ * It is a presentation cutoff. It is not a test, and the page says so.
+ */
+export const MEANINGFUL_GAP_PP = CLEAR_GAP_PP;
+
 function signedPp(pp: number): string {
   return `${pp > 0 ? '+' : ''}${pp.toFixed(1)}`;
 }
@@ -153,4 +166,115 @@ export function overlapSentence(condition: ConditionResult): string | null {
     `${episodes} independent ${episodes === 1 ? 'reading' : 'readings'} ` +
     `than ${count}.`
   );
+}
+
+/** Horizons in the reader's units, with the session count kept alongside. */
+export function horizonLabel(horizon: number): string {
+  switch (horizon) {
+    case 1: return '1 day';
+    case 5: return '1 week';
+    case 10: return '2 weeks';
+    case 21: return '1 month';
+    case 42: return '2 months';
+    default: return `${horizon} sessions`;
+  }
+}
+
+export interface Verdict {
+  tone: 'nothing' | 'better' | 'worse';
+  /** The headline sentence. */
+  text: string;
+  /** Percent-positive, condition and baseline, always shown beneath. */
+  condPositive: number;
+  basePositive: number;
+  gapPp: number;
+  horizon: number;
+}
+
+/**
+ * The headline read, in the plainest words the figures support.
+ *
+ * Three shapes only, chosen by the 42-day median gap against
+ * `MEANINGFUL_GAP_PP`. The percent-positive comparison is not folded into that
+ * choice — it is printed underneath instead, every time, in both directions.
+ *
+ * That split is deliberate and it matters. Drawdown crossing -10% has a median
+ * 2.7 points above the baseline while going up *less* often than a random day
+ * (61% against 67%). Folding both into one word would have to either suppress
+ * one of those facts or invent a fourth shape the brief does not have. Printing
+ * the second line always means the mixed case shows up as a mixed case, in
+ * figures, directly under the word.
+ *
+ * A thin sample never earns "better" or "worse" however large its gap: with
+ * fewer than ten examples the gap is a coincidence with a number attached, and
+ * the headline says exactly that rather than describing its size.
+ */
+export function verdictFor(
+  condition: ConditionResult,
+  baseline: BaselineStats[],
+): Verdict | null {
+  if (condition.matches.length === 0) return null;
+
+  const usable = condition.horizons
+    .filter((h) => {
+      const b = baseline.find((x) => x.horizon === h.horizon);
+      return (
+        h.n > 0 && h.medianReturn !== null && h.positivePct !== null &&
+        b && b.medianReturn !== null && b.positivePct !== null
+      );
+    })
+    .sort((a, b) => b.horizon - a.horizon);
+
+  const stats = usable[0];
+  if (!stats || stats.medianReturn === null || stats.positivePct === null) {
+    return null;
+  }
+  const base = baseline.find((x) => x.horizon === stats.horizon);
+  if (!base || base.medianReturn === null || base.positivePct === null) {
+    return null;
+  }
+
+  const gapPp = (stats.medianReturn - base.medianReturn) * 100;
+  const shared = {
+    condPositive: stats.positivePct,
+    basePositive: base.positivePct,
+    gapPp,
+    horizon: stats.horizon,
+  };
+
+  if (condition.honesty.thin) {
+    return {
+      ...shared,
+      tone: 'nothing',
+      text:
+        'This pattern tells you almost nothing — there are too few past ' +
+        'examples to say.',
+    };
+  }
+
+  if (gapPp >= MEANINGFUL_GAP_PP) {
+    return {
+      ...shared,
+      tone: 'better',
+      text:
+        'After this pattern the market did better than usual — but not every ' +
+        'time.',
+    };
+  }
+
+  if (gapPp <= -MEANINGFUL_GAP_PP) {
+    return {
+      ...shared,
+      tone: 'worse',
+      text: 'After this pattern the market did worse than usual.',
+    };
+  }
+
+  return {
+    ...shared,
+    tone: 'nothing',
+    text:
+      'This pattern tells you almost nothing — the market did about the same ' +
+      'after a random day.',
+  };
 }

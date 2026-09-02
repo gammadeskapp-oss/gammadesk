@@ -26,8 +26,10 @@ const {
   outcomesAt, buildMatches, summarise, honestyOf, LONGEST, baselineFor,
   buildBaseline,
 } = await import('../src/lib/analogues/forward.ts');
-const { comparisonSentence, overlapSentence, SMALL_GAP_PP, CLEAR_GAP_PP } =
-  await import('../src/lib/analogues/phrasing.ts');
+const {
+  comparisonSentence, overlapSentence, verdictFor, horizonLabel,
+  SMALL_GAP_PP, CLEAR_GAP_PP, MEANINGFUL_GAP_PP,
+} = await import('../src/lib/analogues/phrasing.ts');
 
 let failures = 0;
 let checks = 0;
@@ -502,6 +504,89 @@ section('The overlap line names the condition and leads with episodes');
   };
   ok('singular reads correctly', overlapSentence(one).includes('1 separate episode'), overlapSentence(one));
   ok('and singular reading', overlapSentence(one).includes('1 independent reading'));
+}
+
+
+section('The headline verdict has three shapes and never implies action');
+{
+  const make = (medianReturn, positivePct, n = 40, thin = false) => ({
+    id: 'down-3', label: '3 consecutive down closes', rule: '',
+    family: 'consecutive-down',
+    matches: new Array(n).fill(0).map((_, k) => ({
+      date: '2000-01-01', index: k, close: 100, outcomes: [], overlapsPrevious: false,
+    })),
+    firstMatch: null, lastMatch: null, activeToday: false,
+    horizons: [
+      { horizon: 42, n, medianReturn, bestReturn: 0.2, worstReturn: -0.2,
+        bestDate: null, worstDate: null, positivePct, medianDrawdown: -0.02,
+        worstDrawdown: -0.3 },
+    ],
+    honesty: { thin, overlapping: 0, episodes: n, clusteredYear: null },
+  });
+  const baseline = [
+    { horizon: 42, n: 8413, medianReturn: 0.0218, positivePct: 67, medianDrawdown: -0.026 },
+  ];
+
+  const nothing = verdictFor(make(0.0249, 70), baseline);
+  eq('a +0.3 point gap is the nothing shape', nothing.tone, 'nothing');
+  eq('with the specified wording', nothing.text,
+    'This pattern tells you almost nothing — the market did about the same after a random day.');
+
+  const better = verdictFor(make(0.0642, 79), baseline);
+  eq('a +4.2 point gap is better', better.tone, 'better');
+  eq('with the specified wording', better.text,
+    'After this pattern the market did better than usual — but not every time.');
+
+  const worse = verdictFor(make(0.0086, 57), baseline);
+  eq('a -1.3 point gap is not yet worse', worse.tone, 'nothing');
+  const clearlyWorse = verdictFor(make(0.0018, 57), baseline);
+  eq('a -2.0 point gap is worse', clearlyWorse.tone, 'worse');
+  eq('with the specified wording', clearlyWorse.text,
+    'After this pattern the market did worse than usual.');
+
+  // Exactly on the threshold counts as meaningful, in both directions.
+  eq('the threshold is inclusive going up',
+    verdictFor(make(0.0218 + MEANINGFUL_GAP_PP / 100, 70), baseline).tone, 'better');
+  eq('and inclusive going down',
+    verdictFor(make(0.0218 - MEANINGFUL_GAP_PP / 100, 60), baseline).tone, 'worse');
+
+  // The mixed case the split exists for: median well above, went up less often.
+  const mixed = verdictFor(make(0.0487, 61), baseline);
+  eq('a mixed condition still reads better on the median', mixed.tone, 'better');
+  eq('and carries the percent-positive that disagrees', mixed.condPositive, 61);
+  eq('beside the baseline it disagrees with', mixed.basePositive, 67);
+
+  const thinOne = verdictFor(make(0.09, 90, 5, true), baseline);
+  eq('a thin sample never earns better', thinOne.tone, 'nothing');
+  eq('and says why', thinOne.text,
+    'This pattern tells you almost nothing — there are too few past examples to say.');
+
+  const forbidden = ['buy', 'sell', 'should', 'recommend', 'signal',
+    'opportunity', 'edge', 'suggests', 'expect', 'p-value', 'significant'];
+  for (const v of [nothing, better, clearlyWorse, mixed, thinOne]) {
+    const lower = v.text.toLowerCase();
+    ok(`no action language in ${JSON.stringify(v.tone)}`,
+      !forbidden.some((w) => lower.includes(w)));
+  }
+  eq('the stated threshold is the one used', MEANINGFUL_GAP_PP, CLEAR_GAP_PP);
+}
+{
+  const empty = {
+    id: 'x', label: 'x', rule: '', family: 'gap', matches: [],
+    firstMatch: null, lastMatch: null, activeToday: false, horizons: [],
+    honesty: { thin: true, overlapping: 0, episodes: 0, clusteredYear: null },
+  };
+  eq('no matches means no verdict', verdictFor(empty, []), null);
+}
+
+section('Periods read in the reader units');
+{
+  eq('1 session', horizonLabel(1), '1 day');
+  eq('5 sessions', horizonLabel(5), '1 week');
+  eq('10 sessions', horizonLabel(10), '2 weeks');
+  eq('21 sessions', horizonLabel(21), '1 month');
+  eq('42 sessions', horizonLabel(42), '2 months');
+  eq('anything else falls back to sessions', horizonLabel(7), '7 sessions');
 }
 
 console.log(

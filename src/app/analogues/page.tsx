@@ -59,8 +59,22 @@ function ConditionLink({
           </span>
         )}
       </span>
-      <span className="shrink-0 tabular-nums text-term-faint">
-        {condition.matches.length}
+      {/*
+        Both counts, always. A big match count with few episodes is the shape
+        that most looks like strength and least is it — 624 threes-in-a-row on
+        SPY are about 8 separate stretches of market — so the number that
+        deflates it travels with the number that inflates it.
+      */}
+      <span className="shrink-0 text-right text-2xs tabular-nums text-term-faint">
+        {condition.matches.length > 0 ? (
+          <>
+            {condition.matches.length} times ·{' '}
+            {condition.honesty.episodes}{' '}
+            {condition.honesty.episodes === 1 ? 'episode' : 'episodes'}
+          </>
+        ) : (
+          '0 times'
+        )}
         {condition.honesty.thin && condition.matches.length > 0 && (
           <span className="ml-1 text-flip">thin</span>
         )}
@@ -69,22 +83,26 @@ function ConditionLink({
   );
 }
 
+/**
+ * What history this rests on.
+ *
+ * Kept in full and shrunk to a footnote. It is a precondition for trusting the
+ * tables rather than an answer to anything, and at its old size it was the
+ * first thing a reader met — competing with the verdict it exists to qualify.
+ */
 function Coverage({ view }: { view: AnaloguesView }) {
   const { coverage } = view;
   return (
-    <section className="panel space-y-2 px-4 py-3">
-      <h2 className="text-2xs uppercase tracking-[0.18em] text-term-faint">
-        History available
-      </h2>
-      <p className="text-xs leading-relaxed text-term-dim">
-        {coverage.bars.toLocaleString()} daily sessions for{' '}
-        <span className="text-term-text">{coverage.symbol}</span>,{' '}
-        {coverage.firstDate} to {coverage.lastDate} — {coverage.years} years.
-        Prices are split-adjusted and not dividend-adjusted, so every return on
-        this page is a price return.
+    <section className="panel space-y-1 px-4 py-2">
+      <p className="text-2xs leading-relaxed text-term-faint">
+        <span className="uppercase tracking-[0.18em]">History used</span> ·{' '}
+        {coverage.bars.toLocaleString()} trading days for{' '}
+        <span className="text-term-dim">{coverage.symbol}</span>,{' '}
+        {coverage.firstDate} to {coverage.lastDate} ({coverage.years} years).
+        Prices are split-adjusted and exclude dividends.
       </p>
       {coverage.gaps.length > 0 && (
-        <p className="text-2xs leading-relaxed text-flip">
+        <p className="text-2xs leading-relaxed text-term-faint">
           {coverage.gaps.length}{' '}
           {coverage.gaps.length === 1 ? 'break' : 'breaks'} of more than five
           days between sessions:{' '}
@@ -159,9 +177,9 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
           lookup over what happened, not a claim about what will.
         */}
         <p className="text-2xs leading-relaxed text-term-faint">
-          Every number below is a count or a quantile of sessions that already
-          happened. Nothing here is a forecast, and nothing here is advice.
-          Past conditions are matched on price alone.
+          Everything below is a count of what already happened after past
+          sessions that looked like this. Nothing here is a forecast, and
+          nothing here is advice.
         </p>
 
         {error && (
@@ -173,8 +191,6 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
 
         {view && (
           <>
-            <Coverage view={view} />
-
             <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
               <nav
                 aria-label="Conditions"
@@ -298,6 +314,9 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                 )}
               </div>
             </div>
+
+            {/* The precondition, after the answer it qualifies. */}
+            <Coverage view={view} />
           </>
         )}
       </main>
