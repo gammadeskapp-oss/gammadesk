@@ -23,6 +23,11 @@ import type { Bar, ConditionDef, ConditionId } from './types';
  * beside it.
  */
 
+/*
+ * `label` is what the reader sees and is written for someone who has never
+ * traded; `rule` beneath it carries the exact definition. Ids are never
+ * touched — they are in URLs — and neither is anything the detectors read.
+ */
 export const CONDITIONS: ConditionDef[] = [
   {
     id: 'down-3', family: 'consecutive-down', label: '3 consecutive down closes',
@@ -49,50 +54,50 @@ export const CONDITIONS: ConditionDef[] = [
     rule: 'Fifth straight close above the previous close.', warmup: 6,
   },
   {
-    id: 'dd-3', family: 'drawdown', label: 'Drawdown crosses -3%',
+    id: 'dd-3', family: 'drawdown', label: 'Down 3% from its 12-month high',
     rule: 'First close more than 3% below the trailing 52-week high.',
     warmup: 252,
   },
   {
-    id: 'dd-5', family: 'drawdown', label: 'Drawdown crosses -5%',
+    id: 'dd-5', family: 'drawdown', label: 'Down 5% from its 12-month high',
     rule: 'First close more than 5% below the trailing 52-week high.',
     warmup: 252,
   },
   {
-    id: 'dd-10', family: 'drawdown', label: 'Drawdown crosses -10%',
+    id: 'dd-10', family: 'drawdown', label: 'Down 10% from its 12-month high',
     rule: 'First close more than 10% below the trailing 52-week high.',
     warmup: 252,
   },
   {
-    id: 'rsi-under-30', family: 'rsi', label: 'RSI(14) closes below 30',
+    id: 'rsi-under-30', family: 'rsi', label: 'Momentum drops below 30 (RSI)',
     rule: 'RSI crosses from 30 or above to below 30 on the close.', warmup: 15,
   },
   {
-    id: 'rsi-over-70', family: 'rsi', label: 'RSI(14) closes above 70',
+    id: 'rsi-over-70', family: 'rsi', label: 'Momentum rises above 70 (RSI)',
     rule: 'RSI crosses from 70 or below to above 70 on the close.', warmup: 15,
   },
   {
-    id: 'ma200-lost', family: 'ma200-lost', label: 'First close below the 200-day',
+    id: 'ma200-lost', family: 'ma200-lost', label: 'First close below its 200-day average',
     rule: 'Close below the 200-day average after 20 or more closes above it.',
     warmup: 220,
   },
   {
-    id: 'ma200-regained', family: 'ma200-regained', label: 'First close above the 200-day',
+    id: 'ma200-regained', family: 'ma200-regained', label: 'First close above its 200-day average',
     rule: 'Close above the 200-day average after 20 or more closes below it.',
     warmup: 220,
   },
   {
     id: 'bb-lower', family: 'bollinger',
-    label: 'Close below the lower Bollinger band',
+    label: 'Close below its usual range (Bollinger band)',
     rule: 'Close below the 20-day average less two standard deviations, having closed inside the band the day before.',
     warmup: 21,
   },
   {
-    id: 'gap-up-1', family: 'gap', label: 'Gap open above +1%',
+    id: 'gap-up-1', family: 'gap', label: 'Opened more than 1% above the day before',
     rule: 'Open more than 1% above the previous close.', warmup: 2,
   },
   {
-    id: 'gap-down-1', family: 'gap', label: 'Gap open below -1%',
+    id: 'gap-down-1', family: 'gap', label: 'Opened more than 1% below the day before',
     rule: 'Open more than 1% below the previous close.', warmup: 2,
   },
 ];

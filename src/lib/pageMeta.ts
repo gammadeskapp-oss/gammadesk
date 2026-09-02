@@ -48,7 +48,7 @@ export const PAGE_DESCRIPTIONS: Record<string, string> = {
   '/post': "Today's positioning as a six-line post, ready to copy or send.",
   '/guide': 'What everything here means, for someone new to the market.',
   '/analogues':
-    'Past sessions on one ticker that met the same test, and what followed them — including the times it went badly.',
+    'Every time this setup happened before on one ticker, and what came next — including the times it went badly.',
   '/history':
     'The last 30 sessions, with the levels recorded each morning drawn on the day they belonged to.',
   '/methodology':

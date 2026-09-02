@@ -58,10 +58,6 @@ export const MEANINGFUL_GAP_PP = CLEAR_GAP_PP;
  */
 export const POSITIVE_DEADBAND_PP = 1;
 
-function signedPp(pp: number): string {
-  return `${pp > 0 ? '+' : ''}${pp.toFixed(1)}`;
-}
-
 function asPct(value: number): string {
   return `${value > 0 ? '+' : ''}${(value * 100).toFixed(1)}%`;
 }
@@ -117,10 +113,10 @@ export function comparisonSentence(
   const horizon = stats.horizon;
 
   const opening =
-    `After ${midSentence(condition.label)}, the ${horizon}-day median was ` +
-    `${asPct(stats.medianReturn)} across ${stats.n} ` +
-    `${stats.n === 1 ? 'match' : 'matches'}. Any random ${horizon}-day ` +
-    `window was ${asPct(base.medianReturn)}.`;
+    `After ${midSentence(condition.label)}, the typical result over ` +
+    `${horizonLabel(horizon)} was ${asPct(stats.medianReturn)}, across ` +
+    `${stats.n} ${stats.n === 1 ? 'time' : 'times'}. On a normal day it came ` +
+    `to ${asPct(base.medianReturn)}.`;
 
   /*
    * A thin sample gets no verdict on the size of the gap. Describing a gap
@@ -130,27 +126,22 @@ export function comparisonSentence(
   if (condition.honesty.thin) {
     return {
       text:
-        `${opening} Too few matches here to read the difference either way.`,
+        `${opening} Too few past examples here to tell either way.`,
       horizon,
       gapPp,
     };
   }
 
   const size = Math.abs(gapPp);
+  const direction = gapPp > 0 ? 'ahead' : 'behind';
   let verdict: string;
 
   if (size < SMALL_GAP_PP) {
-    verdict = 'Little difference here.';
+    verdict = 'Little difference between the two.';
   } else if (size < CLEAR_GAP_PP) {
-    verdict =
-      gapPp > 0
-        ? `The condition ran ${signedPp(gapPp)} points above the baseline, a small gap.`
-        : `The condition ran ${signedPp(gapPp)} points below the baseline, a small gap.`;
+    verdict = `The pattern came out a little ${direction}.`;
   } else {
-    verdict =
-      gapPp > 0
-        ? `The condition ran ${signedPp(gapPp)} points above the baseline.`
-        : `The condition ran ${signedPp(gapPp)} points below the baseline.`;
+    verdict = `The pattern came out clearly ${direction}.`;
   }
 
   return { text: `${opening} ${verdict}`, horizon, gapPp };
@@ -171,11 +162,10 @@ export function overlapSentence(condition: ConditionResult): string | null {
   const { episodes } = honesty;
 
   return (
-    `These ${count} matches come from about ${episodes} separate ` +
-    `${episodes === 1 ? 'episode' : 'episodes'} — ` +
-    `${midSentence(condition.label)} clusters together, so this is closer to ` +
-    `${episodes} independent ${episodes === 1 ? 'reading' : 'readings'} ` +
-    `than ${count}.`
+    `This happened ${count} times, but they came in clumps — about ` +
+    `${episodes} separate ${episodes === 1 ? 'stretch' : 'stretches'}. So it ` +
+    `is really ${episodes} ${episodes === 1 ? 'story' : 'stories'}, not ` +
+    `${count}.`
   );
 }
 
@@ -196,10 +186,10 @@ export interface Verdict {
   /** The headline sentence. */
   text: string;
   /**
-   * Set only when the median and percent-positive point opposite ways. Printed
-   * verbatim under the headline, which in that case picks neither side.
+   * The second line, always present: the two go-up rates in plain words. When
+   * the two measures point opposite ways it says so instead of picking one.
    */
-  disagreement?: string;
+  detail: string;
   /** Percent-positive, condition and baseline, always shown beneath. */
   condPositive: number;
   basePositive: number;
@@ -251,6 +241,11 @@ export function verdictFor(
   }
 
   const gapPp = (stats.medianReturn - base.medianReturn) * 100;
+  const up = stats.positivePct.toFixed(0);
+  const normalUp = base.positivePct.toFixed(0);
+  const against =
+    `It went up ${up}% of the time, against ${normalUp}% on a normal day.`;
+
   const shared = {
     condPositive: stats.positivePct,
     basePositive: base.positivePct,
@@ -262,45 +257,42 @@ export function verdictFor(
     return {
       ...shared,
       tone: 'nothing',
-      text:
-        'This pattern tells you almost nothing — there are too few past ' +
-        'examples to say.',
+      text: `This has only happened ${condition.matches.length} times — too ` +
+        'few to tell.',
+      detail: against,
     };
   }
 
   /*
    * When the two measures point opposite ways, the headline picks neither.
    *
-   * Drawdown crossing -10% on SPY is the case: its typical result beats a
-   * random day by 2.7 points while it goes UP less often, 61% against 67%. A
-   * headline saying "did better than usual" would be true of one measure and
-   * false of the other, and the reader has no way to know which one it came
-   * from. So the verdict falls back to "almost nothing" and the disagreement
-   * is stated in its own plain sentence rather than resolved silently.
+   * Being 10% down from the 12-month high on SPY is the case: its typical
+   * result comes out ahead while it goes UP less often, 61% against 67%. A
+   * headline saying "did better than normal" would be true of one measure and
+   * false of the other, with nothing telling the reader which one it came
+   * from. So it is called mixed and both facts are stated.
    *
-   * Only checked when the median gap would otherwise have picked a side. Below
-   * that threshold the headline is already "almost nothing", and announcing a
-   * contradiction between two numbers that are both flat would be noise.
+   * Only checked when the typical result would otherwise have picked a side.
+   * Below that threshold the headline already says nothing special happened,
+   * and announcing a contradiction between two flat numbers would be noise.
    */
   const positiveGapPp = stats.positivePct - base.positivePct;
-  const medianPicksSide = Math.abs(gapPp) >= MEANINGFUL_GAP_PP;
+  const resultPicksSide = Math.abs(gapPp) >= MEANINGFUL_GAP_PP;
   const positivePoints = Math.abs(positiveGapPp) >= POSITIVE_DEADBAND_PP;
-  const disagree =
-    medianPicksSide && positivePoints &&
-    Math.sign(gapPp) !== Math.sign(positiveGapPp);
 
-  if (disagree) {
-    const medianBetter = gapPp > 0;
+  if (
+    resultPicksSide && positivePoints &&
+    Math.sign(gapPp) !== Math.sign(positiveGapPp)
+  ) {
+    const resultBetter = gapPp > 0;
     return {
       ...shared,
       tone: 'nothing',
-      disagreement:
-        `Its typical result was ${medianBetter ? 'better' : 'worse'} than a ` +
-        `random day, but it went up ${medianBetter ? 'less' : 'more'} often. ` +
-        'The two point different ways.',
-      text:
-        'This pattern tells you almost nothing — the two measures below ' +
-        'disagree.',
+      text: 'This one is mixed — the numbers point different ways.',
+      detail:
+        `Its typical result was ${resultBetter ? 'better' : 'worse'} than ` +
+        `normal, but it went up ${resultBetter ? 'less' : 'more'} often — ` +
+        `${up}% of the time, against ${normalUp}% on a normal day.`,
     };
   }
 
@@ -308,9 +300,8 @@ export function verdictFor(
     return {
       ...shared,
       tone: 'better',
-      text:
-        'After this pattern the market did better than usual — but not every ' +
-        'time.',
+      text: 'The market usually did better than normal after this.',
+      detail: against,
     };
   }
 
@@ -318,15 +309,29 @@ export function verdictFor(
     return {
       ...shared,
       tone: 'worse',
-      text: 'After this pattern the market did worse than usual.',
+      text: 'The market usually did worse than normal after this.',
+      detail: against,
     };
   }
 
   return {
     ...shared,
     tone: 'nothing',
-    text:
-      'This pattern tells you almost nothing — the market did about the same ' +
-      'after a random day.',
+    text: 'Nothing special happened after this.',
+    detail:
+      `The market went up ${up}% of the time — about the same as it usually ` +
+      'does.',
   };
 }
+
+/**
+ * What an episode is, in one line.
+ *
+ * Shared by the sidebar and the table so the two cannot drift apart. The word
+ * survives the plain-language sweep because there is no shorter honest
+ * substitute — "stretches" alone loses that they are separated in time — but
+ * it never appears without this sentence within reach.
+ */
+export const EPISODE_NOTE =
+  'Episodes are separate stretches of market, not single days: several times ' +
+  'close together count as one.';

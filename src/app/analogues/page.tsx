@@ -5,7 +5,7 @@ import { AnalogueSearch } from '@/components/AnalogueSearch';
 import { AnalogueTable } from '@/components/AnalogueTable';
 import { Footer } from '@/components/Footer';
 import {
-  CONDITIONS, conditionById, fetchDeepBars, getAnalogues,
+  CONDITIONS, conditionById, fetchDeepBars, getAnalogues, EPISODE_NOTE,
   type AnaloguesView, type ConditionResult,
 } from '@/lib/analogues';
 import { TickerError } from '@/lib/ticker/bars';
@@ -99,7 +99,7 @@ function Coverage({ view }: { view: AnaloguesView }) {
         {coverage.bars.toLocaleString()} trading days for{' '}
         <span className="text-term-dim">{coverage.symbol}</span>,{' '}
         {coverage.firstDate} to {coverage.lastDate} ({coverage.years} years).
-        Prices are split-adjusted and exclude dividends.
+        Prices are adjusted for stock splits and exclude dividends.
       </p>
       {coverage.gaps.length > 0 && (
         <p className="text-2xs leading-relaxed text-term-faint">
@@ -164,7 +164,7 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
           </div>
           {view && (
             <p className="text-2xs text-term-faint">
-              {view.coverage.bars.toLocaleString()} sessions ·{' '}
+              {view.coverage.bars.toLocaleString()} trading days ·{' '}
               {view.coverage.source} · close {view.coverage.lastDate}
             </p>
           )}
@@ -176,11 +176,25 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
           Said once, at the top, in the same words as the brief: this is a
           lookup over what happened, not a claim about what will.
         */}
-        <p className="text-2xs leading-relaxed text-term-faint">
-          Everything below is a count of what already happened after past
-          sessions that looked like this. Nothing here is a forecast, and
-          nothing here is advice.
-        </p>
+        {/*
+          The whole page in five sentences, for someone who has never seen it.
+          Deliberately carries no numbers: a reader who does not yet know what
+          the page is for cannot use a figure, and every number here would be
+          one more thing to decode before the idea lands.
+        */}
+        <section className="panel px-4 py-3">
+          <h2 className="text-2xs uppercase tracking-[0.18em] text-term-faint">
+            What am I looking at
+          </h2>
+          <p className="mt-2 max-w-3xl text-xs leading-relaxed text-term-dim">
+            This page finds every time in the past that today&apos;s setup
+            happened, and shows what came next. The grey row underneath each
+            result is the same question asked about every day in the history.
+            If the two rows look alike, the pattern didn&apos;t tell you
+            anything. Most patterns don&apos;t. This is a record of what
+            already happened, not a forecast.
+          </p>
+        </section>
 
         {error && (
           <Panel>
@@ -193,12 +207,12 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
           <>
             <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
               <nav
-                aria-label="Conditions"
+                aria-label="Patterns"
                 className="panel h-fit overflow-hidden"
               >
                 <div className="flex items-baseline justify-between gap-2 px-3 py-2">
                   <h2 className="text-2xs uppercase tracking-[0.18em] text-term-faint">
-                    Conditions
+                    Patterns
                   </h2>
                   {selectedDef && (
                     <Link
@@ -217,6 +231,11 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                     selected={condition.id === selectedDef?.id}
                   />
                 ))}
+                {/* The word "episodes" appears above on every row, so its
+                    explanation sits at the foot of the same list. */}
+                <p className="border-t border-term-line px-3 py-2 text-2xs leading-relaxed text-term-faint">
+                  {EPISODE_NOTE}
+                </p>
               </nav>
 
               <div className="min-w-0 space-y-4">
@@ -227,11 +246,9 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                         {selected.label} — {symbol}
                       </h2>
                       <p className="text-2xs text-term-dim">
-                        {selected.matches.length}{' '}
-                        {selected.matches.length === 1
-                          ? 'occurrence'
-                          : 'occurrences'}{' '}
-                        marked on the full price history below.
+                        It happened {selected.matches.length}{' '}
+                        {selected.matches.length === 1 ? 'time' : 'times'},
+                        each marked on the price history below.
                       </p>
                     </div>
 
@@ -253,7 +270,7 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                     {selected.matches.length > 0 && (
                       <details className="panel px-4 py-3">
                         <summary className="cursor-pointer text-2xs uppercase tracking-[0.14em] text-term-faint">
-                          Every match date ({selected.matches.length})
+                          Every date it happened ({selected.matches.length})
                         </summary>
                         <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-2xs tabular-nums text-term-dim">
                           {selected.matches.map((match) => (
@@ -264,7 +281,7 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                               }
                               title={
                                 match.overlapsPrevious
-                                  ? 'Within 42 sessions of the previous match — overlapping window.'
+                                  ? 'Within two months of the one before — same stretch of market.'
                                   : undefined
                               }
                             >
@@ -273,8 +290,9 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                           ))}
                         </ul>
                         <p className="mt-2 text-2xs text-term-faint">
-                          Greyed dates fall within 42 sessions of the previous
-                          match.
+                          Greyed dates fall within two months of the one
+                          before, so they belong to the same stretch of market
+                          rather than a separate one.
                         </p>
                       </details>
                     )}
@@ -286,18 +304,20 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                         Today — {symbol}
                       </h2>
                       <p className="text-2xs text-term-dim">
-                        Conditions completed by the close on{' '}
+                        What happened by today&apos;s close,{' '}
                         {view.coverage.lastDate}.
                       </p>
                     </div>
 
                     {active.length === 0 ? (
                       <Panel>
-                        <p className="text-term-text">No conditions active.</p>
+                        <p className="text-term-text">
+                          None of these patterns happened today.
+                        </p>
                         <p className="mt-1 text-term-dim">
-                          None of the {CONDITIONS.length} tests was completed by
-                          the close on {view.coverage.lastDate}. Pick a
-                          condition on the left to see its history anyway.
+                          None of the {CONDITIONS.length} finished by the close
+                          on {view.coverage.lastDate}. Pick one on the left to
+                          see its history anyway.
                         </p>
                       </Panel>
                     ) : (

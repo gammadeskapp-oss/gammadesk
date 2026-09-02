@@ -420,30 +420,35 @@ section('The generated read quotes both numbers and never implies action');
   // Gap of +0.31pp: the real SPY down-3 case.
   const small = comparisonSentence(make(0.0249), baseline);
   eq('it speaks about the longest usable horizon', small.horizon, 42);
-  ok('it quotes the condition median', small.text.includes('+2.5%'));
-  ok('it quotes the baseline median', small.text.includes('+2.2%'));
+  ok('it quotes the pattern result', small.text.includes('+2.5%'));
+  ok('it quotes the every-other-day result', small.text.includes('+2.2%'));
   ok('it names the condition mid-sentence',
     small.text.startsWith('After 3 consecutive down closes,'));
   ok('a sub-half-point gap is called little difference',
-    small.text.includes('Little difference here.'), small.text);
-  ok('it carries the match count', small.text.includes('40 matches'));
+    small.text.includes('Little difference between the two.'), small.text);
+  ok('it carries the count in plain words', small.text.includes('40 times'));
+  ok('it says normal day rather than a random window',
+    small.text.includes('On a normal day it came to'), small.text);
+  ok('no jargon survives in the generated read',
+    !/median|baseline|drawdown|horizon/i.test(small.text), small.text);
 
   const clear = comparisonSentence(make(0.0518), baseline);
   ok('a three-point gap is stated plainly',
-    clear.text.includes('above the baseline.') && clear.text.includes('+3.0'), clear.text);
-  ok('and is not called small', !clear.text.includes('a small gap'));
+    clear.text.includes('came out clearly ahead.'), clear.text);
+  ok('and is not called a little', !clear.text.includes('a little ahead'));
 
   const middling = comparisonSentence(make(0.0318), baseline);
-  ok('a one-point gap is explicitly called small',
-    middling.text.includes('a small gap'), middling.text);
+  ok('a one-point gap is called a little ahead',
+    middling.text.includes('came out a little ahead.'), middling.text);
 
   const negative = comparisonSentence(make(-0.0182), baseline);
-  ok('a negative gap says below', negative.text.includes('below the baseline'), negative.text);
-  ok('and keeps its sign', negative.text.includes('-4.0'), negative.text);
+  ok('a negative gap says behind',
+    negative.text.includes('came out clearly behind.'), negative.text);
+  ok('and quotes the losing figure', negative.text.includes('-1.8%'), negative.text);
 
   const thinOne = comparisonSentence(make(0.09, 5, true), baseline);
   ok('a thin sample gets no verdict on the gap size',
-    thinOne.text.includes('Too few matches here to read the difference either way.'),
+    thinOne.text.includes('Too few past examples here to tell either way.'),
     thinOne.text);
   ok('and still quotes both figures',
     thinOne.text.includes('+9.0%') && thinOne.text.includes('+2.2%'));
@@ -488,10 +493,9 @@ section('The overlap line names the condition and leads with episodes');
     honesty: { thin: false, overlapping: 411, episodes: 37, clusteredYear: null },
   };
   const line = overlapSentence(condition);
-  ok('it leads with the match and episode counts',
-    line.startsWith('These 448 matches come from about 37 separate episodes'), line);
-  ok('it names what clusters', line.includes('3 consecutive down closes clusters together'), line);
-  ok('it ends on the comparison', line.includes('closer to 37 independent readings than 448'), line);
+  eq('it reads in plain words', line,
+    'This happened 448 times, but they came in clumps — about 37 separate '
+    + 'stretches. So it is really 37 stories, not 448.');
   ok('no action language', !/buy|sell|should/i.test(line));
 }
 {
@@ -502,8 +506,9 @@ section('The overlap line names the condition and leads with episodes');
     firstMatch: null, lastMatch: null, activeToday: false, horizons: [],
     honesty: { thin: true, overlapping: 1, episodes: 1, clusteredYear: null },
   };
-  ok('singular reads correctly', overlapSentence(one).includes('1 separate episode'), overlapSentence(one));
-  ok('and singular reading', overlapSentence(one).includes('1 independent reading'));
+  ok('singular stretch reads correctly',
+    overlapSentence(one).includes('about 1 separate stretch.'), overlapSentence(one));
+  ok('and singular story', overlapSentence(one).includes('really 1 story, not 2'));
 }
 
 
@@ -529,20 +534,23 @@ section('The headline verdict has three shapes and never implies action');
 
   const nothing = verdictFor(make(0.0249, 70), baseline);
   eq('a +0.3 point gap is the nothing shape', nothing.tone, 'nothing');
-  eq('with the specified wording', nothing.text,
-    'This pattern tells you almost nothing — the market did about the same after a random day.');
+  eq('with the specified wording', nothing.text, 'Nothing special happened after this.');
+  eq('and its second line names the usual rate', nothing.detail,
+    'The market went up 70% of the time — about the same as it usually does.');
 
   const better = verdictFor(make(0.0642, 79), baseline);
   eq('a +4.2 point gap is better', better.tone, 'better');
   eq('with the specified wording', better.text,
-    'After this pattern the market did better than usual — but not every time.');
+    'The market usually did better than normal after this.');
+  eq('and its second line compares the two rates', better.detail,
+    'It went up 79% of the time, against 67% on a normal day.');
 
   const worse = verdictFor(make(0.0086, 57), baseline);
   eq('a -1.3 point gap is not yet worse', worse.tone, 'nothing');
   const clearlyWorse = verdictFor(make(0.0018, 57), baseline);
   eq('a -2.0 point gap is worse', clearlyWorse.tone, 'worse');
   eq('with the specified wording', clearlyWorse.text,
-    'After this pattern the market did worse than usual.');
+    'The market usually did worse than normal after this.');
 
   // Exactly on the threshold counts as meaningful, in both directions.
   eq('the threshold is inclusive going up',
@@ -563,7 +571,7 @@ section('The headline verdict has three shapes and never implies action');
   const thinOne = verdictFor(make(0.09, 90, 5, true), baseline);
   eq('a thin sample never earns better', thinOne.tone, 'nothing');
   eq('and says why', thinOne.text,
-    'This pattern tells you almost nothing — there are too few past examples to say.');
+    'This has only happened 5 times — too few to tell.');
 
   const forbidden = ['buy', 'sell', 'should', 'recommend', 'signal',
     'opportunity', 'edge', 'suggests', 'expect', 'p-value', 'significant'];
@@ -617,26 +625,28 @@ section('When the two measures disagree the headline picks neither');
   const mixed = verdictFor(make(0.0487, 61), baseline);
   eq('the headline refuses to pick a side', mixed.tone, 'nothing');
   eq('and says why', mixed.text,
-    'This pattern tells you almost nothing — the two measures below disagree.');
-  eq('the disagreement is stated plainly', mixed.disagreement,
-    'Its typical result was better than a random day, but it went up less often. ' +
-    'The two point different ways.');
+    'This one is mixed — the numbers point different ways.');
+  eq('the disagreement is stated plainly', mixed.detail,
+    'Its typical result was better than normal, but it went up less often — ' +
+    '61% of the time, against 67% on a normal day.');
 
   // The mirror: median well below, went up more often.
   const mirrored = verdictFor(make(0.0018, 74), baseline);
   eq('the mirrored case also refuses', mirrored.tone, 'nothing');
-  eq('and reads the other way round', mirrored.disagreement,
-    'Its typical result was worse than a random day, but it went up more often. ' +
-    'The two point different ways.');
+  eq('and reads the other way round', mirrored.detail,
+    'Its typical result was worse than normal, but it went up more often — ' +
+    '74% of the time, against 67% on a normal day.');
 
   // Agreement is untouched: both above.
   const agree = verdictFor(make(0.0642, 79), baseline);
   eq('agreement still earns better', agree.tone, 'better');
-  eq('and carries no disagreement line', agree.disagreement, undefined);
+  ok('and its second line is the ordinary comparison',
+    agree.detail.startsWith('It went up 79% of the time, against 67%'), agree.detail);
 
   const agreeWorse = verdictFor(make(0.0018, 60), baseline);
   eq('agreement still earns worse', agreeWorse.tone, 'worse');
-  eq('with no disagreement line', agreeWorse.disagreement, undefined);
+  ok('with the ordinary second line',
+    agreeWorse.detail.includes('against 67% on a normal day'), agreeWorse.detail);
 
   /*
    * A median gap too small to pick a side never raises a disagreement, however
@@ -644,29 +654,43 @@ section('When the two measures disagree the headline picks neither');
    * numbers would be noise, and four of SPY's conditions sit there.
    */
   const flat = verdictFor(make(0.0225, 60), baseline);
-  eq('a sub-threshold median raises no disagreement', flat.disagreement, undefined);
-  eq('and reads as the ordinary nothing', flat.text,
-    'This pattern tells you almost nothing — the market did about the same after a random day.');
+  eq('a sub-threshold typical result raises no disagreement', flat.text,
+    'Nothing special happened after this.');
+  ok('and its second line says about the same',
+    flat.detail.includes('about the same as it usually does'), flat.detail);
 
   // Percent-positive inside the deadband is not a direction.
   const withinDeadband = verdictFor(make(0.0487, 66.5), baseline);
   eq('a sub-point positive gap does not count as disagreeing',
     withinDeadband.tone, 'better');
-  eq('and prints no line', withinDeadband.disagreement, undefined);
+  ok('and reads as an ordinary better',
+    withinDeadband.text === 'The market usually did better than normal after this.');
   eq('the deadband is the documented one', POSITIVE_DEADBAND_PP, 1);
 
   // Thin still wins over everything.
   const thinMixed = verdictFor(make(0.0487, 61, 5, true), baseline);
   eq('a thin sample still reports too few examples', thinMixed.text,
-    'This pattern tells you almost nothing — there are too few past examples to say.');
-  eq('and raises no disagreement line', thinMixed.disagreement, undefined);
+    'This has only happened 5 times — too few to tell.');
 
   const forbidden = ['buy', 'sell', 'should', 'recommend', 'signal',
     'opportunity', 'edge', 'suggests', 'expect', 'p-value', 'significant'];
   for (const v of [mixed, mirrored]) {
-    const text = `${v.text} ${v.disagreement}`.toLowerCase();
-    ok('no action language in the disagreement wording',
+    const text = `${v.text} ${v.detail}`.toLowerCase();
+    ok('no action language in the mixed wording',
       !forbidden.some((w) => text.includes(w)));
+  }
+
+  /*
+   * The words the brief bans outright from the headline and its second line.
+   * They are correct terms and they stay in "How this is calculated"; what is
+   * not allowed is meeting one before the answer.
+   */
+  const banned = ['baseline', 'median', 'random day', 'percentage point',
+    'statistical', 'distribution', 'sample'];
+  for (const v of [mixed, mirrored, thinMixed, agree, agreeWorse, withinDeadband]) {
+    const text = `${v.text} ${v.detail}`.toLowerCase();
+    const hit = banned.find((w) => text.includes(w));
+    ok(`no jargon in ${JSON.stringify(v.text.slice(0, 34))}`, !hit, `found ${hit}`);
   }
 }
 
