@@ -9,6 +9,7 @@ import { ForecastChart } from '@/components/ForecastChart';
 import { InfoTip } from '@/components/InfoTip';
 import { LevelsPanel } from '@/components/LevelsPanel';
 import { PageBar } from '@/components/PageBar';
+import { PositioningRecordCard } from '@/components/PositioningRecordCard';
 import { ReadMode } from '@/components/ReadMode';
 import { RetestFeed } from '@/components/RetestFeed';
 import { SimpleRead } from '@/components/SimpleRead';
@@ -20,6 +21,11 @@ import { TradeabilityPanel } from '@/components/TradeabilityPanel';
 import { ChainError } from '@/lib/chainSource';
 import { DecisionError, getDecision, type DecisionResult } from '@/lib/decision';
 import { exposureIsReliable, type Check, type Grade } from '@/lib/decision/types';
+import { readLog } from '@/lib/log/store';
+import {
+  summarisePositioningRecord,
+  type PositioningRecord,
+} from '@/lib/log/positioningRecord';
 import { getForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
@@ -154,10 +160,21 @@ function Decision({
   retests,
   methodology,
   stale,
+  positioningRecord,
+  tracksLog,
 }: {
   data: DecisionResult;
   breadth: BreadthReading | null;
   retests: RetestFeedData | null;
+  /*
+   * The settled record for the tracked symbol, or null on any other ticker —
+   * and null also when the log could not be read, which `tracksLog`
+   * distinguishes. The two cases read very differently to someone looking at
+   * the page and must not print the same sentence.
+   */
+  positioningRecord: PositioningRecord | null;
+  /** True when this page is showing the one symbol the log records. */
+  tracksLog: boolean;
   /** Graded by the caller, so this and the banner cannot disagree. */
   stale: boolean;
   /*
@@ -438,6 +455,29 @@ function Decision({
               </div>
             )}
           </Section>
+
+          {/*
+            The record under the checks, because it is the same levels judged
+            after the fact — and directly under them, so a conviction reading
+            and how that reading has actually turned out are on one screen.
+
+            On any other ticker this is a sentence rather than a card. An empty
+            panel would read as "no levels have held", which is a claim about
+            the market; the truth is that nothing has been recorded, which is a
+            claim about this project.
+          */}
+          {positioningRecord ? (
+            <PositioningRecordCard symbol={config.symbol} record={positioningRecord} />
+          ) : (
+            <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
+              <h2 className="label-xs">How these levels have behaved</h2>
+              <p className="mt-1.5">
+                {tracksLog
+                  ? 'The accuracy record could not be read, so no rates are shown rather than incomplete ones.'
+                  : `Only ${config.symbol} has a settled record. Levels are logged for ${config.symbol} each morning and judged after the close, and that log has no per-ticker history behind it — so there is nothing to show for ${c.symbol} rather than nothing to report.`}
+              </p>
+            </section>
+          )}
         </div>
       </div>
 
@@ -553,6 +593,20 @@ export default async function DecisionPage({ searchParams }: PageProps) {
       ])
     : [null, null, null, null];
 
+  /*
+   * The accuracy log holds one symbol and has no field to hold another, so it
+   * is only read when the page is showing that symbol. On any other ticker
+   * there is nothing to fetch and nothing to compare against — see
+   * `lib/log/positioningRecord.ts`, and `app/page.tsx`, which withholds its
+   * log line on the same grounds.
+   */
+  const tracksLog = symbol === config.symbol;
+  const positioningRecord: PositioningRecord | null = tracksLog
+    ? await readLog()
+        .then(summarisePositioningRecord)
+        .catch((): PositioningRecord | null => null)
+    : null;
+
   const forecastPanel = forecast ? (
     <ForecastChart data={forecast} />
   ) : (
@@ -633,6 +687,8 @@ export default async function DecisionPage({ searchParams }: PageProps) {
                 retests={retests}
                 methodology={methodology}
                 stale={Boolean(staleness?.stale)}
+                positioningRecord={positioningRecord}
+                tracksLog={tracksLog}
               />
             }
           />
