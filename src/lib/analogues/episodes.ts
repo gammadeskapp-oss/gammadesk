@@ -6,40 +6,44 @@ import type { Bar, Match } from './types';
  *
  * ## Why the chart cannot be drawn per occurrence
  *
- * Three consecutive down closes fired 448 times on SPY, and 411 of those fall
- * within 42 sessions of an earlier one. Drawing 448 lines would draw the same
- * few stretches of market over and over — March 2020 would contribute a dozen
- * near-identical paths — and a reader looking at the density of the bundle
- * would read a handful of episodes as hundreds of independent confirmations.
- * The spread would look far more robust than it is, which is the exact
- * failure this page exists to avoid.
+ * Three consecutive down closes fired on 448 days of SPY, drawn from 155
+ * non-overlapping stretches. Drawing 448 lines would draw the same stretches
+ * over and over — March 2020 would contribute several near-identical paths —
+ * and a reader judging the spread by the density of the bundle would read 155
+ * observations as 448. The spread would look more robust than it is, which is
+ * the exact failure this page exists to avoid.
  *
- * So the chart plots one line per episode. Same grouping the honesty caveat
- * already counts: a run of occurrences each within `LONGEST` sessions of the
- * one before is one episode. Day zero anchors at the FIRST occurrence in the
- * run, because that is when the stretch began — anchoring at the last would
- * quietly start the clock after most of the move had already happened.
+ * So the chart plots one line per episode, using the same grouping the honesty
+ * caveat counts. That grouping is ANCHORED, not chained: the first occurrence
+ * opens an episode, everything inside its 42-day window belongs to it, and the
+ * next occurrence beyond that window opens the next one. See `buildMatches` for
+ * why — chaining off the previous occurrence merged twelve years of SPY into a
+ * single "stretch".
+ *
+ * Day zero is therefore the anchor, which is also when the stretch began.
+ * Anchoring at the last occurrence instead would start the clock after most of
+ * the move had already happened.
  */
 
 export interface Episode {
-  /** Index of the first occurrence in the run — day zero. */
+  /** Index of the anchoring occurrence — day zero. */
   anchorIndex: number;
-  /** Date of that first occurrence. */
+  /** Date of that anchor. */
   date: string;
-  /** Calendar year, for labelling the extreme lines. */
+  /** Calendar year. */
   year: string;
-  /** How many occurrences the run contains. */
+  /** Occurrences falling inside this anchor's window, the anchor included. */
   occurrences: number;
-  /** Date of the last occurrence, when the run holds more than one. */
+  /** Date of the last occurrence in the window, when there is more than one. */
   lastDate: string;
 }
 
 /**
  * Group matches into episodes.
  *
- * `overlapsPrevious` already carries the run structure — a match that does not
- * overlap its predecessor opens a new run — so this reads the same flag the
- * episode COUNT is derived from. The two can never disagree.
+ * `overlapsPrevious` already carries the anchoring — false marks an anchor,
+ * true marks a match inside an earlier anchor's window — so this reads the very
+ * flag the episode COUNT is derived from. The two can never disagree.
  */
 export function toEpisodes(matches: Match[]): Episode[] {
   const episodes: Episode[] = [];
@@ -91,7 +95,16 @@ export interface PathBand {
 export interface PathsView {
   paths: EpisodePath[];
   band: PathBand[];
-  /** Best and worst finishers, labelled on the chart. */
+  /**
+   * The two extreme finishers, identified by DATE rather than by year.
+   *
+   * A year is not an identity: highlighting by year lit up every episode that
+   * happened to share a calendar year with the extreme, which on a dense
+   * pattern meant a dozen amber lines instead of two.
+   */
+  bestDate: string | null;
+  worstDate: string | null;
+  /** Their years, for the caption. */
   bestYear: string | null;
   worstYear: string | null;
 }
@@ -169,6 +182,8 @@ export function buildPaths(bars: Bar[], episodes: Episode[]): PathsView {
   return {
     paths,
     band,
+    bestDate: best?.date ?? null,
+    worstDate: worst?.date ?? null,
     bestYear: best?.year ?? null,
     worstYear: worst?.year ?? null,
   };

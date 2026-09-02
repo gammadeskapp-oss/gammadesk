@@ -77,20 +77,43 @@ export function AnaloguePathsChart({
       .map((b) => `${x(b.day).toFixed(1)},${y(b.p25).toFixed(1)}`)
       .join(' ');
 
-  const ticks = [lo, (lo + hi) / 2, hi].map((v) => Math.round(v * 10) / 10);
+  /*
+   * The 100 line is always labelled, so any tick that would land on top of it
+   * is dropped rather than printed over it — on a tight bundle the midpoint
+   * sits within a few pixels of 100 and the two labels collide.
+   */
+  const ticks = [lo, (lo + hi) / 2, hi]
+    .map((v) => Math.round(v * 10) / 10)
+    .filter((v) => Math.abs(y(v) - y(100)) > 10);
   const dayTicks = [0, 5, 10, 21, 42].filter((d) => d <= maxDay);
 
-  const extremeYears = new Set(
-    [paths.bestYear, paths.worstYear].filter((y): y is string => y !== null),
+  /*
+   * The two extreme paths, by date. Matching on year lit every episode that
+   * shared a calendar year with an extreme — on a 155-line chart that was a
+   * dozen amber lines claiming to be two.
+   */
+  const extremeDates = new Set(
+    [paths.bestDate, paths.worstDate].filter((d): d is string => d !== null),
   );
+
+  /*
+   * Per-line opacity falls as the bundle grows, so density reads as density
+   * rather than as a solid block. Twenty episodes stay individually legible;
+   * a hundred and fifty overlap into shading that still shows where the mass
+   * is. Floored so no line disappears entirely.
+   */
+  const lineOpacity = Math.max(0.09, Math.min(0.4, 12 / lines.length));
+
+  const ordinary = lines.filter((l) => !extremeDates.has(l.date));
+  const extremes = lines.filter((l) => extremeDates.has(l.date));
 
   return (
     <figure className="panel space-y-2 overflow-x-auto px-4 py-3">
       <figcaption className="text-2xs leading-relaxed text-term-dim">
         Each thin line is one separate stretch of market, starting at 100 on the
-        day the pattern finished. The darker line is the middle one; the shaded
-        band holds the middle half. Nothing is smoothed or trimmed — the
-        extremes are the point.
+        day the pattern finished. The solid white line is the middle one, and
+        the dashed lines around it hold the middle half. Nothing is smoothed or
+        trimmed — the extremes are the point.
       </figcaption>
       <svg
         viewBox={`0 0 ${W} ${H}`}
@@ -129,6 +152,14 @@ export function AnaloguePathsChart({
           strokeWidth={1}
           strokeDasharray="3 3"
         />
+        <text
+          x={PAD.left + PLOT_W + 6}
+          y={y(100) + 3}
+          className="fill-term-dim"
+          fontSize={9}
+        >
+          100
+        </text>
 
         {dayTicks.map((day) => (
           <text
@@ -143,29 +174,63 @@ export function AnaloguePathsChart({
           </text>
         ))}
 
-        <polygon points={bandArea} className="fill-flip" opacity={0.12} />
+        {/*
+          The middle half. Under every line so the bundle is never hidden, but
+          its edges are drawn explicitly on top — at a hundred and fifty lines
+          a fill alone is indistinguishable from the bundle sitting on it, and
+          the caption promises a band the reader could not find.
+        */}
+        <polygon points={bandArea} className="fill-term-text" opacity={0.14} />
 
-        {lines.map((line) => {
-          const isExtreme = extremeYears.has(line.year) &&
-            (line.year === paths.bestYear || line.year === paths.worstYear);
-          return (
-            <polyline
-              key={`${line.date}`}
-              points={toPoints(line.values)}
-              fill="none"
-              className={isExtreme ? 'stroke-flip' : 'stroke-term-faint'}
-              strokeWidth={isExtreme ? 1.2 : 0.7}
-              opacity={isExtreme ? 0.85 : 0.4}
-            >
-              {/* Hover and screen-reader label. Extremes name their year. */}
-              <title>
-                {line.date}
-                {line.occurrences > 1 ? ` · ${line.occurrences} occurrences` : ''}
-                {` · finished at ${line.endValue.toFixed(1)}`}
-              </title>
-            </polyline>
-          );
-        })}
+        {ordinary.map((line) => (
+          <polyline
+            key={line.date}
+            points={toPoints(line.values)}
+            fill="none"
+            className="stroke-term-faint"
+            strokeWidth={0.6}
+            opacity={lineOpacity}
+          >
+            <title>
+              {line.date}
+              {line.occurrences > 1 ? ` · ${line.occurrences} occurrences` : ''}
+              {` · finished at ${line.endValue.toFixed(1)}`}
+            </title>
+          </polyline>
+        ))}
+
+        {/* Drawn after the bundle so they are not buried inside it. */}
+        {extremes.map((line) => (
+          <polyline
+            key={line.date}
+            points={toPoints(line.values)}
+            fill="none"
+            className="stroke-flip"
+            strokeWidth={1.4}
+            opacity={0.95}
+          >
+            <title>
+              {line.date}
+              {line.occurrences > 1 ? ` · ${line.occurrences} occurrences` : ''}
+              {` · finished at ${line.endValue.toFixed(1)}`}
+            </title>
+          </polyline>
+        ))}
+
+        {([
+          ['p25', band.map((b) => `${x(b.day).toFixed(1)},${y(b.p25).toFixed(1)}`)],
+          ['p75', band.map((b) => `${x(b.day).toFixed(1)},${y(b.p75).toFixed(1)}`)],
+        ] as const).map(([key, points]) => (
+          <polyline
+            key={key}
+            points={points.join(' ')}
+            fill="none"
+            className="stroke-term-text"
+            strokeWidth={1}
+            strokeDasharray="4 3"
+            opacity={0.5}
+          />
+        ))}
 
         <polyline
           points={band.map((b) => `${x(b.day).toFixed(1)},${y(b.median).toFixed(1)}`).join(' ')}
@@ -181,8 +246,8 @@ export function AnaloguePathsChart({
         drawn
         {paths.bestYear && paths.worstYear && (
           <>
-            {' '}· the highest finish was in {paths.bestYear} and the lowest in{' '}
-            {paths.worstYear}, both drawn in amber
+            {' '}· the highest finish was {paths.bestDate} and the lowest{' '}
+            {paths.worstDate}, the two amber lines
           </>
         )}
         . Hover any line for its date.
