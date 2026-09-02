@@ -77,7 +77,14 @@ interface YahooChartResponse {
   };
 }
 
-/** Yahoo accepts only a fixed set of range tokens, so snap to the nearest. */
+/**
+ * Yahoo accepts only a fixed set of range tokens, so snap to the nearest.
+ *
+ * The `max` branch is unreachable today because `MAX_YEARS` is 10, and raising
+ * it would be a mistake: `range=max&interval=1d` returns MONTHLY bars with no
+ * error and no way to tell them from daily ones. Ask by period instead — see
+ * `analogues/deepBars.ts`.
+ */
 function rangeToken(years: number): string {
   if (years <= 1) return '1y';
   if (years <= 2) return '2y';

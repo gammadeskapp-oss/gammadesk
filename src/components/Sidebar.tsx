@@ -64,6 +64,7 @@ const NAV: NavItem[] = [
   { href: '/flow', label: 'Options Flow', icon: '⇄' },
   { href: '/velocity', label: 'Velocity', icon: 'Δ' },
   // The log is the record; /history is the same record drawn against price.
+  { href: '/analogues', label: 'Analogues', icon: '⟲' },
   { href: '/log', label: 'Track Record', icon: '✓', match: ['/history'] },
   // Digest and the morning post were one day's writing split over two pages.
   { href: '/daily', label: 'Daily', icon: '≡', match: ['/digest', '/post'] },
