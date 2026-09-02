@@ -35,9 +35,11 @@ interface NavItem {
  * on, then the written-up day, then the manual.
  *
  * Several routes are deliberately absent rather than deleted — `/` (the
- * positioning book), `/forecast`, `/sectors` and `/ticker` are all still live
- * and still linked from the pages that lead into them. They are reached
- * through the work rather than from a list of fourteen.
+ * positioning book), `/forecast`, `/sectors`, `/ticker`, `/status`,
+ * `/velocity` and `/movers` are all still live and still linked from the
+ * pages that lead into them. They are reached through the work rather than
+ * from a list of fourteen. `/methodology` is absent because it is no longer a
+ * page: its text now sits at the bottom of `/guide`, under #methodology.
  */
 const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: '◎' },
@@ -50,30 +52,18 @@ const NAV: NavItem[] = [
    */
   { href: '/strength', label: 'Stock Strength', icon: '⇅' },
   { href: '/scanner', label: 'Scanner', icon: '⌕' },
-  /*
-   * Directly under the scanner and never above it. The two answer different
-   * questions and the scanner's is the stronger one; a reader scanning this
-   * list should meet the rules before they meet the movers.
-   */
-  { href: '/movers', label: 'Moved Last Session', icon: '↗' },
   // `/` and `/ticker` both land a symbol here, so they light the same item.
   // Kept as "Decision" on purpose — it is the one page whose name is the
   // question the reader arrived with. Its subtitle does the explaining.
   { href: '/decision', label: 'Decision', icon: '◈' },
   { href: '/watchlist', label: 'Watchlist', icon: '★' },
   { href: '/flow', label: 'Options Flow', icon: '⇄' },
-  { href: '/velocity', label: 'Velocity', icon: 'Δ' },
-  // The log is the record; /history is the same record drawn against price.
   { href: '/analogues', label: 'Analogues', icon: '⟲' },
+  // The log is the record; /history is the same record drawn against price.
   { href: '/log', label: 'Track Record', icon: '✓', match: ['/history'] },
   // Digest and the morning post were one day's writing split over two pages.
   { href: '/daily', label: 'Daily', icon: '≡', match: ['/digest', '/post'] },
   { href: '/guide', label: 'Guide', icon: '?' },
-  // Reached from every methodology drawer as well; listed because a reader who
-  // wants to know how the numbers are made should not have to find a drawer
-  // first. `/status` sits under it as the operational half of the same
-  // question — is the arithmetic sound, and did it actually run.
-  { href: '/methodology', label: 'Methodology', icon: '∑', match: ['/status'] },
 ];
 
 // --- collapse flag ----------------------------------------------------------

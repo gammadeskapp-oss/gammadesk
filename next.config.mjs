@@ -13,6 +13,17 @@ const nextConfig = {
         // for a GET-only page route; this matches what the brief asked for.
         statusCode: 301,
       },
+      {
+        // The methodology is now the bottom of /guide. Handled here as well as
+        // in the route file: a page-level `permanentRedirect` is delivered as
+        // an RSC redirect with a 200, which moves a reader correctly but never
+        // shows a crawler a permanent status. This emits a real 308 before the
+        // route is reached; src/app/methodology/page.tsx stays as the fallback
+        // for anything that gets past it.
+        source: '/methodology',
+        destination: '/guide#methodology',
+        permanent: true,
+      },
     ];
   },
   async headers() {
