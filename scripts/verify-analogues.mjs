@@ -434,7 +434,16 @@ section('The generated read quotes both numbers and never implies action');
     small.text.startsWith('After 3 consecutive down closes,'));
   ok('a sub-half-point gap is called little difference',
     small.text.includes('Little difference between the two.'), small.text);
-  ok('it carries the count in plain words', small.text.includes('40 times'));
+  ok('without an episode count it falls back to days',
+    small.text.includes('across 40 days'), small.text);
+  ok('given episodes it counts in stretches instead',
+    comparisonSentence(make(0.0249), baseline, 7).text
+      .includes('across 7 separate stretches'),
+    comparisonSentence(make(0.0249), baseline, 7).text);
+  ok('and reads singular correctly',
+    comparisonSentence(make(0.0249), baseline, 1).text
+      .includes('across 1 separate stretch.'),
+    comparisonSentence(make(0.0249), baseline, 1).text);
   ok('it says normal day rather than a random window',
     small.text.includes('On a normal day it came to'), small.text);
   ok('no jargon survives in the generated read',

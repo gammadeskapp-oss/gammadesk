@@ -88,6 +88,11 @@ export interface Comparison {
 export function comparisonSentence(
   condition: ConditionResult,
   baseline: BaselineStats[],
+  /**
+   * Separate stretches the matches came from. Quoted in preference to the day
+   * count, so this sentence counts in the same unit as the table above it.
+   */
+  episodes?: number,
 ): Comparison | null {
   if (condition.matches.length === 0) return null;
 
@@ -112,11 +117,15 @@ export function comparisonSentence(
   const gapPp = (stats.medianReturn - base.medianReturn) * 100;
   const horizon = stats.horizon;
 
+  const across =
+    episodes === undefined
+      ? `${stats.n} ${stats.n === 1 ? 'day' : 'days'}`
+      : `${episodes} separate ${episodes === 1 ? 'stretch' : 'stretches'}`;
+
   const opening =
     `After ${midSentence(condition.label)}, the typical result over ` +
     `${horizonLabel(horizon)} was ${asPct(stats.medianReturn)}, across ` +
-    `${stats.n} ${stats.n === 1 ? 'time' : 'times'}. On a normal day it came ` +
-    `to ${asPct(base.medianReturn)}.`;
+    `${across}. On a normal day it came to ${asPct(base.medianReturn)}.`;
 
   /*
    * A thin sample gets no verdict on the size of the gap. Describing a gap

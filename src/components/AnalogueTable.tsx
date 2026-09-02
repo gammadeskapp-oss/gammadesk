@@ -3,7 +3,7 @@ import type {
   BaselineStats, ConditionResult, Coverage, HorizonStats,
 } from '@/lib/analogues';
 import {
-  comparisonSentence, horizonLabel, overlapSentence, verdictFor,
+  comparisonSentence, horizonLabel, overlapSentence, toEpisodes, verdictFor,
   EPISODE_NOTE, MEANINGFUL_GAP_PP, THIN_SAMPLE,
 } from '@/lib/analogues';
 
@@ -33,7 +33,8 @@ import {
  * ## The display rules are still the point
  *
  *   - Best and worst sit on the same row as the typical result, always.
- *   - Under ten times the results are greyed and the panel says so.
+ *   - Under ten separate stretches the results are greyed and the panel
+ *     says so — stretches, not days, because days overstate the evidence.
  *   - The history used is stated on every panel.
  *   - Clumping is stated in plain words.
  *   - Every period carries its "what normally happens" row.
@@ -61,7 +62,16 @@ function Caveat({ children }: { children: React.ReactNode }) {
 /** Shared by both rows of a pair, so the columns cannot drift apart. */
 const NUM = 'text-right tabular-nums';
 
-function Row({ stats, thin }: { stats: HorizonStats; thin: boolean }) {
+function Row({
+  stats,
+  thin,
+  episodes,
+}: {
+  stats: HorizonStats;
+  thin: boolean;
+  /** Separate stretches with this period fully elapsed. The primary count. */
+  episodes: number;
+}) {
   // Greyed rather than withheld: the number is still the number, it just is
   // not carrying the weight the reader might otherwise give it.
   const resultTone = thin ? 'text-term-faint' : tone(stats.medianReturn);
@@ -74,7 +84,15 @@ function Row({ stats, thin }: { stats: HorizonStats; thin: boolean }) {
           {stats.horizon} {stats.horizon === 1 ? 'session' : 'sessions'}
         </span>
       </td>
-      <td className={`py-2 pr-4 align-top ${NUM} text-term-dim`}>{stats.n}</td>
+      {/*
+        Episodes lead and days follow. The two differ by a factor of twelve on
+        the busiest patterns, and the larger number is the one that overstates
+        the evidence, so it is never the one a reader meets first.
+      */}
+      <td className={`py-2 pr-4 align-top ${NUM} text-term-dim`}>
+        {episodes}
+        <span className="block text-2xs text-term-faint">{stats.n} days</span>
+      </td>
       <td className={`py-2 pr-4 align-top ${NUM} ${resultTone}`}>
         {pct(stats.medianReturn)}
       </td>
@@ -135,8 +153,14 @@ function NormalRow({
           all {totalDays.toLocaleString()} days, not just these
         </span>
       </td>
+      {/*
+        The comparison row counts days, not stretches — every day in the
+        history is its own entry, so there is nothing to group. Labelled, so
+        the column does not read as though it were the same unit as above.
+      */}
       <td className={`py-2 pr-4 align-top text-2xs ${NUM}`}>
         {stats.n.toLocaleString()}
+        <span className="block text-term-faint/70">days</span>
       </td>
       <td className={`py-2 pr-4 align-top text-2xs ${NUM}`}>
         {pct(stats.medianReturn)}
@@ -158,9 +182,9 @@ function NormalRow({
 
 /** Header text, and whether the column holds words or figures. */
 const HEADINGS: { label: string; numeric: boolean; width: string }[] = [
-  { label: 'How long after', numeric: false, width: 'w-[16%]' },
-  { label: 'Times', numeric: true, width: 'w-[9%]' },
-  { label: 'Typical result', numeric: true, width: 'w-[13%]' },
+  { label: 'How long after', numeric: false, width: 'w-[15%]' },
+  { label: 'Separate stretches', numeric: true, width: 'w-[11%]' },
+  { label: 'Typical result', numeric: true, width: 'w-[12%]' },
   { label: 'Best time', numeric: true, width: 'w-[14%]' },
   { label: 'Worst time', numeric: true, width: 'w-[14%]' },
   { label: 'Went up', numeric: true, width: 'w-[10%]' },
@@ -180,8 +204,33 @@ export function AnalogueTable({
 }) {
   const { matches, honesty } = condition;
   const count = matches.length;
+
+  /*
+   * Episodes per period, derived here rather than plumbed through, so both
+   * callers get it without the Today view having to know about filtering.
+   *
+   * A stretch counts at a period when its ANCHOR has an outcome for that
+   * period — the same truncation rule the day count already follows, read off
+   * the match itself so the two can never disagree about which windows have
+   * finished.
+   */
+  const episodes = toEpisodes(matches);
+  const byIndex = new Map(matches.map((m) => [m.index, m]));
+  const episodesAt = (horizon: number) =>
+    episodes.filter((e) =>
+      byIndex.get(e.anchorIndex)?.outcomes.some((o) => o.horizon === horizon),
+    ).length;
+
+  /*
+   * Thin now triggers on stretches as well as days. A pattern with sixty
+   * occurrences drawn from four stretches is four pieces of evidence, and
+   * leaving it unlabelled because sixty clears the bar would be the page
+   * counting in the unit it just told the reader not to trust.
+   */
+  const thin = honesty.thin || episodes.length < THIN_SAMPLE;
+
+  const comparison = comparisonSentence(condition, baseline, episodes.length);
   const verdict = verdictFor(condition, baseline);
-  const comparison = comparisonSentence(condition, baseline);
   const overlap = overlapSentence(condition);
 
   const verdictTone =
@@ -229,8 +278,9 @@ export function AnalogueTable({
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] table-fixed text-xs">
               <caption className="sr-only">
-                What happened after the {count} times {condition.label} on{' '}
-                {coverage.symbol}, each period paired with what normally
+                What happened after {condition.label} on {coverage.symbol},
+                across {episodes.length} separate stretches of market drawn
+                from {count} days, each period paired with what normally
                 happens.
               </caption>
               <thead>
@@ -260,7 +310,11 @@ export function AnalogueTable({
                   key={h.horizon}
                   className="border-b-4 border-term-bg align-top"
                 >
-                  <Row stats={h} thin={honesty.thin} />
+                  <Row
+                    stats={h}
+                    thin={thin}
+                    episodes={episodesAt(h.horizon)}
+                  />
                   <NormalRow
                     totalDays={coverage.bars}
                     stats={
@@ -280,10 +334,12 @@ export function AnalogueTable({
 
           {/* Everything that used to sit above the table. */}
           <div className="space-y-1 border-t border-term-line pt-3">
-            {honesty.thin && (
+            {thin && (
               <Caveat>
-                This has happened fewer than {THIN_SAMPLE} times, which is too
-                few to trust. The results are greyed for that reason.
+                This comes from {episodes.length} separate{' '}
+                {episodes.length === 1 ? 'stretch' : 'stretches'} of market,
+                fewer than the {THIN_SAMPLE} this page treats as enough to
+                trust. The results are greyed for that reason.
               </Caveat>
             )}
             {overlap && <Caveat>{overlap}</Caveat>}

@@ -341,15 +341,26 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                           Too thin to read.
                         </p>
                         <p className="mx-auto max-w-lg text-xs leading-relaxed text-term-dim">
-                          These filters leave {filtered.episodes} separate{' '}
+                          {/*
+                            The floor applies with or without filters, so the
+                            sentence has to work both ways. A pattern that
+                            fired on hundreds of days drawn from a handful of
+                            stretches lands here on its own, and blaming
+                            filters that were never applied would send the
+                            reader looking for a control to undo.
+                          */}
+                          {Object.keys(activeFilters).length > 0
+                            ? 'These filters leave '
+                            : 'This comes from '}
+                          {filtered.episodes} separate{' '}
                           {filtered.episodes === 1 ? 'stretch' : 'stretches'} of
                           market
                           {filtered.matches > 0 && (
                             <> (from {filtered.matches} days)</>
                           )}
                           . Below {MIN_EPISODES} there is nothing here worth
-                          showing, so the results are withheld rather than
-                          shown with a warning attached.
+                          showing, so the results are withheld rather than shown
+                          with a warning attached.
                         </p>
                       </div>
                     ) : (
