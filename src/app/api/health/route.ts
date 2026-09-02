@@ -214,12 +214,18 @@ export async function GET(request: Request) {
    * individually rather than counted, because the fix differs per job.
    */
   for (const source of cron?.sources ?? []) {
-    if (source.state === 'ok') continue;
-    problems.push(
-      source.state === 'missing'
-        ? `${source.path} has never written anything (${source.label}).`
-        : `${source.path} last wrote ${source.ageHours}h ago, past its ${source.staleAfterHours}h limit (${source.label}).`,
-    );
+    /*
+     * Reported when EITHER grading is unhappy. The flat age limit is loose
+     * enough to survive a long weekend, which means a job that missed this
+     * morning's run passes it — and that miss is precisely the failure this
+     * endpoint kept being unable to see. The `grading` sentence says which of
+     * the two raised it, so a reader is never left guessing.
+     */
+    const ageBad = source.state !== 'ok';
+    const dueBad = source.dueState === 'late' || source.dueState === 'missing';
+    if (!ageBad && !dueBad) continue;
+
+    problems.push(`${source.path} — ${source.grading} (${source.label})`);
   }
 
   return NextResponse.json(
@@ -247,6 +253,15 @@ export async function GET(request: Request) {
             ageHours: s.ageHours,
             staleAfterHours: s.staleAfterHours,
             state: s.state,
+            /*
+             * The alarm's grading alongside the age grading. Both, because
+             * they answer different questions and can legitimately disagree —
+             * see the note on `dueState` in lib/cronHealth.ts.
+             */
+            dueState: s.dueState,
+            dueBy: s.dueBy,
+            dueLabel: s.dueLabel,
+            grading: s.grading,
             detail: s.detail,
           }))
         : null,

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { cached } from '../cache';
+import { sendToDiscord, type Delivery } from '../discord';
 import { createJsonStore } from '../jsonStore';
 import { marketToday } from '../time';
 import { getDigest } from '../digest';
@@ -80,46 +81,11 @@ export function getMorningPost(): Promise<{ post: MorningPost; stored: boolean }
 }
 
 /**
- * Post to Discord.
+ * Post the morning post to Discord.
  *
- * The webhook URL is a credential — anyone holding it can post to the channel
- * — so it is read server-side only and never returned to a caller.
+ * The transport lives in `lib/discord.ts` — see the note there for why this is
+ * no longer a copy of the digest's version.
  */
-export async function postToDiscord(
-  post: MorningPost,
-): Promise<{ delivered: boolean; reason?: string }> {
-  const url = process.env.DISCORD_WEBHOOK_URL?.trim();
-  if (!url) {
-    return { delivered: false, reason: 'DISCORD_WEBHOOK_URL is not set.' };
-  }
-  if (!/^https:\/\/(?:\w+\.)?discord(?:app)?\.com\/api\/webhooks\//i.test(url)) {
-    return {
-      delivered: false,
-      reason: 'DISCORD_WEBHOOK_URL does not look like a Discord webhook URL.',
-    };
-  }
-
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        content: await buildDiscordMessage(post),
-        // The post mentions nobody; suppress pings outright so a ticker that
-        // happens to match a role name cannot notify a channel.
-        allowed_mentions: { parse: [] },
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    if (!res.ok) {
-      return { delivered: false, reason: `Discord returned HTTP ${res.status}.` };
-    }
-    return { delivered: true };
-  } catch (error) {
-    return {
-      delivered: false,
-      reason: error instanceof Error ? error.message : 'Discord request failed.',
-    };
-  }
+export async function postToDiscord(post: MorningPost): Promise<Delivery> {
+  return sendToDiscord(await buildDiscordMessage(post));
 }

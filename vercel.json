@@ -26,8 +26,12 @@
       "schedule": "35 14 * * 1-5"
     },
     {
-      "path": "/api/post",
+      "path": "/api/post?when=scheduled",
       "schedule": "0 13 * * 1-5"
+    },
+    {
+      "path": "/api/post?when=scheduled",
+      "schedule": "0 14 * * 1-5"
     },
     {
       "path": "/api/log/snapshot",
@@ -76,6 +80,10 @@
     {
       "path": "/api/rs/members",
       "schedule": "30 22 * * 6"
+    },
+    {
+      "path": "/api/alarm",
+      "schedule": "0 14-21 * * 1-5"
     }
   ]
 }

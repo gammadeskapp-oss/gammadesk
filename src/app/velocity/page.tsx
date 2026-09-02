@@ -7,6 +7,7 @@ import { getMembership } from '@/lib/rs/membership';
 import { getSymbolDirectory } from '@/lib/symbols/directory';
 import { getVelocity, storeStatus } from '@/lib/velocity';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
+import { DataFreshness } from '@/components/StaleDataBanner';
 
 export const metadata: Metadata = {
   title: 'Gamma Velocity',
@@ -58,6 +59,15 @@ export default async function VelocityPage() {
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+        {/* Bespoke header, shared check — see the note on /flow. */}
+        <DataFreshness
+          freshness={{
+            kind: 'daily',
+            date: data.currentDate,
+            generatedAt: data.capturedAt,
+          }}
+        />
+
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">

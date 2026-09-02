@@ -3,7 +3,7 @@ import { Footer } from '@/components/Footer';
 import { ForecastChart } from '@/components/ForecastChart';
 import { ForecastSearch } from '@/components/ForecastSearch';
 import { ForecastStats } from '@/components/ForecastStats';
-import { PageBar } from '@/components/PageBar';
+import { PageBar, pageStaleness } from '@/components/PageBar';
 import { config } from '@/lib/config';
 import { getForecast, TickerError } from '@/lib/forecast';
 import { BLEND } from '@/lib/forecast/magnets';
@@ -11,8 +11,7 @@ import { MAX_BEND_SIGMA } from '@/lib/forecast/simulate';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice } from '@/lib/format';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
-import { snapshotStaleness } from '@/lib/events';
-import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
+import { mutedIf } from '@/components/StaleDataBanner';
 
 export const metadata: Metadata = {
   title: 'Forecast',
@@ -49,15 +48,14 @@ export default async function ForecastPage({ searchParams }: PageProps) {
    * behind the cone, so there is nothing here that could be a stale dealer
    * level — the page already says so in its own words above the chart.
    */
+  // Same verdict the bar renders, reused for the muting below.
   const staleness = data?.quoteDateIso
-    ? snapshotStaleness(data.quoteDateIso)
+    ? pageStaleness({ kind: 'continuous', updatedAt: data.quoteDateIso })
     : null;
 
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
-        {staleness && <StaleDataBanner staleness={staleness} />}
-
         <PageBar
           /*
             Just "Forecast". "Blended Magnets" is the method, and the method
@@ -70,6 +68,11 @@ export default async function ForecastPage({ searchParams }: PageProps) {
           meta={
             data
               ? `${data.symbol} · ${data.paths.toLocaleString('en-US')} paths · ${data.horizon} trading days · spot ${formatPrice(data.spot)} · ${data.source}`
+              : undefined
+          }
+          freshness={
+            data?.quoteDateIso
+              ? { kind: 'continuous', updatedAt: data.quoteDateIso }
               : undefined
           }
           asOfLabel={data?.asOfLabel}

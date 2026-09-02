@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
-import { PageBar } from '@/components/PageBar';
+import { PageBar, pageStaleness } from '@/components/PageBar';
 import { regimeLabel, regimeTone } from '@/lib/regime';
 import { PostActions } from '@/components/PostActions';
 import { TickerLink } from '@/components/TickerLink';
@@ -15,8 +15,7 @@ import {
   X_LIMIT,
 } from '@/lib/post';
 import { formatAsOf } from '@/lib/time';
-import { dailySnapshotStaleness } from '@/lib/events';
-import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
+import { mutedIf } from '@/components/StaleDataBanner';
 
 /**
  * Digest and Morning Post, on one page.
@@ -89,14 +88,26 @@ export default async function DailyPage() {
    * 09:00 ET and never updated, so an hours-old stamp is normal and expected —
    * what would be wrong is the post describing yesterday.
    */
-  const staleness = dailySnapshotStaleness(post.date, post.generatedAt);
+  // Same verdict the bar renders, reused for the muting below.
+  const staleness = pageStaleness({
+    kind: 'daily',
+    date: post.date,
+    generatedAt: post.generatedAt,
+  });
 
   return (
     <>
       <main className="mx-auto w-full max-w-[900px] flex-1 space-y-5 px-4 py-5 sm:px-6">
-        <StaleDataBanner staleness={staleness} />
-
-        <PageBar title="Daily" description={PAGE_DESCRIPTIONS['/daily']} />
+        <PageBar
+          title="Daily"
+          description={PAGE_DESCRIPTIONS['/daily']}
+          freshness={{
+            kind: 'daily',
+            date: post.date,
+            generatedAt: post.generatedAt,
+          }}
+          asOfLabel={post.asOfLabel}
+        />
 
         {/* --- the digest --- */}
         <section className="space-y-2">

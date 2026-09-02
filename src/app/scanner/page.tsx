@@ -39,6 +39,16 @@ export default async function ScannerPage() {
                 ? `Last run ${latest.date}`
                 : 'Not yet run'
           }
+          /*
+            Daily, not continuous. The scan is taken five minutes after the
+            open and then does not change; grading it against the clock would
+            condemn a perfectly good 09:35 list every afternoon.
+          */
+          freshness={
+            scan
+              ? { kind: 'daily', date: scan.date, generatedAt: scan.scannedAt }
+              : undefined
+          }
         />
 
         {/*

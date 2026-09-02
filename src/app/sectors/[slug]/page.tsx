@@ -9,7 +9,6 @@ import { getSectorsSnapshot } from '@/lib/sectors';
 import { SECTORS, sectorById } from '@/lib/sectors/definitions';
 import type { SectorMember, SectorMomentum } from '@/lib/sectors/types';
 import { getSymbolDirectory } from '@/lib/symbols/directory';
-import { formatAsOf } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -171,9 +170,7 @@ export default async function SectorDetailPage({
               ? `${members.length} constituents · score ${sector.score.toFixed(0)}`
               : undefined
           }
-          asOfLabel={
-            snapshot ? formatAsOf(new Date(snapshot.computedAt)) : undefined
-          }
+          freshness={{ kind: 'continuous', updatedAt: snapshot?.computedAt }}
         />
 
         <Link

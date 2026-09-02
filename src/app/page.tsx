@@ -2,7 +2,7 @@ import { ContextRow } from '@/components/ContextRow';
 import { EventRiskRow } from '@/components/EventRiskRow';
 import { Dashboard } from '@/components/Dashboard';
 import { Footer } from '@/components/Footer';
-import { PageBar } from '@/components/PageBar';
+import { PageBar, pageStaleness } from '@/components/PageBar';
 import { PositioningSearch } from '@/components/PositioningSearch';
 import { ResearchCards } from '@/components/ResearchCards';
 import { ChainError } from '@/lib/chainSource';
@@ -15,12 +15,7 @@ import type { MarketContextQuotes } from '@/lib/marketContext/quotes';
 import { positioningMethodology } from '@/lib/methodology';
 import { researchLine } from '@/lib/simple/research';
 import { moodOf } from '@/lib/simple/translate';
-import {
-  eventRow,
-  highImportanceToday,
-  priorSessionDate,
-  snapshotStaleness,
-} from '@/lib/events';
+import { eventRow, highImportanceToday, priorSessionDate } from '@/lib/events';
 import { readLog } from '@/lib/log/store';
 import { readArchive } from '@/lib/scanner/archive';
 import { marketToday } from '@/lib/time';
@@ -129,7 +124,10 @@ export default async function HomePage({ searchParams }: PageProps) {
             snapshot as fresh no matter how long the feed had been dead. The
             quote date is the age of the data itself.
           */
-          staleness={snapshotStaleness(data.meta.quoteDateIso)}
+          staleness={pageStaleness({
+            kind: 'continuous',
+            updatedAt: data.meta.quoteDateIso,
+          })}
           /*
             Built from the snapshot being rendered, so the drawer describes
             this view rather than a general case — see lib/methodology.ts.

@@ -1,4 +1,43 @@
+import { dailySnapshotStaleness, snapshotStaleness } from '@/lib/events';
 import type { Staleness } from '@/lib/staleness';
+
+/**
+ * What kind of thing a page's timestamp describes.
+ *
+ * The two checks measure against different references and a page must not have
+ * to know which one it needs beyond naming what it has. `continuous` is a feed
+ * that should keep updating through the session — chains, breadth, sector
+ * scores. `daily` is a once-a-day artefact, graded by the session it describes
+ * rather than by the clock, because a correct 09:00 post is six hours old by
+ * mid-afternoon and must not be condemned for it.
+ */
+export type FreshnessKind =
+  | { kind: 'continuous'; updatedAt: string | null | undefined }
+  | {
+      kind: 'daily';
+      date: string | null | undefined;
+      generatedAt: string | null | undefined;
+    };
+
+/** Grade a page's snapshot. The single entry point every surface goes through. */
+export function pageStaleness(freshness: FreshnessKind): Staleness {
+  return freshness.kind === 'continuous'
+    ? snapshotStaleness(freshness.updatedAt)
+    : dailySnapshotStaleness(freshness.date, freshness.generatedAt);
+}
+
+/**
+ * Grade and warn in one line.
+ *
+ * `PageBar` renders this for every page that goes through it. This is the
+ * escape hatch for the handful of pages whose header is too bespoke for the
+ * bar — /flow, /velocity, /strength — so that "my header is custom" never
+ * again means "my page has no freshness check". They share this file's
+ * threshold and wording; they are choosing a layout, not opting out.
+ */
+export function DataFreshness({ freshness }: { freshness: FreshnessKind }) {
+  return <StaleDataBanner staleness={pageStaleness(freshness)} />;
+}
 
 /**
  * Full-width warning shown above everything else when the snapshot behind a

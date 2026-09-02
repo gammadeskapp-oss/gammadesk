@@ -8,7 +8,7 @@ import { Footer } from '@/components/Footer';
 import { ForecastChart } from '@/components/ForecastChart';
 import { InfoTip } from '@/components/InfoTip';
 import { LevelsPanel } from '@/components/LevelsPanel';
-import { PageBar } from '@/components/PageBar';
+import { PageBar, pageStaleness } from '@/components/PageBar';
 import { ReadMode } from '@/components/ReadMode';
 import { RetestFeed } from '@/components/RetestFeed';
 import { SimpleRead } from '@/components/SimpleRead';
@@ -24,8 +24,7 @@ import { getForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
 import { getPositioningView } from '@/lib/positioning';
-import { snapshotStaleness } from '@/lib/events';
-import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
+import { mutedIf } from '@/components/StaleDataBanner';
 import { MethodologyDrawer } from '@/components/MethodologyDrawer';
 import { positioningMethodology, type Methodology } from '@/lib/methodology';
 import { getRetests, type RetestFeed as RetestFeedData } from '@/lib/retest';
@@ -567,7 +566,12 @@ export default async function DecisionPage({ searchParams }: PageProps) {
 
   // Graded off the chain's own quote date, carried on the context for exactly
   // this reason — see lib/decision/types.ts.
-  const staleness = data ? snapshotStaleness(data.context.quoteDateIso) : null;
+  const freshness = {
+    kind: 'continuous',
+    updatedAt: data?.context.quoteDateIso,
+  } as const;
+  // Same verdict the bar renders, reused for the muting below.
+  const staleness = data ? pageStaleness(freshness) : null;
 
   /*
    * From the chain snapshot fetched alongside the decision, so the drawer
@@ -578,12 +582,11 @@ export default async function DecisionPage({ searchParams }: PageProps) {
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-6 px-4 py-5 sm:px-6">
-        {staleness && <StaleDataBanner staleness={staleness} />}
-
         <PageBar
           title="Decision"
           description={PAGE_DESCRIPTIONS['/decision']}
           meta="one screen, top to bottom"
+          freshness={data ? freshness : undefined}
           /* The book's stamp, not the render clock — see DecisionContext. */
           asOfLabel={data?.context.quoteDateLabel}
         />

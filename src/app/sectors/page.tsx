@@ -19,7 +19,6 @@ import {
   type SectorMomentum,
 } from '@/lib/sectors';
 import type { SectorConsensus } from '@/lib/sectors/types';
-import { formatAsOf } from '@/lib/time';
 import type { TooltipKey } from '@/lib/tooltips';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
@@ -366,15 +365,18 @@ export default async function SectorsPage({ searchParams }: PageProps) {
                 ? `${snapshot.sectors.length} sectors · ${snapshot.sessions} sessions · close ${snapshot.asOfDate}`
                 : undefined
           }
-          asOfLabel={
-            view === 'groups'
-              ? groups
-                ? formatAsOf(new Date(groups.computedAt))
-                : undefined
-              : snapshot
-                ? formatAsOf(new Date(snapshot.computedAt))
-                : undefined
-          }
+          /*
+            Graded off whichever half is on screen. The two views are refreshed
+            by two different crons ten minutes apart, so a single timestamp for
+            the page would be wrong for one of them — and wrong in the
+            direction that matters, since the groups job failing while sectors
+            succeeds is exactly the case this has to catch.
+          */
+          freshness={{
+            kind: 'continuous',
+            updatedAt:
+              view === 'groups' ? groups?.computedAt : snapshot?.computedAt,
+          }}
         />
 
         <ViewToggle view={view} />

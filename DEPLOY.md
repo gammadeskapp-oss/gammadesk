@@ -181,15 +181,20 @@ Vercel wipes the filesystem on every deploy, so the log has to live outside it.
 This is on the free tier. Two small JSON files live here: the accuracy log and
 the `/groups` snapshot.
 
-> Vercel's Hobby plan allows a limited number of cron jobs. If it refuses the
-> third one, drop `/api/groups/refresh` from `vercel.json` — `/groups` still
+> Cron limits vary by Vercel plan, in two separate ways: how many entries you
+> may have, and how precisely they fire. This project is deployed on **Pro**,
+> where the entries in `vercel.json` — including the multi-fire expressions
+> used by `/api/breadth/refresh`, `/api/retest/refresh` and `/api/alarm` — are
+> all permitted and fire close to their scheduled minute.
+>
+> On a more restricted plan, drop `/api/groups/refresh` first: `/groups` still
 > works, it just recomputes itself on the first visit of the day instead of
 > being refreshed ahead of time.
 
 ### Add a cron secret
 
-The two scheduled jobs write to storage, so they must not be callable by
-anyone who guesses the URL.
+The scheduled jobs write to storage, so they must not be callable by anyone
+who guesses the URL.
 
 1. **Settings** → **Environment Variables** → **Add New**.
 2. Key: `CRON_SECRET`. Value: a long random string — mash the keyboard, or use
@@ -229,12 +234,24 @@ only take effect on a new build.
 | Job | UTC | EDT (summer) | EST (winter) |
 |-----|-----|--------------|--------------|
 | `/api/scanner/gamma` — refresh gamma for scanner candidates | 12:30 **and** 13:30 | 08:30 | 08:30 |
+| `/api/post` — build the morning post and send it to Discord | 13:00 **and** 14:00 | 09:00 | 09:00 |
 | `/api/scanner/run` — run the morning scan | 13:35 **and** 14:35 | 09:35 | 09:35 |
+| `/api/breadth/refresh` — sample S&P 500 breadth | every minute, 13:00–21:59 | 09:00–17:59 | 08:00–16:59 |
+| `/api/retest/refresh` — advance broken-level states | every minute, 13:00–21:59 | 09:00–17:59 | 08:00–16:59 |
+| `/api/alarm` — page Discord about jobs that stopped writing | hourly, 14:00–21:00 | 10:00–17:00 | 09:00–16:00 |
 | `/api/log/snapshot` — record the day's flip level and magnets | 14:45 | 10:45 | 09:45 |
 | `/api/log/settle` — score it against the session's high and low | 21:15 | 17:15 | **16:15** |
 | `/api/flow/refresh` — rescan chains for unusual activity | 21:40 | 17:40 | 16:40 |
+| `/api/velocity/refresh` — diff per-strike gamma against yesterday | 21:50 | 17:50 | 16:50 |
 | `/api/groups/refresh` — recompute group scores and breadth | 22:00 | 18:00 | 17:00 |
+| `/api/sectors/refresh` — sector momentum, and the session history row | 22:10 | 18:10 | 17:10 |
 | `/api/digest` — build the digest and post it to Discord | 22:20 | 18:20 | 17:20 |
+| `/api/rs/refresh` — one shard of relative-strength history | 23:00, 01:00, 03:00, 05:00 | 19:00 → 01:00 | 18:00 → 00:00 |
+| `/api/rs/members` — refresh S&P 500 membership | Sat 22:30 | Sat 18:30 | Sat 17:30 |
+
+The three jobs registered at **two** UTC times each — the scanner pair and the
+morning post — are the ones that must land on a specific New York wall clock.
+See "Why some jobs are registered twice" below.
 
 ### Why the log needs two jobs, not one
 
@@ -259,23 +276,37 @@ matters. Anything earlier would fire *before* the close during winter.
 Both times were picked to sit inside the trading session in **both** summer and
 winter, since Vercel cron schedules are UTC and New York is not.
 
-### Why the two scanner jobs are registered twice
+### Why some jobs are registered twice
 
 The scanner has no such slack. 08:30 ET is chosen because open interest has
 just published, and 09:35 ET because it is five minutes after the open — an
 hour of winter drift would run the scan *before the market opened*.
 
-So each scanner job is registered at **both** candidate UTC times, and both
-entries carry `?when=scheduled`. The route checks the actual New York clock and
+The morning post has the same problem and used to get it wrong. It was
+registered only at 13:00 UTC and refused to run before 9am local, so from
+November to March it fired at 08:00 ET, was refused, returned HTTP 200, and no
+post went out — a silent failure that looked like a healthy cron on the
+dashboard. It now carries the same dual registration.
+
+So each of these jobs is registered at **both** candidate UTC times, and every
+entry carries `?when=scheduled`. The route checks the actual New York clock and
 runs only when it reads the configured time; the other entry fires, sees the
 wrong hour, and returns without spending a single upstream request. The whole
 year is covered without either job drifting.
 
 The same guard refuses a run delayed past twenty minutes rather than running it
 late — a scan that ran at 10:30 but published under a 09:35 heading would be a
-false statement about when its VWAP readings were taken. On Vercel's free plan
-crons can be delayed by up to an hour, so **the scanner wants the Pro plan** or
-it will regularly refuse. Either way you can re-run a missed morning by hand:
+false statement about when its VWAP readings were taken.
+
+The tolerance is currently twenty minutes, a figure chosen when the project was
+on the free plan and crons could be delayed by up to an hour — which meant the
+scanner refused runs routinely. On Pro that delay assumption no longer holds,
+so the twenty minutes is probably tighter than it needs to be and possibly
+looser than it could be. It has deliberately not been retuned yet: the right
+number comes from the observed spread between trigger and fire times in the
+deployment's own logs, not from a plan's documented guarantee.
+
+Either way you can re-run a missed morning by hand:
 
 ```
 curl "https://your-site/api/scanner/gamma?token=$CRON_SECRET&format=text"
@@ -286,6 +317,47 @@ Both return a single readable line — `Refreshed 51 chains, 2 failed. SPY gamma
 positive.` — which is the point of `format=text`. Neither is linked anywhere in
 the UI, and both need `CRON_SECRET`. Run the gamma job first; the scan reads
 what it stored.
+
+### The job alarm
+
+`/api/alarm` runs hourly through the session and posts to Discord when a
+scheduled job has stopped writing. It exists because every other way of finding
+that out was a pull: `/status` and `/api/health` have always known which jobs
+were late, and both required someone to open them and read a timestamp.
+
+It uses the same `DISCORD_WEBHOOK_URL` as the digest. Leave that unset and the
+alarm still grades every job and reports through `/api/alarm` — it just has
+nowhere to push to.
+
+Three things about it worth knowing:
+
+**Each job is graded against its own schedule, not against a flat age.** A flat
+limit cannot tell a dead job from a Monday morning: every after-close job is 63
+hours old at the Monday open and perfectly healthy. So the alarm asks when each
+job was last *due* — walking back over weekends and the holiday calendar — and
+counts it late only if it has not written since. Holidays and early closes come
+from `events/calendar.json`, the same file the staleness banner uses.
+
+**It repeats, then clears.** A job that goes late is announced once, repeated
+every six hours while it stays down, and announced again when it recovers. The
+repeat is the important half: without it a job that broke on Tuesday is
+mentioned once and then silently stays broken.
+
+**It only runs during the session.** A 21:00 page about the morning scan cannot
+be acted on until tomorrow, by which time the next morning's check says the
+same thing.
+
+`/api/positioning` is listed on `/status` but never alarms. Nothing schedules
+it — the chain snapshot behind `/decision` is written as a side effect of a
+page request that fetched successfully — so on a quiet day "stale" and "nobody
+visited" are the same reading. Showing that to a human with the caveat attached
+is useful; paging someone about it is not.
+
+Check it by hand, or preview what it would say without posting:
+
+```
+curl "https://your-site/api/alarm?token=$CRON_SECRET&force=1&dry=1"
+```
 
 ### Why the breadth and level-feed jobs are registered differently
 
@@ -321,9 +393,9 @@ session.
 You do not need to do anything else. The first row appears on the next weekday
 run, and the running percentages become meaningful after a couple of weeks.
 
-> On Vercel's free plan cron jobs can be delayed by up to an hour. That is fine
-> here — both jobs have an hour of slack before they would fall outside the
-> window they care about, and the settle job re-checks any day it missed.
+> Both jobs tolerate a late run regardless of plan: each has an hour of slack
+> before it would fall outside the window it cares about, and the settle job
+> re-checks any day it missed.
 
 ---
 

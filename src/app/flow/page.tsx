@@ -13,6 +13,7 @@ import type { TooltipKey } from '@/lib/tooltips';
 import { TickerLink } from '@/components/TickerLink';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { marketToday } from '@/lib/time';
+import { DataFreshness } from '@/components/StaleDataBanner';
 
 export const metadata: Metadata = {
   title: 'Options Flow',
@@ -82,6 +83,20 @@ export default async function FlowPage({ searchParams }: PageProps) {
     <>
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+        {/*
+          The header here is too bespoke for PageBar, so the check comes in
+          directly — same component, same threshold, same wording. Graded as a
+          daily artefact: the flow scan runs once after the close and describes
+          one session, so the clock check would condemn it every evening.
+        */}
+        <DataFreshness
+          freshness={{
+            kind: 'daily',
+            date: snapshot?.sessionDate,
+            generatedAt: snapshot?.computedAt,
+          }}
+        />
+
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">

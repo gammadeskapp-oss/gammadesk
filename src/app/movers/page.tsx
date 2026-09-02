@@ -2,8 +2,6 @@ import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
 import { MoversBoard } from '@/components/MoversBoard';
 import { PageBar } from '@/components/PageBar';
-import { StaleDataBanner } from '@/components/StaleDataBanner';
-import { snapshotStaleness } from '@/lib/events';
 import { EARNINGS_WARN_DAYS } from '@/lib/movers/rules';
 import {
   MIN_RELATIVE_VOLUME,
@@ -16,7 +14,6 @@ import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { getScannerView } from '@/lib/scanner';
 import { partition } from '@/lib/scanner/evaluate';
 import { sessionLabel } from '@/lib/staleness';
-import { formatAsOf } from '@/lib/time';
 
 export const metadata: Metadata = {
   title: 'Moving today',
@@ -44,13 +41,10 @@ export default async function MoversPage() {
   const scannerView = await getScannerView().catch(() => null);
   const scannerPassed = scannerView?.scan ? partition(scannerView.scan.rows).passed.length : null;
 
-  const staleness = snapshotStaleness(movers.capturedAt);
   const nextIn = Math.max(0, Math.ceil(secondsUntilRefresh() / 60));
 
   return (
     <>
-      <StaleDataBanner staleness={staleness} />
-
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <PageBar
           title="Moving today"
@@ -60,7 +54,7 @@ export default async function MoversPage() {
               ? `Last refreshed ${movers.capturedEt} ET · next in ${nextIn} min`
               : `Close of ${sessionLabel(movers.sessionDate)}`
           }
-          asOfLabel={formatAsOf(new Date(movers.capturedAt))}
+          freshness={{ kind: 'continuous', updatedAt: movers.capturedAt }}
         />
 
         {/*

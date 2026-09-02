@@ -16,23 +16,21 @@ export const maxDuration = 60;
  *
  * ## Why four separate cron entries rather than one `0,15,30,45` schedule
  *
- * Vercel's Hobby plan rejects any cron *expression* that would run more than
- * once a day, and fails the whole deployment when it sees one — the concise
- * four-times-an-hour form took the entire build down with it. Four entries
- * pointing at this same route are four once-daily expressions, which is
- * allowed, and the cron-count limit is 100 on every plan so the extra entries
- * cost nothing.
+ * This split dates from when the project was on Vercel's Hobby plan, which
+ * restricts both how often a cron may be *expressed* and when it actually
+ * fires. **The project is on Pro now**, so neither restriction applies and the
+ * split is no longer required — it is kept because it works and because
+ * collapsing it is a change with no benefit attached, not because the plan
+ * still demands it. Anyone tempted to reason from this comment about what
+ * Vercel allows should check the current plan first; `/api/breadth/refresh`
+ * and `/api/alarm` both use multi-fire expressions.
  *
- * They are spaced two hours apart rather than fifteen minutes because Hobby
- * only guarantees the *hour* of a cron, firing anywhere within it. Runs
- * fifteen minutes apart on paper could therefore land in any order or land
- * together, and two concurrent runs would read the same cursor, refresh the
- * same shard twice and skip another. Two hours of separation makes that
- * overlap impossible. The later three run on days 2-6 because they fall after
- * midnight UTC — they are still the same weekday *evening* in New York.
- *
- * On Pro this could go back to one entry at any frequency; nothing about the
- * code depends on the split.
+ * What the split still buys, independent of plan: the four runs are two hours
+ * apart, and two concurrent runs would read the same cursor, refresh the same
+ * shard twice and skip another. Wide spacing makes that overlap impossible
+ * whatever the scheduler's timing guarantees happen to be. The later three run
+ * on days 2-6 because they fall after midnight UTC — they are still the same
+ * weekday *evening* in New York.
  *
  * Pass `?shard=N` to force a particular shard, which is useful for filling a
  * fresh deploy by hand without waiting four nights for the cursor to come

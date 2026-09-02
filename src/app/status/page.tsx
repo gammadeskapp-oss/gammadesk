@@ -40,6 +40,27 @@ function stateWord(source: CronSource): string {
   return source.state === 'late' ? 'LATE' : 'NEVER RAN';
 }
 
+/*
+ * The alarm's verdict, which is not always the same as the age verdict beside
+ * it — see the note on `dueState`. Named rather than coloured, because the
+ * dot already carries the colour and a second red thing in the same row reads
+ * as two problems.
+ */
+function dueWord(state: CronSource['dueState']): string {
+  switch (state) {
+    case 'ok':
+      return 'on time';
+    case 'late':
+      return 'behind schedule';
+    case 'missing':
+      return 'never written';
+    case 'not-due':
+      return 'not due yet';
+    case 'not-alarmed':
+      return 'not alarmed on';
+  }
+}
+
 function Row({ source }: { source: CronSource }) {
   const ok = source.state === 'ok';
 
@@ -76,6 +97,27 @@ function Row({ source }: { source: CronSource }) {
             {source.detail}
           </div>
         )}
+
+        {/*
+          Why the alarm reached its verdict, in one sentence, from the same
+          function that reached it. This is here so "why is this late" can be
+          answered from the page rather than by reading `cronDue.ts` — the
+          schedule it is graded against, the instant it was due, and what it
+          actually wrote.
+        */}
+        <div
+          className={`mt-1 text-2xs leading-relaxed ${
+            source.dueState === 'late' || source.dueState === 'missing'
+              ? 'text-bear'
+              : 'text-term-faint'
+          }`}
+        >
+          <span className="uppercase tracking-[0.12em]">
+            {dueWord(source.dueState)}
+          </span>
+          {' · '}
+          {source.grading}
+        </div>
       </div>
 
       <div className="pl-4 sm:pl-0 sm:text-right">
