@@ -161,6 +161,11 @@ export interface Coverage {
 export interface AnaloguesView {
   coverage: Coverage;
   /**
+   * Per-session regime, plus what each filter can and cannot reach. Index
+   * aligned with the bar series, so a match knows its own regime by index.
+   */
+  regimes: import('./regimes').RegimeSeries;
+  /**
    * One baseline per horizon, over the whole series. Computed once and shared
    * by every table: all sixteen conditions rest on the same lookback, so a
    * per-condition baseline would be the same numbers repeated sixteen times.

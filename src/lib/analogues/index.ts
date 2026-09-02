@@ -4,10 +4,23 @@ import { cached } from '../cache';
 import { CONDITIONS, detect } from './conditions';
 import { fetchDeepBars } from './deepBars';
 import { buildBaseline, summarise } from './forward';
+import { buildRegimes } from './regimes';
+import { fetchVix } from './vix';
 import type { AnaloguesView, ConditionId } from './types';
 
 export { CONDITIONS, conditionById, detect } from './conditions';
 export { buildBaseline, LONGEST, THIN_SAMPLE } from './forward';
+export { buildPaths, toEpisodes } from './episodes';
+export type { Episode, EpisodePath, PathBand, PathsView } from './episodes';
+export {
+  applyFilters, baselineOver, episodesUnder, honestyUnder, MIN_EPISODES,
+  type FilteredCondition,
+} from './filtered';
+export {
+  buildRegimes, filterCount, parseFilters, sessionPasses,
+  type ActiveFilters, type FilterDef, type FilterId, type FilterValue,
+  type RegimeRow, type RegimeSeries,
+} from './regimes';
 export {
   comparisonSentence, horizonLabel, overlapSentence, verdictFor,
   CLEAR_GAP_PP, EPISODE_NOTE, MEANINGFUL_GAP_PP, POSITIVE_DEADBAND_PP,
@@ -37,6 +50,14 @@ export function getAnalogues(symbol: string): Promise<AnaloguesView> {
   return cached(`analogues:${symbol.toUpperCase()}`, 3600, async () => {
     const { bars, coverage } = await fetchDeepBars(symbol);
 
+    /*
+     * VIX is allowed to fail. It powers one filter, and losing it should cost
+     * that filter rather than the page — `buildRegimes` marks it unavailable
+     * and says so, which is the same treatment gamma already gets.
+     */
+    const vix = await fetchVix().catch(() => null);
+    const regimes = buildRegimes(bars, vix);
+
     const conditions = CONDITIONS.map((def) =>
       summarise(def, bars, detect(bars, def.id)),
     );
@@ -44,6 +65,7 @@ export function getAnalogues(symbol: string): Promise<AnaloguesView> {
     return {
       coverage,
       baseline: buildBaseline(bars),
+      regimes,
       conditions,
       active: conditions
         .filter((c) => c.activeToday)

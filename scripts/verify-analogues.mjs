@@ -26,6 +26,14 @@ const {
   outcomesAt, buildMatches, summarise, honestyOf, LONGEST, baselineFor,
   buildBaseline,
 } = await import('../src/lib/analogues/forward.ts');
+const { toEpisodes, buildPaths } = await import(
+  '../src/lib/analogues/episodes.ts'
+);
+const { buildRegimes, sessionPasses, parseFilters } = await import(
+  '../src/lib/analogues/regimes.ts'
+);
+const { applyFilters, baselineOver, episodesUnder, MIN_EPISODES } =
+  await import('../src/lib/analogues/filtered.ts');
 const {
   comparisonSentence, overlapSentence, verdictFor, horizonLabel,
   SMALL_GAP_PP, CLEAR_GAP_PP, MEANINGFUL_GAP_PP, POSITIVE_DEADBAND_PP,
@@ -692,6 +700,208 @@ section('When the two measures disagree the headline picks neither');
     const hit = banned.find((w) => text.includes(w));
     ok(`no jargon in ${JSON.stringify(v.text.slice(0, 34))}`, !hit, `found ${hit}`);
   }
+}
+
+
+section('Episodes group occurrences into the stretches they came from');
+{
+  const bars = series(new Array(400).fill(0).map((_, i) => 100 + i));
+  // Two clusters and one loner: 0,5,10 | 200,210 | 350
+  const matches = buildMatches(bars, [0, 5, 10, 200, 210, 350]);
+  const episodes = toEpisodes(matches);
+  eq('three stretches', episodes.length, 3);
+  eq('day zero anchors at the FIRST of each run',
+    episodes.map((e) => e.anchorIndex), [0, 200, 350]);
+  eq('and each knows how many occurrences it holds',
+    episodes.map((e) => e.occurrences), [3, 2, 1]);
+  eq('the episode count agrees with the honesty count',
+    episodes.length, honestyOf(matches).episodes);
+}
+{
+  eq('no matches means no episodes', toEpisodes([]).length, 0);
+}
+
+section('Paths are rebased per episode and never smoothed');
+{
+  // Flat 100, then one episode that doubles over its window.
+  const closes = new Array(60).fill(100);
+  for (let i = 0; i < 60; i += 1) closes.push(100 + i);
+  const bars = series(closes);
+  const matches = buildMatches(bars, [60]);
+  const view = buildPaths(bars, toEpisodes(matches));
+
+  eq('one episode draws one line', view.paths.length, 1);
+  close('every path starts at exactly 100', view.paths[0].values[0], 100, 1e-9);
+  eq('and runs to the longest horizon', view.paths[0].values.length, LONGEST + 1);
+  close('the value is a rebase of the close',
+    view.paths[0].values[10], ((100 + 10) / 100) * 100, 1e-9);
+}
+{
+  /*
+   * Three episodes finishing at 90, 100 and 130. The median must be the
+   * middle one and the extremes must survive untouched — a chart that
+   * clipped the 130 would answer a different question.
+   */
+  const closes = [];
+  const anchors = [];
+  for (const end of [0.9, 1.0, 1.3]) {
+    anchors.push(closes.length);
+    closes.push(100);
+    for (let d = 1; d <= LONGEST; d += 1) {
+      closes.push(100 * (1 + (end - 1) * (d / LONGEST)));
+    }
+    for (let k = 0; k < 60; k += 1) closes.push(100 * end);
+  }
+  const bars = series(closes);
+  const view = buildPaths(bars, toEpisodes(buildMatches(bars, anchors)));
+
+  eq('three separate stretches', view.paths.length, 3);
+  const last = view.band[view.band.length - 1];
+  eq('the band runs to the longest horizon', last.day, LONGEST);
+  close('the median finish is the middle episode', last.median, 100, 1e-6);
+  close('the band holds the middle half', last.p25, 95, 1e-6);
+  close('on both sides', last.p75, 115, 1e-6);
+  ok('the winner is not clipped',
+    Math.max(...view.paths.map((p) => p.endValue)) > 129);
+  ok('nor the loser', Math.min(...view.paths.map((p) => p.endValue)) < 91);
+}
+
+section('Regime filters state their own reach');
+{
+  const closes = new Array(400).fill(0).map((_, i) => 100 + Math.sin(i / 9) * 6 + i * 0.05);
+  const bars = series(closes);
+  const vix = new Map(bars.map((b, i) => [b.date, 10 + (i % 30)]));
+  const { rows, filters } = buildRegimes(bars, vix);
+
+  eq('one regime row per session', rows.length, bars.length);
+  eq('the 50-day is undefined before it exists', rows[10].ma50, null);
+  ok('and defined once it does', rows[80].ma50 !== null);
+  eq('the 200-day is undefined before it exists', rows[100].ma200, null);
+  ok('and defined once it does', rows[250].ma200 !== null);
+
+  const ma50 = filters.find((f) => f.id === 'ma50');
+  ok('the 50-day filter names the date it starts from', Boolean(ma50.from));
+  ok('and says so in words', ma50.note.includes(ma50.from));
+
+  const gamma = filters.find((f) => f.id === 'gamma');
+  eq('gamma is unavailable', gamma.available, false);
+  eq('and offers no start date', gamma.from, null);
+  ok('and says why in plain words',
+    gamma.note.startsWith('Unavailable.') && gamma.note.includes('backfill'),
+    gamma.note);
+}
+{
+  // No VIX at all: the filter turns off, the rest keep working.
+  const bars = series(new Array(400).fill(0).map((_, i) => 100 + i));
+  const { filters, rows } = buildRegimes(bars, null);
+  const vixFilter = filters.find((f) => f.id === 'vix');
+  eq('the VIX filter is unavailable without VIX', vixFilter.available, false);
+  eq('and no session carries a bucket', rows[300].vix, null);
+  ok('while the moving averages still work', rows[300].ma200 !== null);
+}
+{
+  const bars = series(new Array(400).fill(0).map((_, i) => 100 + i));
+  const { filters } = buildRegimes(bars, null);
+  eq('unavailable filters are ignored from the URL',
+    parseFilters({ gamma: 'positive', vix: 'high' }, filters), {});
+  eq('and unknown values are dropped',
+    parseFilters({ ma200: 'sideways' }, filters), {});
+  eq('a good value is kept',
+    parseFilters({ ma200: 'above' }, filters), { ma200: 'above' });
+}
+{
+  eq('a session with no regime never passes',
+    sessionPasses(undefined, { ma200: 'above' }), false);
+  eq('nor one the filter cannot classify',
+    sessionPasses({ ma50: null, ma200: null, vix: null }, { ma200: 'above' }), false);
+  eq('everything passes when nothing is applied',
+    sessionPasses({ ma50: null, ma200: null, vix: null }, {}), true);
+  eq('gamma excludes everything, since it has no series',
+    sessionPasses({ ma50: 'above', ma200: 'above', vix: 'low' }, { gamma: 'positive' }),
+    false);
+}
+
+section('The floor withholds returns rather than hedging them');
+{
+  const bars = series(new Array(900).fill(0).map((_, i) => 100 + Math.sin(i / 7) * 5 + i * 0.05));
+  const { rows } = buildRegimes(bars, null);
+  const def = CONDITIONS.find((c) => c.id === 'down-3');
+
+  // Twelve well-separated occurrences: over the floor.
+  const many = buildMatches(bars, Array.from({ length: 12 }, (_, i) => 300 + i * 45));
+  const wide = applyFilters(def, bars, many, rows, {});
+  eq('twelve stretches clear the floor', wide.episodes, 12);
+  eq('so results are shown', wide.tooThin, false);
+  ok('with a table', wide.result !== null);
+  ok('a comparison row', wide.baseline !== null);
+  ok('and paths', wide.paths !== null);
+
+  // Nine: under the floor.
+  const few = buildMatches(bars, Array.from({ length: 9 }, (_, i) => 300 + i * 45));
+  const thin = applyFilters(def, bars, few, rows, {});
+  eq('nine stretches do not', thin.episodes, 9);
+  eq('so it is marked too thin', thin.tooThin, true);
+  eq('and NOTHING is returned to display', thin.result, null);
+  eq('not even a comparison row', thin.baseline, null);
+  eq('nor paths', thin.paths, null);
+  ok('but the count is still reported', thin.episodes === 9);
+  eq('the floor is the documented one', MIN_EPISODES, 10);
+}
+{
+  /*
+   * Occurrences clumped inside one window are one stretch, so a condition
+   * that fired thirty times can still be under the floor. This is the case
+   * the floor exists for.
+   */
+  const bars = series(new Array(600).fill(0).map((_, i) => 100 + i));
+  const { rows } = buildRegimes(bars, null);
+  const def = CONDITIONS.find((c) => c.id === 'down-3');
+  const clumped = buildMatches(bars, Array.from({ length: 30 }, (_, i) => 100 + i));
+  const out = applyFilters(def, bars, clumped, rows, {});
+  eq('thirty clumped days are one stretch', out.episodes, 1);
+  eq('and are withheld', out.tooThin, true);
+}
+
+section('A filtered comparison uses filtered days, not all history');
+{
+  const bars = series(new Array(1100).fill(0).map((_, i) => 100 + i * 0.4));
+  const { rows } = buildRegimes(bars, null);
+
+  const above = [];
+  const all = [];
+  for (let i = 0; i < bars.length; i += 1) {
+    all.push(i);
+    if (sessionPasses(rows[i], { ma200: 'above' })) above.push(i);
+  }
+  ok('the filter selects a strict subset', above.length > 0 && above.length < all.length);
+
+  const filteredRow = baselineOver(bars, above);
+  const everything = baselineOver(bars, all);
+  const oneFiltered = filteredRow.find((b) => b.horizon === 1);
+  const oneAll = everything.find((b) => b.horizon === 1);
+  ok('and the comparison row rests on fewer days', oneFiltered.n < oneAll.n);
+  ok('while still measuring something', oneFiltered.n > 0);
+
+  const def = CONDITIONS.find((c) => c.id === 'down-3');
+  const matches = buildMatches(bars, Array.from({ length: 14 }, (_, i) => 250 + i * 45));
+  const out = applyFilters(def, bars, matches, rows, { ma200: 'above' });
+  if (!out.tooThin) {
+    ok('the filtered view reports the days its comparison used',
+      out.baselineDays === above.length,
+      `expected ${above.length}, got ${out.baselineDays}`);
+    const shown = out.baseline.find((b) => b.horizon === 1);
+    eq('and that comparison is the filtered one', shown.n, oneFiltered.n);
+  }
+}
+{
+  // Episode counting under a candidate filter, for the number on each button.
+  const bars = series(new Array(1100).fill(0).map((_, i) => 100 + i * 0.4));
+  const { rows } = buildRegimes(bars, null);
+  const matches = buildMatches(bars, Array.from({ length: 14 }, (_, i) => 250 + i * 45));
+  const unfiltered = episodesUnder(bars, matches, rows, {});
+  const narrowed = episodesUnder(bars, matches, rows, { ma200: 'below' });
+  eq('unfiltered counts every stretch', unfiltered, 14);
+  ok('and a filter can only shrink it', narrowed <= unfiltered);
 }
 
 console.log(

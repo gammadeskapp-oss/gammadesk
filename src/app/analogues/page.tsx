@@ -1,12 +1,15 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { AnalogueChart } from '@/components/AnalogueChart';
+import { AnalogueFilters, type OptionCount } from '@/components/AnalogueFilters';
+import { AnaloguePathsChart } from '@/components/AnaloguePathsChart';
 import { AnalogueSearch } from '@/components/AnalogueSearch';
 import { AnalogueTable } from '@/components/AnalogueTable';
 import { Footer } from '@/components/Footer';
 import {
-  CONDITIONS, conditionById, fetchDeepBars, getAnalogues, EPISODE_NOTE,
-  type AnaloguesView, type ConditionResult,
+  CONDITIONS, conditionById, fetchDeepBars, getAnalogues, applyFilters,
+  episodesUnder, parseFilters, EPISODE_NOTE, MIN_EPISODES,
+  type ActiveFilters, type AnaloguesView, type ConditionResult, type FilterId,
 } from '@/lib/analogues';
 import { TickerError } from '@/lib/ticker/bars';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
@@ -20,7 +23,7 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
-  searchParams: Promise<{ symbol?: string; condition?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
 const DEFAULT_SYMBOL = 'SPY';
@@ -120,8 +123,13 @@ function Coverage({ view }: { view: AnaloguesView }) {
 
 export default async function AnaloguesPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const symbol = (params.symbol?.trim() || DEFAULT_SYMBOL).toUpperCase();
-  const selectedId = params.condition?.trim();
+  const one = (key: string): string | undefined => {
+    const raw = params[key];
+    return (Array.isArray(raw) ? raw[0] : raw)?.trim() || undefined;
+  };
+
+  const symbol = (one('symbol') || DEFAULT_SYMBOL).toUpperCase();
+  const selectedId = one('condition');
   const selectedDef = selectedId ? conditionById(selectedId) : undefined;
 
   let view: AnaloguesView | null = null;
@@ -142,13 +150,66 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
       : null;
 
   /*
-   * Bars are fetched only for the condition view, where the chart needs them.
+   * Bars are fetched only for the condition view, where the charts need them.
    * The underlying request is the one `getAnalogues` already made, so this
    * costs a cache read rather than a second trip upstream.
    */
   const bars = selected ? await fetchDeepBars(symbol).catch(() => null) : null;
 
-  const active = view?.conditions.filter((c) => c.activeToday) ?? [];
+  const activeToday = view?.conditions.filter((c) => c.activeToday) ?? [];
+
+  /*
+   * Filters apply to the condition view only. On the Today view a reader is
+   * asking what fired today, and narrowing that by regime would answer a
+   * different question while looking like the same one.
+   */
+  const filterDefs = view?.regimes.filters ?? [];
+  const activeFilters: ActiveFilters =
+    selected && view ? parseFilters(params, filterDefs) : {};
+
+  const filtered =
+    selected && view && bars
+      ? applyFilters(
+          selectedDef!,
+          bars.bars,
+          selected.matches,
+          view.regimes.rows,
+          activeFilters,
+        )
+      : null;
+
+  /*
+   * What each option would leave, computed against the filters already chosen
+   * so the number answers "if I click this next" rather than "on its own".
+   */
+  const optionCounts: OptionCount[] =
+    selected && view && bars
+      ? filterDefs
+          .filter((def) => def.available)
+          .flatMap((def) =>
+            def.options.map((option) => {
+              const candidate: ActiveFilters = { ...activeFilters };
+              if (candidate[def.id] === option.value) {
+                delete candidate[def.id];
+              } else {
+                candidate[def.id as FilterId] = option.value;
+              }
+              return {
+                id: def.id,
+                value: option.value,
+                episodes: episodesUnder(
+                  bars.bars,
+                  selected.matches,
+                  view.regimes.rows,
+                  candidate,
+                ),
+              };
+            }),
+          )
+      : [];
+
+  const baseParams = new URLSearchParams({ symbol });
+  if (selectedDef) baseParams.set('condition', selectedDef.id);
 
   return (
     <>
@@ -261,11 +322,62 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                       />
                     )}
 
-                    <AnalogueTable
-                      condition={selected}
-                      coverage={view.coverage}
-                      baseline={view.baseline}
+                    <AnalogueFilters
+                      filters={filterDefs}
+                      active={activeFilters}
+                      counts={optionCounts}
+                      baseParams={baseParams.toString()}
+                      totalEpisodes={filtered?.episodes ?? 0}
                     />
+
+                    {/*
+                      Under the floor nothing is shown. Not greyed numbers and
+                      not a hedged percentage — either there are enough
+                      separate stretches or there are not.
+                    */}
+                    {filtered?.tooThin ? (
+                      <div className="panel space-y-2 px-4 py-6 text-center">
+                        <p className="text-sm font-bold text-flip">
+                          Too thin to read.
+                        </p>
+                        <p className="mx-auto max-w-lg text-xs leading-relaxed text-term-dim">
+                          These filters leave {filtered.episodes} separate{' '}
+                          {filtered.episodes === 1 ? 'stretch' : 'stretches'} of
+                          market
+                          {filtered.matches > 0 && (
+                            <> (from {filtered.matches} days)</>
+                          )}
+                          . Below {MIN_EPISODES} there is nothing here worth
+                          showing, so the results are withheld rather than
+                          shown with a warning attached.
+                        </p>
+                      </div>
+                    ) : (
+                      filtered?.result && filtered.baseline && (
+                        <>
+                          <AnalogueTable
+                            condition={filtered.result}
+                            coverage={view.coverage}
+                            baseline={filtered.baseline}
+                          />
+                          {filtered.paths && (
+                            <AnaloguePathsChart
+                              paths={filtered.paths}
+                              symbol={symbol}
+                              label={selected.label}
+                            />
+                          )}
+                          {Object.keys(activeFilters).length > 0 && (
+                            <p className="text-2xs leading-relaxed text-term-faint">
+                              Both rows of the table are filtered: the pattern
+                              days and the {filtered.baselineDays.toLocaleString()}{' '}
+                              comparison days both passed the same filters, so
+                              the two describe the same kind of day.
+                            </p>
+                          )}
+                        </>
+                      )
+                    )}
 
                     {selected.matches.length > 0 && (
                       <details className="panel px-4 py-3">
@@ -309,7 +421,7 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                       </p>
                     </div>
 
-                    {active.length === 0 ? (
+                    {activeToday.length === 0 ? (
                       <Panel>
                         <p className="text-term-text">
                           None of these patterns happened today.
@@ -321,7 +433,7 @@ export default async function AnaloguesPage({ searchParams }: PageProps) {
                         </p>
                       </Panel>
                     ) : (
-                      active.map((condition) => (
+                      activeToday.map((condition) => (
                         <AnalogueTable
                           key={condition.id}
                           condition={condition}
