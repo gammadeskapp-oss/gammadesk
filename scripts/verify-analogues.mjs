@@ -28,7 +28,7 @@ const {
 } = await import('../src/lib/analogues/forward.ts');
 const {
   comparisonSentence, overlapSentence, verdictFor, horizonLabel,
-  SMALL_GAP_PP, CLEAR_GAP_PP, MEANINGFUL_GAP_PP,
+  SMALL_GAP_PP, CLEAR_GAP_PP, MEANINGFUL_GAP_PP, POSITIVE_DEADBAND_PP,
 } = await import('../src/lib/analogues/phrasing.ts');
 
 let failures = 0;
@@ -550,9 +550,13 @@ section('The headline verdict has three shapes and never implies action');
   eq('and inclusive going down',
     verdictFor(make(0.0218 - MEANINGFUL_GAP_PP / 100, 60), baseline).tone, 'worse');
 
-  // The mixed case the split exists for: median well above, went up less often.
+  /*
+   * The mixed case. The headline declines to pick a side; the dedicated
+   * section below covers the wording. Asserted here too so the three-shape
+   * block cannot drift back to resolving a contradiction silently.
+   */
   const mixed = verdictFor(make(0.0487, 61), baseline);
-  eq('a mixed condition still reads better on the median', mixed.tone, 'better');
+  eq('a mixed condition picks neither side', mixed.tone, 'nothing');
   eq('and carries the percent-positive that disagrees', mixed.condPositive, 61);
   eq('beside the baseline it disagrees with', mixed.basePositive, 67);
 
@@ -587,6 +591,83 @@ section('Periods read in the reader units');
   eq('21 sessions', horizonLabel(21), '1 month');
   eq('42 sessions', horizonLabel(42), '2 months');
   eq('anything else falls back to sessions', horizonLabel(7), '7 sessions');
+}
+
+
+section('When the two measures disagree the headline picks neither');
+{
+  const make = (medianReturn, positivePct, n = 40, thin = false) => ({
+    id: 'dd-10', label: 'Drawdown crosses -10%', rule: '', family: 'drawdown',
+    matches: new Array(n).fill(0).map((_, k) => ({
+      date: '2000-01-01', index: k, close: 100, outcomes: [], overlapsPrevious: false,
+    })),
+    firstMatch: null, lastMatch: null, activeToday: false,
+    horizons: [
+      { horizon: 42, n, medianReturn, bestReturn: 0.2, worstReturn: -0.2,
+        bestDate: null, worstDate: null, positivePct, medianDrawdown: -0.04,
+        worstDrawdown: -0.3 },
+    ],
+    honesty: { thin, overlapping: 0, episodes: n, clusteredYear: null },
+  });
+  const baseline = [
+    { horizon: 42, n: 8413, medianReturn: 0.0218, positivePct: 67, medianDrawdown: -0.026 },
+  ];
+
+  // The real SPY drawdown -10% shape: median well above, went up less often.
+  const mixed = verdictFor(make(0.0487, 61), baseline);
+  eq('the headline refuses to pick a side', mixed.tone, 'nothing');
+  eq('and says why', mixed.text,
+    'This pattern tells you almost nothing — the two measures below disagree.');
+  eq('the disagreement is stated plainly', mixed.disagreement,
+    'Its typical result was better than a random day, but it went up less often. ' +
+    'The two point different ways.');
+
+  // The mirror: median well below, went up more often.
+  const mirrored = verdictFor(make(0.0018, 74), baseline);
+  eq('the mirrored case also refuses', mirrored.tone, 'nothing');
+  eq('and reads the other way round', mirrored.disagreement,
+    'Its typical result was worse than a random day, but it went up more often. ' +
+    'The two point different ways.');
+
+  // Agreement is untouched: both above.
+  const agree = verdictFor(make(0.0642, 79), baseline);
+  eq('agreement still earns better', agree.tone, 'better');
+  eq('and carries no disagreement line', agree.disagreement, undefined);
+
+  const agreeWorse = verdictFor(make(0.0018, 60), baseline);
+  eq('agreement still earns worse', agreeWorse.tone, 'worse');
+  eq('with no disagreement line', agreeWorse.disagreement, undefined);
+
+  /*
+   * A median gap too small to pick a side never raises a disagreement, however
+   * the percent-positive falls. Announcing a contradiction between two flat
+   * numbers would be noise, and four of SPY's conditions sit there.
+   */
+  const flat = verdictFor(make(0.0225, 60), baseline);
+  eq('a sub-threshold median raises no disagreement', flat.disagreement, undefined);
+  eq('and reads as the ordinary nothing', flat.text,
+    'This pattern tells you almost nothing — the market did about the same after a random day.');
+
+  // Percent-positive inside the deadband is not a direction.
+  const withinDeadband = verdictFor(make(0.0487, 66.5), baseline);
+  eq('a sub-point positive gap does not count as disagreeing',
+    withinDeadband.tone, 'better');
+  eq('and prints no line', withinDeadband.disagreement, undefined);
+  eq('the deadband is the documented one', POSITIVE_DEADBAND_PP, 1);
+
+  // Thin still wins over everything.
+  const thinMixed = verdictFor(make(0.0487, 61, 5, true), baseline);
+  eq('a thin sample still reports too few examples', thinMixed.text,
+    'This pattern tells you almost nothing — there are too few past examples to say.');
+  eq('and raises no disagreement line', thinMixed.disagreement, undefined);
+
+  const forbidden = ['buy', 'sell', 'should', 'recommend', 'signal',
+    'opportunity', 'edge', 'suggests', 'expect', 'p-value', 'significant'];
+  for (const v of [mixed, mirrored]) {
+    const text = `${v.text} ${v.disagreement}`.toLowerCase();
+    ok('no action language in the disagreement wording',
+      !forbidden.some((w) => text.includes(w)));
+  }
 }
 
 console.log(

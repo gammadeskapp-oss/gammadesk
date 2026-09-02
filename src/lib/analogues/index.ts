@@ -10,7 +10,7 @@ export { CONDITIONS, conditionById, detect } from './conditions';
 export { buildBaseline, LONGEST, THIN_SAMPLE } from './forward';
 export {
   comparisonSentence, horizonLabel, overlapSentence, verdictFor,
-  CLEAR_GAP_PP, MEANINGFUL_GAP_PP, SMALL_GAP_PP,
+  CLEAR_GAP_PP, MEANINGFUL_GAP_PP, POSITIVE_DEADBAND_PP, SMALL_GAP_PP,
   type Comparison, type Verdict,
 } from './phrasing';
 export { fetchDeepBars } from './deepBars';

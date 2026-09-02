@@ -205,6 +205,17 @@ export function AnalogueTable({
                 {horizonLabel(verdict.horizon)}, against{' '}
                 {verdict.basePositive.toFixed(0)}% after a random day.
               </p>
+              {/*
+                Only present when the two measures contradict each other. The
+                headline above has already declined to pick a side; this says
+                out loud what the reader would otherwise have to infer by
+                comparing two rows of the table.
+              */}
+              {verdict.disagreement && (
+                <p className="text-xs leading-relaxed text-flip">
+                  {verdict.disagreement}
+                </p>
+              )}
               <p className="text-2xs leading-relaxed text-term-faint">
                 &quot;Better&quot; and &quot;worse&quot; here mean the typical
                 result was at least {MEANINGFUL_GAP_PP} percentage points away

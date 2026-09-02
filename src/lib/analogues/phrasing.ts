@@ -47,6 +47,17 @@ export const CLEAR_GAP_PP = 1.5;
  */
 export const MEANINGFUL_GAP_PP = CLEAR_GAP_PP;
 
+/**
+ * How far the percent-positive gap must move before it counts as pointing
+ * anywhere at all.
+ *
+ * Percent-positive is displayed rounded to whole points, so a gap of a few
+ * tenths is a difference the reader cannot see. Without this deadband a
+ * condition sitting a rounding error below the baseline would be announced as
+ * contradicting itself.
+ */
+export const POSITIVE_DEADBAND_PP = 1;
+
 function signedPp(pp: number): string {
   return `${pp > 0 ? '+' : ''}${pp.toFixed(1)}`;
 }
@@ -184,6 +195,11 @@ export interface Verdict {
   tone: 'nothing' | 'better' | 'worse';
   /** The headline sentence. */
   text: string;
+  /**
+   * Set only when the median and percent-positive point opposite ways. Printed
+   * verbatim under the headline, which in that case picks neither side.
+   */
+  disagreement?: string;
   /** Percent-positive, condition and baseline, always shown beneath. */
   condPositive: number;
   basePositive: number;
@@ -249,6 +265,42 @@ export function verdictFor(
       text:
         'This pattern tells you almost nothing — there are too few past ' +
         'examples to say.',
+    };
+  }
+
+  /*
+   * When the two measures point opposite ways, the headline picks neither.
+   *
+   * Drawdown crossing -10% on SPY is the case: its typical result beats a
+   * random day by 2.7 points while it goes UP less often, 61% against 67%. A
+   * headline saying "did better than usual" would be true of one measure and
+   * false of the other, and the reader has no way to know which one it came
+   * from. So the verdict falls back to "almost nothing" and the disagreement
+   * is stated in its own plain sentence rather than resolved silently.
+   *
+   * Only checked when the median gap would otherwise have picked a side. Below
+   * that threshold the headline is already "almost nothing", and announcing a
+   * contradiction between two numbers that are both flat would be noise.
+   */
+  const positiveGapPp = stats.positivePct - base.positivePct;
+  const medianPicksSide = Math.abs(gapPp) >= MEANINGFUL_GAP_PP;
+  const positivePoints = Math.abs(positiveGapPp) >= POSITIVE_DEADBAND_PP;
+  const disagree =
+    medianPicksSide && positivePoints &&
+    Math.sign(gapPp) !== Math.sign(positiveGapPp);
+
+  if (disagree) {
+    const medianBetter = gapPp > 0;
+    return {
+      ...shared,
+      tone: 'nothing',
+      disagreement:
+        `Its typical result was ${medianBetter ? 'better' : 'worse'} than a ` +
+        `random day, but it went up ${medianBetter ? 'less' : 'more'} often. ` +
+        'The two point different ways.',
+      text:
+        'This pattern tells you almost nothing — the two measures below ' +
+        'disagree.',
     };
   }
 
