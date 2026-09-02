@@ -17,7 +17,7 @@ import type { Methodology } from '@/lib/methodology';
  */
 export function MethodologyDrawer({
   methodology,
-  /** Anchor on /methodology this drawer corresponds to. */
+  /** Anchor on /guide's methodology section this drawer corresponds to. */
   anchor,
 }: {
   methodology: Methodology;
@@ -77,7 +77,7 @@ export function MethodologyDrawer({
 
         <p className="mt-3 border-t border-term-line pt-3 text-2xs text-term-faint">
           <Link
-            href={`/methodology#${anchor}`}
+            href={`/guide#${anchor}`}
             className="underline hover:text-term-text"
           >
             Every calculation on the site, in one place

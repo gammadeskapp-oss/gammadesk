@@ -18,10 +18,20 @@ import { DEFAULT_FILTERS, scoreAndJudge } from '@/lib/scanner/score';
 import { sessionLabel } from '@/lib/staleness';
 import { formatAsOf } from '@/lib/time';
 
+/**
+ * Unlisted, and deliberately not private — the same arrangement as
+ * `/previousscanner`.
+ *
+ * `noindex, nofollow` overrides the site-wide `index, follow` from the root
+ * layout, and the sidebar no longer lists this route. It is still reached from
+ * `/scanner`, which is where a reader who wants it should meet it: after the
+ * rules, never instead of them.
+ */
 export const metadata: Metadata = {
   title: 'Moved last session',
   description:
     'S&P 500 names that closed up on more than 1.5 times their own average volume in the last completed session, with the context to check each one against. Not a scanner result.',
+  robots: { index: false, follow: false },
 };
 
 export const dynamic = 'force-dynamic';

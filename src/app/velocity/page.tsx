@@ -8,10 +8,22 @@ import { getSymbolDirectory } from '@/lib/symbols/directory';
 import { getVelocity, storeStatus } from '@/lib/velocity';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
+/**
+ * Unlisted, and deliberately not private — the same arrangement as
+ * `/previousscanner`.
+ *
+ * `noindex, nofollow` overrides the site-wide `index, follow` from the root
+ * layout, and the sidebar no longer lists this route. That keeps it out of
+ * search results and out of the way; it does not keep anyone out. The page is
+ * still built, still refreshed on its schedule, and still linked from
+ * `/guide` — anybody who follows that link or types the URL reads the live
+ * page.
+ */
 export const metadata: Metadata = {
   title: 'Gamma Velocity',
   description:
     'Day-over-day change in per-strike dealer gamma across the tracked symbols.',
+  robots: { index: false, follow: false },
 };
 
 export const dynamic = 'force-dynamic';
