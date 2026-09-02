@@ -26,6 +26,8 @@ const {
   outcomesAt, buildMatches, summarise, honestyOf, LONGEST, baselineFor,
   buildBaseline,
 } = await import('../src/lib/analogues/forward.ts');
+const { comparisonSentence, overlapSentence, SMALL_GAP_PP, CLEAR_GAP_PP } =
+  await import('../src/lib/analogues/phrasing.ts');
 
 let failures = 0;
 let checks = 0;
@@ -377,6 +379,129 @@ section('The baseline covers every window, not just the matches');
     close(`positive share agrees at ${horizon}d`, c.positivePct, b.positivePct, 1e-12);
     close(`median drawdown agrees at ${horizon}d`, c.medianDrawdown, b.medianDrawdown, 1e-12);
   }
+}
+
+
+section('The generated read quotes both numbers and never implies action');
+{
+  /*
+   * A condition result assembled by hand, so the wording at each size of gap
+   * is pinned. Building it from a real series would make the sentence depend
+   * on the detectors, which are tested separately.
+   */
+  const make = (medianReturn, n = 40, thin = false, label = '3 consecutive down closes') => ({
+    id: 'down-3',
+    label,
+    rule: '',
+    family: 'consecutive-down',
+    matches: new Array(n).fill(0).map((_, k) => ({
+      date: `2000-01-${String((k % 28) + 1).padStart(2, '0')}`,
+      index: k, close: 100, outcomes: [], overlapsPrevious: false,
+    })),
+    firstMatch: '2000-01-01',
+    lastMatch: '2000-01-28',
+    activeToday: false,
+    horizons: [
+      { horizon: 1, n, medianReturn: 0.001, bestReturn: 0.01, worstReturn: -0.01,
+        bestDate: null, worstDate: null, positivePct: 50, medianDrawdown: 0, worstDrawdown: 0 },
+      { horizon: 42, n, medianReturn, bestReturn: 0.2, worstReturn: -0.2,
+        bestDate: null, worstDate: null, positivePct: 60, medianDrawdown: -0.02, worstDrawdown: -0.3 },
+    ],
+    honesty: { thin, overlapping: 0, episodes: n, clusteredYear: null },
+  });
+
+  const baseline = [
+    { horizon: 1, n: 8000, medianReturn: 0.0005, positivePct: 52, medianDrawdown: 0 },
+    { horizon: 42, n: 8000, medianReturn: 0.0218, positivePct: 67, medianDrawdown: -0.026 },
+  ];
+
+  // Gap of +0.31pp: the real SPY down-3 case.
+  const small = comparisonSentence(make(0.0249), baseline);
+  eq('it speaks about the longest usable horizon', small.horizon, 42);
+  ok('it quotes the condition median', small.text.includes('+2.5%'));
+  ok('it quotes the baseline median', small.text.includes('+2.2%'));
+  ok('it names the condition mid-sentence',
+    small.text.startsWith('After 3 consecutive down closes,'));
+  ok('a sub-half-point gap is called little difference',
+    small.text.includes('Little difference here.'), small.text);
+  ok('it carries the match count', small.text.includes('40 matches'));
+
+  const clear = comparisonSentence(make(0.0518), baseline);
+  ok('a three-point gap is stated plainly',
+    clear.text.includes('above the baseline.') && clear.text.includes('+3.0'), clear.text);
+  ok('and is not called small', !clear.text.includes('a small gap'));
+
+  const middling = comparisonSentence(make(0.0318), baseline);
+  ok('a one-point gap is explicitly called small',
+    middling.text.includes('a small gap'), middling.text);
+
+  const negative = comparisonSentence(make(-0.0182), baseline);
+  ok('a negative gap says below', negative.text.includes('below the baseline'), negative.text);
+  ok('and keeps its sign', negative.text.includes('-4.0'), negative.text);
+
+  const thinOne = comparisonSentence(make(0.09, 5, true), baseline);
+  ok('a thin sample gets no verdict on the gap size',
+    thinOne.text.includes('Too few matches here to read the difference either way.'),
+    thinOne.text);
+  ok('and still quotes both figures',
+    thinOne.text.includes('+9.0%') && thinOne.text.includes('+2.2%'));
+
+  const acronym = comparisonSentence(make(0.0249, 40, false, 'RSI(14) closes below 30'), baseline);
+  ok('an acronym label is not lower-cased',
+    acronym.text.startsWith('After RSI(14) closes below 30,'), acronym.text);
+
+  // The whole point of the module: nothing that reads as instruction.
+  const forbidden = [
+    'buy', 'sell', 'should', 'recommend', 'signal', 'opportunity', 'edge',
+    'suggests', 'expect', 'likely to', 'p-value', 'significant',
+  ];
+  for (const sentence of [small, clear, middling, negative, thinOne, acronym]) {
+    const lower = sentence.text.toLowerCase();
+    const hit = forbidden.find((w) => lower.includes(w));
+    ok(`no action language: ${JSON.stringify(sentence.text.slice(0, 40))}`, !hit, `found ${hit}`);
+  }
+
+  eq('thresholds are the documented ones', [SMALL_GAP_PP, CLEAR_GAP_PP], [0.5, 1.5]);
+}
+{
+  const empty = {
+    id: 'down-3', label: 'x', rule: '', family: 'consecutive-down',
+    matches: [], firstMatch: null, lastMatch: null, activeToday: false,
+    horizons: [], honesty: { thin: true, overlapping: 0, episodes: 0, clusteredYear: null },
+  };
+  eq('no matches means no sentence', comparisonSentence(empty, []), null);
+  eq('and no overlap line', overlapSentence(empty), null);
+}
+
+section('The overlap line names the condition and leads with episodes');
+{
+  const condition = {
+    id: 'down-3', label: '3 consecutive down closes', rule: '',
+    family: 'consecutive-down',
+    matches: new Array(448).fill(0).map((_, k) => ({
+      date: '2000-01-01', index: k, close: 100, outcomes: [], overlapsPrevious: k > 36,
+    })),
+    firstMatch: null, lastMatch: null, activeToday: false,
+    horizons: [],
+    honesty: { thin: false, overlapping: 411, episodes: 37, clusteredYear: null },
+  };
+  const line = overlapSentence(condition);
+  ok('it leads with the match and episode counts',
+    line.startsWith('These 448 matches come from about 37 separate episodes'), line);
+  ok('it names what clusters', line.includes('3 consecutive down closes clusters together'), line);
+  ok('it ends on the comparison', line.includes('closer to 37 independent readings than 448'), line);
+  ok('no action language', !/buy|sell|should/i.test(line));
+}
+{
+  const one = {
+    id: 'x', label: 'A rare thing', rule: '', family: 'gap',
+    matches: [{ date: '2000-01-01', index: 0, close: 1, outcomes: [], overlapsPrevious: false },
+              { date: '2000-01-02', index: 1, close: 1, outcomes: [], overlapsPrevious: true }],
+    firstMatch: null, lastMatch: null, activeToday: false, horizons: [],
+    honesty: { thin: true, overlapping: 1, episodes: 1, clusteredYear: null },
+  };
+  ok('singular reads correctly', overlapSentence(one).includes('1 separate episode'), overlapSentence(one));
+  ok('and singular reading', overlapSentence(one).includes('1 independent reading'));
 }
 
 console.log(

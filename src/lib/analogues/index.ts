@@ -8,6 +8,10 @@ import type { AnaloguesView, ConditionId } from './types';
 
 export { CONDITIONS, conditionById, detect } from './conditions';
 export { buildBaseline, LONGEST, THIN_SAMPLE } from './forward';
+export {
+  comparisonSentence, overlapSentence, CLEAR_GAP_PP, SMALL_GAP_PP,
+  type Comparison,
+} from './phrasing';
 export { fetchDeepBars } from './deepBars';
 export { HORIZONS } from './types';
 export type {

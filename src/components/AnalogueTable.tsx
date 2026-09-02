@@ -2,7 +2,9 @@ import { Fragment } from 'react';
 import type {
   BaselineStats, ConditionResult, Coverage, HorizonStats,
 } from '@/lib/analogues';
-import { THIN_SAMPLE } from '@/lib/analogues';
+import {
+  comparisonSentence, overlapSentence, THIN_SAMPLE,
+} from '@/lib/analogues';
 
 /**
  * One condition's forward-return table.
@@ -103,7 +105,9 @@ function Row({ stats, thin }: { stats: HorizonStats; thin: boolean }) {
 function BaselineRow({ stats }: { stats: BaselineStats }) {
   return (
     <tr className="text-term-faint">
-      <td className="pb-1.5 pr-3 pl-3 text-2xs">all windows</td>
+      <td className="pb-1.5 pr-3 pl-3 text-2xs">
+        Any random window (baseline)
+      </td>
       <td className="pb-1.5 pr-3 text-right text-2xs tabular-nums">
         {stats.n.toLocaleString()}
       </td>
@@ -137,6 +141,8 @@ export function AnalogueTable({
 }) {
   const { matches, honesty } = condition;
   const count = matches.length;
+  const comparison = comparisonSentence(condition, baseline);
+  const overlap = overlapSentence(condition);
 
   return (
     <section className="panel space-y-3 px-4 py-4">
@@ -184,13 +190,9 @@ export function AnalogueTable({
                 {THIN_SAMPLE} this page treats as a sample. Medians are greyed.
               </Caveat>
             )}
-            {honesty.overlapping > 0 && (
+            {overlap && (
               <Caveat>
-                These {count} matches come from about {honesty.episodes}{' '}
-                separate {honesty.episodes === 1 ? 'episode' : 'episodes'} — the
-                condition clusters, so this is closer to {honesty.episodes}{' '}
-                independent {honesty.episodes === 1 ? 'reading' : 'readings'}{' '}
-                than {count}.{' '}
+                {overlap}{' '}
                 <span className="text-term-faint">
                   {honesty.overlapping} of the {count} fall within 42 sessions
                   of an earlier match, so their forward windows share sessions.
@@ -267,6 +269,18 @@ export function AnalogueTable({
           </div>
 
           {/*
+            The only sentence on the page that draws a conclusion, and the only
+            one generated from the figures rather than written. It quotes both
+            numbers it compares so the reader can check it against the row
+            directly above, and it says nothing about what to do.
+          */}
+          {comparison && (
+            <p className="border-t border-term-line pt-2 text-xs leading-relaxed text-term-text">
+              {comparison.text}
+            </p>
+          )}
+
+          {/*
             Two of these three lines exist because the number above them reads
             as something other than what it is:
 
@@ -292,11 +306,13 @@ export function AnalogueTable({
               early.
             </p>
             <p>
-              The <span className="text-term-dim">all windows</span> row under
+              The{' '}
+              <span className="text-term-dim">any random window</span> row under
               each horizon is every window of that length in the same lookback,
-              condition or not. It is what an entry picked at random did. The
-              comparison worth making is the gap between the two rows, not the
-              level of either. No significance test is applied.
+              condition or not, measured the same way. It is what an entry
+              picked at random did. The comparison worth making is the gap
+              between the two rows, not the level of either. No significance
+              test is applied.
             </p>
           </div>
         </>
