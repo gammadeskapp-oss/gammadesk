@@ -13,7 +13,7 @@ import {
   storeStatus,
 } from '@/lib/scanner';
 import {
-  ALIGNMENT_LABEL,
+  RULE_LABEL,
   OPTION_BADGE_LABEL,
   type FilterState,
   type OptionQualityBadge,
@@ -27,6 +27,31 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * Label one archived badge key.
+ *
+ * The archive spans a rule-set change. Mornings recorded before the scanner
+ * was rebuilt carry the four old alignment keys; everything since carries the
+ * five rule keys. Both are labelled here rather than one of them being
+ * discarded, because an archive that silently drops the days it no longer
+ * understands is not an archive — and the whole point of keeping ninety days
+ * is to be able to look back across exactly this kind of change.
+ */
+const LEGACY_BADGE_LABEL: Record<string, string> = {
+  market: 'Market aligned',
+  momentum: 'Momentum confirmed',
+  trend: 'Trend aligned',
+  options: 'Options liquid',
+};
+
+function badgeLabel(key: string): string {
+  return (
+    RULE_LABEL[key as keyof typeof RULE_LABEL] ??
+    LEGACY_BADGE_LABEL[key] ??
+    key
+  );
+}
 
 const STATE_CLASS: Record<FilterState, string> = {
   pass: 'border-bull/50 bg-bull/15 text-bull',
@@ -153,7 +178,7 @@ export default async function ScannerHistoryPage() {
                               key={badge.key}
                               className={`inline-flex items-center border px-1.5 py-0.5 text-2xs tracking-[0.06em] ${STATE_CLASS[badge.state]}`}
                             >
-                              {ALIGNMENT_LABEL[badge.key]}
+                              {badgeLabel(badge.key)}
                               <span className="sr-only"> {badge.state}</span>
                             </li>
                           ))}

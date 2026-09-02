@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
 import { runScanner, storeStatus } from '@/lib/scanner';
-import { partition } from '@/lib/scanner/evaluate';
+import { DEFAULT_FILTERS, scoreAndJudge } from '@/lib/scanner/score';
 import { checkSchedule } from '@/lib/scanner/schedule';
 
 export const dynamic = 'force-dynamic';
@@ -45,13 +45,16 @@ export async function GET(request: Request) {
 
   try {
     const result = await runScanner();
-    const { passed } = partition(result.rows);
+    const passed = scoreAndJudge(result.rows, DEFAULT_FILTERS).filter(
+      (entry) => entry.passes && !entry.earningsExcluded,
+    );
 
-    const summary = result.gateReason
-      ? `Scan empty: SPY is in a volatile regime. ${result.candidates} candidates evaluated.`
-      : `Scanned ${result.candidates} of ${result.universe} — ${passed.length} passed all five gates, ` +
-        `${result.earningsExcluded.length} removed for earnings, ${result.qualityChecked} contracts graded. ` +
-        `Gamma as of ${result.gammaRefreshedAt ? result.gammaDate : 'no same-day refresh'}.`;
+    const summary =
+      `Scored ${result.scored} of ${result.universe} — ${passed.length} pass all five rules at the defaults, ` +
+      `${result.earningsExcluded.length} reporting inside the earnings buffer, ` +
+      `${result.qualityChecked} of ${result.qualityTargeted} contracts graded. ` +
+      `Market regime ${result.spyRegime ?? 'unknown'}. ` +
+      `Gamma as of ${result.gammaRefreshedAt ? result.gammaDate : 'no same-day refresh'}.`;
 
     if (wantsText) {
       return new NextResponse(`${summary}\n`, {
@@ -65,17 +68,19 @@ export async function GET(request: Request) {
       date: result.date,
       scannedAt: result.scannedAt,
       universe: result.universe,
-      candidates: result.candidates,
+      scored: result.scored,
       passed: passed.map((entry) => ({
         symbol: entry.row.symbol,
-        rs: entry.row.rsScore,
+        score: Math.round(entry.score.total),
+        rs: Math.round(entry.row.metrics.rsScore),
         option: entry.row.optionQuality?.badge ?? 'not checked',
       })),
       earningsExcluded: result.earningsExcluded,
       earningsSource: result.earningsSource,
       qualityChecked: result.qualityChecked,
       spyRegime: result.spyRegime,
-      gateReason: result.gateReason,
+      qualityTargeted: result.qualityTargeted,
+      qualityFailures: result.qualityFailures,
       gammaDate: result.gammaDate,
       notes: result.notes,
       store: storeStatus(),

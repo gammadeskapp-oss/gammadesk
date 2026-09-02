@@ -30,8 +30,17 @@ export function daysBetween(fromIso: string, toIso: string): number {
  * never exclude and can never clear — it is passed through so the caller has
  * to render the uncertainty rather than resolve it silently. See
  * `EarningsInfo` for why that distinction is the whole point.
+ *
+ * The buffer is a parameter because it is one of the reader's controls now.
+ * `EARNINGS_EXCLUSION_DAYS` remains the shipped default and the value the
+ * archive and the run summary are recorded at, so "removed for earnings" in
+ * the history means one fixed thing rather than whatever a slider happened to
+ * be set to when someone looked.
  */
-export function excludedForEarnings(info: EarningsInfo): boolean {
+export function excludedForEarnings(
+  info: EarningsInfo,
+  bufferDays: number = EARNINGS_EXCLUSION_DAYS,
+): boolean {
   if (info.state !== 'known' || info.daysAway === null) return false;
-  return info.daysAway >= 0 && info.daysAway <= EARNINGS_EXCLUSION_DAYS;
+  return info.daysAway >= 0 && info.daysAway <= bufferDays;
 }

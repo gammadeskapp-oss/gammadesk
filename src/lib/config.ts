@@ -314,6 +314,59 @@ export const config = {
         ),
       },
 
+      /**
+       * How many ranked names get their option chain pulled at scan time, and
+       * therefore how many rows the page renders.
+       *
+       * Capped at sixty because that is roughly what Cboe answers in a window
+       * before it refuses, and the 08:30 gamma job has already spent most of
+       * it — raising this past the low tens will start returning ungraded
+       * names, which show as "contract not checked" rather than failing.
+       */
+      contractTopN: Math.min(
+        60,
+        Math.max(5, num(process.env.GAMMADESK_SCAN_CONTRACT_TOP_N, 25)),
+      ),
+
+      /**
+       * How far down the ranking earnings dates are looked up.
+       *
+       * The fundamentals calendar is batched fifty symbols at a time, so the
+       * whole index is eleven sequential round trips — enough on a slow
+       * afternoon to put the run past the platform's function ceiling on its
+       * own, which would store nothing at all.
+       *
+       * Bounding it is safe in one specific direction and it is worth being
+       * precise about which. An earnings date can only ever *remove* a name,
+       * and a name whose date was not looked up is `unknown` — which never
+       * removes, and which the watch line always states out loud. So the
+       * effect of this bound is that a name ranked three hundredth, which the
+       * reader would have to move several controls to see at all, carries
+       * "earnings date unknown" instead of a date. It is never the other way
+       * round: nothing is admitted that a lookup would have excluded without
+       * the page saying the date is unknown.
+       *
+       * Set it to the universe size to look up everything, at the cost above.
+       */
+      earningsLookupN: Math.max(
+        25,
+        num(process.env.GAMMADESK_SCAN_EARNINGS_LOOKUP_N, 150),
+      ),
+
+      /**
+       * Wall-clock backstop for the contract-grading phase.
+       *
+       * The route is capped at 300 seconds by the platform. Stopping cleanly
+       * at 150 leaves ample room for the earnings lookup, the store write and
+       * the archive — and a scan that stores twenty graded names and says it
+       * did not reach the last five beats one that is killed mid-write and
+       * stores nothing.
+       */
+      contractBudgetMs: Math.max(
+        20_000,
+        num(process.env.GAMMADESK_SCAN_CONTRACT_BUDGET_MS, 150_000),
+      ),
+
       /** Days of finished scans kept, so a missed morning is still readable. */
       keepDays: Math.max(1, num(process.env.GAMMADESK_SCAN_KEEP_DAYS, 5)),
 

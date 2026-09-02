@@ -30,9 +30,32 @@ export const TIMEFRAME_LABEL: Record<ScanTimeframe, string> = {
 export type FilterState = 'pass' | 'fail' | 'unknown';
 
 /**
- * The five filters that gate the scan. All hard, all evaluated once.
+ * The five rules the scanner scores against.
  *
- * ## What was removed, and why
+ * ## They rank now; they do not gate
+ *
+ * These were five hard ANDed gates and the scan printed whatever survived all
+ * five. Twice in a row that was zero names out of 503 — and an empty page
+ * cannot even tell you which rule ate the list. So the five are scored and
+ * weighted (`score.ts`), the list is always ordered, and the top of it is
+ * always rendered. A name that fails a rule still fails it, in red, dimmed,
+ * with the number that failed it printed beside it. Failing just no longer
+ * makes a name invisible.
+ *
+ * ## Market regime is gone, and contract quality took its place
+ *
+ * The regime was the fifth key. It is one *market-wide* condition, so when it
+ * failed it failed identically for every name in the universe and the page
+ * went blank for a reason that had nothing to do with any of them. It is a
+ * banner now — see `MARKET_REGIME_NOTE` — with one optional, default-off
+ * toggle for a reader who wants the old behaviour.
+ *
+ * Contract quality is the fifth rule in its place. It was always a hard
+ * requirement, it was simply resolved somewhere the rule list did not show;
+ * naming it makes the thing that most often stops a good stock from being a
+ * tradable idea visible in the same row as the reasons it looked good.
+ *
+ * ## What was removed earlier, and why
  *
  * There were seven, across three timeframes, with a strictness toggle
  * governing how many had to agree. Three are gone:
@@ -50,28 +73,34 @@ export type FilterState = 'pass' | 'fail' | 'unknown';
  *    text on the card, with that caveat attached, rather than silently
  *    removing names on the strength of an assumption.
  *
- * The 200 EMA gate is now the **daily** one only. "Above the 200-day average"
- * is a statement someone can check; "above the 200-period average on two of
- * three timeframes, at the current agreement setting" is not.
- *
- * There is no strictness toggle and no near-miss list. Five gates, all hard,
- * and a name either clears them or is not on the page.
+ * The 200 EMA rule is the **daily** one only. "Above the 200-day average" is a
+ * statement someone can check; "above the 200-period average on two of three
+ * timeframes, at the current agreement setting" is not.
  */
-export const FILTER_KEYS = [
+export const RULE_KEYS = [
   'rs',
   'ema',
   'volume',
   'liquidity',
-  'spyGamma',
+  'contract',
 ] as const;
-export type FilterKey = (typeof FILTER_KEYS)[number];
+export type RuleKey = (typeof RULE_KEYS)[number];
 
-export const FILTER_LABEL: Record<FilterKey, string> = {
+export const RULE_LABEL: Record<RuleKey, string> = {
   rs: 'Relative strength',
   ema: '200-day average',
   volume: 'Volume',
   liquidity: 'Liquidity',
-  spyGamma: 'Market regime',
+  contract: 'Contract',
+};
+
+/** Short form, for the badge row on a table line. */
+export const RULE_SHORT: Record<RuleKey, string> = {
+  rs: 'RS',
+  ema: '200D',
+  volume: 'VOL',
+  liquidity: 'LIQ',
+  contract: 'OPT',
 };
 
 /**
@@ -82,12 +111,13 @@ export const FILTER_LABEL: Record<FilterKey, string> = {
  * fired; it tells everyone else nothing at all, which on a page whose entire
  * output is a shortlist of stock tickers is the wrong way round.
  */
-export const FILTER_EXPLANATION: Record<FilterKey, string> = {
+export const RULE_EXPLANATION: Record<RuleKey, string> = {
   rs: 'Outperforming most of the market over the last few months.',
   ema: 'Above the 200-day average — the long-term trend is up.',
   volume: 'Trading more than its own normal volume, so the move has participation behind it.',
-  liquidity: 'Enough shares and contracts change hands to get in and out without moving the price.',
-  spyGamma: 'The wider market is in a calm regime, where dealer hedging damps moves rather than amplifying them.',
+  liquidity: 'Enough turnover to get in and out without moving the price.',
+  contract:
+    'There is an option in the chosen expiry and delta window that is actually worth trading.',
 };
 
 /** One filter's outcome, with the reading behind it. */
@@ -123,92 +153,16 @@ export function hasNw(timeframe: ScanTimeframe): timeframe is NwTimeframe {
 /**
  * Where price sits relative to the Nadaraya-Watson envelope.
  *
- * "Inside the band" is a different situation from "clearly below it", and the
- * entry being watched for is a close back *above* the band, which is only a
- * recognisable event if the in-band state is visible on the way there.
+ * Kept for the result chart, which still draws the band. Nothing in the scan
+ * reads it: it stopped gating (it was near-unsatisfiable at the shipped
+ * multiplier), then stopped ranking, and is now a line on a chart and a
+ * sentence beside it.
  *
  * `unavailable` means the band is not computed on this timeframe at all — see
  * `NW_TIMEFRAMES`. It is kept apart from `unknown`, which means it should have
  * been computed and could not be.
  */
 export type NwState = 'above' | 'inside' | 'below' | 'unknown' | 'unavailable';
-
-/**
- * The Nadaraya-Watson reading. A score, not a gate.
- *
- * ## Why it stopped being a filter
- *
- * The non-repainting endpoint estimator fits each bar from that bar and the
- * ones before it, which makes it hug recent price closely. The band width,
- * though, is the *window-average* absolute deviation over hundreds of bars. So
- * the quantity being tested — deviation at the endpoint — is structurally far
- * smaller than the quantity setting the threshold. Price clears the band only
- * in genuinely rare conditions, and requiring it on several timeframes at once
- * returned zero names on essentially every day: a dead page rather than a
- * strict one.
- *
- * It briefly ranked the list instead. That is gone too: band position is a
- * reading about one name against its own recent regression, and letting it
- * decide the order of a shortlist gave it an authority over the reader's
- * attention it does not earn. The list ranks on relative strength.
- *
- * What is left is a line on the chart. `z` is where the close sits in units of
- * half-band:
- *
- *     z = (close - centre) / (upper - centre)
- *
- * so `z = 0` sits on the centre line and `z = -1` is the lower edge. It is
- * shown beside the chart as context and gates nothing.
- */
-export interface NwReading {
-  state: NwState;
-  /**
-   * Position in half-band units. Null when there is no band.
-   *
-   * Unbounded on purpose: clamping it would throw away exactly the separation
-   * the ranking exists to show.
-   */
-  z: number | null;
-  /** Envelope centre line. */
-  mid: number | null;
-  upper: number | null;
-  lower: number | null;
-  /** Bars the estimator actually had. */
-  barsUsed: number;
-  /** Bars it wanted. A short band sample is flagged, not hidden. */
-  barsWanted: number;
-}
-
-/**
- * One timeframe's reading.
- *
- * No verdicts any more. Nothing here gates: the 200-day average gate is
- * computed once, on the daily series, and lives in `ScanRow.single`. What is
- * left is the material the result chart draws — the trend line and the
- * Nadaraya-Watson envelope — plus the bar counts that say how much history
- * either was measured over.
- */
-export interface TimeframeReading {
-  timeframe: ScanTimeframe;
-  /** Close of the most recent bar on this timeframe. */
-  close: number | null;
-  /** The trend average — 200 periods, from `config.scanner.trendEmaPeriod`. */
-  ema: number | null;
-  /**
-   * The short average the extended flag is measured against.
-   *
-   * Carried here rather than recomputed by the caller because the bars are
-   * already in hand at this point and nowhere else has them — the stored scan
-   * keeps readings, not series.
-   */
-  ema20: number | null;
-  /** Drawn on the chart. Never a gate and no longer a ranking input. */
-  nw: NwReading;
-  /** Bars available on this timeframe, or null when the fetch failed. */
-  bars: number | null;
-  /** Why this timeframe could not be read, when it could not. */
-  error?: string;
-}
 
 
 // --- earnings, extension, and option quality ---------------------------------
@@ -339,12 +293,24 @@ export const OPTION_WINDOW = {
 /**
  * How many ranked names the scan pulls chains for.
  *
+ * ## Why this number is also the length of the rendered list
+ *
  * The constraint is Cboe's window, which the 08:30 gamma refresh has already
- * spent most of. Ten more is affordable every day; a chain per candidate would
- * put the scan over the quota on its own. Everything below the tenth is graded
- * when the reader asks for it, and each result says which of the two it got.
+ * spent most of. A chain for every one of the 503 scored names is not close to
+ * affordable, so the contract rule can only ever be *answered* for the top of
+ * the ranking — and the page renders exactly that many rows, so that every row
+ * on screen has had all five of its rules actually tested.
+ *
+ * Everything below it is graded when the reader opens it, and its contract
+ * badge until then reads "not checked" in grey. That is not a failure and it
+ * is not a pass: nobody looked. The same rule the earnings logic has always
+ * applied.
+ *
+ * Overridable with `GAMMADESK_SCAN_CONTRACT_TOP_N` — see `config.scanner`.
+ * This constant is the shipped default and the client's assumption about how
+ * long the list is.
  */
-export const OPTION_QUALITY_TOP_N = 10;
+export const OPTION_QUALITY_TOP_N = 25;
 
 /**
  * The risks attached to one result, in plain English.
@@ -358,61 +324,6 @@ export interface WatchLine {
   text: string;
 }
 
-
-// --- alignment badges --------------------------------------------------------
-
-/**
- * The four things a reader actually wants to know at a glance, each answered
- * from its own evidence.
- *
- * ## Why these are not just the five gates repainted
- *
- * Every name on the pass list has all five gates green by definition, so five
- * green chips would carry no information at all. These four are chosen because
- * they *vary between names that all passed*:
- *
- *  - **Trend aligned** wants the long trend and the short one pointing the
- *    same way. The gate is the 200-day average alone; a name can clear that
- *    and still be under its 20-day, which is a genuinely different picture.
- *  - **Momentum confirmed** is the volume gate plus the extension flag. A name
- *    that has already run 8% past its 20-day average has confirmed momentum
- *    and a worse place to start from, and the badge says so.
- *  - **Options liquid** comes from the contract check, which is the one thing
- *    upstream never measured.
- *  - **Market aligned** is the market regime. Constant across a single scan by
- *    construction, and kept anyway: it is the badge that explains why the list
- *    is empty on the days it is empty, and it varies in the archive.
- *
- * ## Amber is not a shade of green
- *
- * `unknown` exists because the alternative is worse. The instruction was that
- * each badge is red or green on its own evidence and that none may be weighted
- * or hidden to produce more green — so a badge with no evidence behind it is
- * never green, and it is never quietly dropped either. It renders grey, states
- * why, and counts as not-green everywhere it is counted.
- */
-export const ALIGNMENT_KEYS = [
-  'market',
-  'momentum',
-  'trend',
-  'options',
-] as const;
-export type AlignmentKey = (typeof ALIGNMENT_KEYS)[number];
-
-export const ALIGNMENT_LABEL: Record<AlignmentKey, string> = {
-  market: 'Market aligned',
-  momentum: 'Momentum confirmed',
-  trend: 'Trend aligned',
-  options: 'Options liquid',
-};
-
-export interface AlignmentBadge {
-  key: AlignmentKey;
-  /** `unknown` is never counted as aligned. See above. */
-  state: FilterState;
-  /** The evidence, in plain English. Never empty. */
-  detail: string;
-}
 
 /** A gamma magnet — a strike holding a large share of positive exposure. */
 export interface Magnet {
@@ -453,34 +364,74 @@ export interface StoredGamma {
   requested: number;
 }
 
+/**
+ * The raw readings one rule verdict can be computed from.
+ *
+ * ## Numbers, never conclusions
+ *
+ * This type is the whole reason the controls on the page can be instant. The
+ * scan stores *what it measured*; the browser decides what that amounts to,
+ * against thresholds the reader owns — see `score.ts`. A stored `pass` would
+ * be a conclusion drawn at one cutoff and then rendered under another, which
+ * is the single thing an adjustable rule set must not do.
+ *
+ * It is also what makes scanning the whole index affordable. Every field here
+ * comes out of the relative-strength digest, which is stored and already read
+ * on every page view, so all 503 names can be scored without a single upstream
+ * request. The old scan pulled three bar series per candidate and could
+ * therefore only ever look at the couple of dozen names that had already
+ * cleared the RS floor — which meant the floor could never be one of the
+ * adjustable controls.
+ */
+export interface RowMetrics {
+  /** 0-100 composite from /strength. */
+  rsScore: number;
+  /** Position in the full universe ranking, 1 = strongest. */
+  rsRank: number;
+  /** Percent above (positive) or below (negative) the 200-day average. */
+  pctAbove200: number | null;
+  ema200: number | null;
+  /** Percent above or below the 20-day average. Drives the extended flag. */
+  pctAbove20: number | null;
+  ema20: number | null;
+  /**
+   * Recent volume against the name's own baseline. 1.0 is the confirmation
+   * line. Null when there is not enough history for both legs — which is not
+   * the same as unconfirmed and is never recorded as such.
+   */
+  volumeRatio: number | null;
+  /** Average daily dollar turnover over the last 20 sessions. */
+  avgDollarVolume: number;
+}
+
 /** One ticker as the page renders it. */
 export interface ScanRow {
   symbol: string;
   /** Latest daily close from the RS digest, with its own date. */
   price: number | null;
   priceAsOf: string;
-  rsScore: number;
-  rsRank: number;
+  /** Everything a rule verdict is computed from. See `RowMetrics`. */
+  metrics: RowMetrics;
   equityTier: LiquidityTier | null;
   optionsTier: LiquidityTier | null;
   /**
-   * The name's own dealer positioning. Context text on the card, not a gate -
-   * see `FILTER_KEYS` for why it stopped being one.
+   * The name's own dealer positioning. Context text on the row, not a rule -
+   * see `RULE_KEYS` for why it stopped being one.
+   *
+   * Null for most names: the 08:30 job only refreshes chains for the RS-
+   * clearing candidates, and the whole index is scored here.
    */
   regime: 'positive' | 'negative' | null;
   netGex: number | null;
   magnets: Magnet[];
-  /** All five gates. */
-  single: Record<FilterKey, FilterVerdict>;
-  /** One reading per timeframe, for the chart. Nothing here gates. */
-  timeframes: TimeframeReading[];
-  /** When it next reports. Excludes the name inside the window; see `EarningsInfo`. */
+  /** When it next reports. See `EarningsInfo` — unknown is not "no earnings". */
   earnings: EarningsInfo;
-  /** How far it has run from its 20-day average. A flag, not a gate. */
+  /** How far it has run from its 20-day average. A flag, not a rule. */
   extension: ExtensionReading;
   /**
    * The contract check. Null means it has not been run for this name yet -
-   * only the top `OPTION_QUALITY_TOP_N` are graded at scan time.
+   * only the top `OPTION_QUALITY_TOP_N` by score are graded at scan time, and
+   * an ungraded contract is unknown rather than bad.
    */
   optionQuality: OptionQuality | null;
 }
@@ -488,9 +439,19 @@ export interface ScanRow {
 /**
  * A finished scan, stored once and read all day.
  *
- * Every candidate is kept with all five of its gate states, so the page can
- * show its working on a zero-result morning rather than rendering an empty box
- * with no account of what was tested.
+ * ## The whole index, with its readings, and no verdicts
+ *
+ * Every scored name is kept — not just the ones that would pass at some
+ * setting — because the page's controls are applied to *this document* in the
+ * browser and nothing else. A snapshot narrowed to the survivors at the
+ * shipped cutoffs could not answer what happens at a lower one without the
+ * scan running again, which would put the chain provider's request budget at
+ * the mercy of a slider.
+ *
+ * It is affordable because `RowMetrics` comes entirely out of the stored
+ * relative-strength digest. 503 names of readings is a few hundred kilobytes;
+ * the old document held three bar-series summaries per candidate and covered
+ * twenty-seven names.
  */
 export interface ScanResult {
   /** New York date the scan belongs to. */
@@ -498,30 +459,40 @@ export interface ScanResult {
   scannedAt: string;
   /** Wall-clock the scan was scheduled for, from config. */
   scheduledEt: string;
-  /** Every RS-clearing candidate, with every filter resolved. */
+  /** Every scored name in the universe, best first at the shipped weights. */
   rows: ScanRow[];
   /** Names in the S&P 500 universe considered. */
   universe: number;
-  /** How many cleared filter 1 and were carried into the rest. */
-  candidates: number;
+  /** Names that had enough stored history to be scored at all. */
+  scored: number;
+  /**
+   * The relative-strength cutoff the *page* opens on.
+   *
+   * No longer a pipeline bound: nothing is dropped for being below it. It is
+   * carried so the page can label the default and so the archive can record
+   * what "passed" meant that morning.
+   */
   rsMin: number;
-  /** SPY's own gamma regime — the market-wide gate. */
+  /**
+   * SPY's own gamma regime.
+   *
+   * A banner on the page now, not a per-name rule. See `MARKET_REGIME_NOTE`
+   * for why one market-wide condition must not be evaluated 503 times.
+   */
   spyRegime: 'positive' | 'negative' | null;
-  /** Set when the scan returned nothing because SPY's gamma is not positive. */
-  gateReason: string | null;
   /** Date of the gamma refresh these rows were built from. */
   gammaDate: string | null;
   gammaRefreshedAt: string | null;
-  /** Candidates whose bars could not be read at all. */
-  barFailures: string[];
-  /** Candidates the bar-phase budget did not reach. */
-  barSkipped: string[];
-  /** Names excluded outright for reporting earnings inside the window. */
+  /** Names carrying an upcoming report inside the shipped 10-day buffer. */
   earningsExcluded: Array<{ symbol: string; dateIso: string; daysAway: number }>;
   /** Where the earnings dates came from this run, for the UI to state. */
   earningsSource: string;
   /** How many names had their chains pulled at scan time. */
   qualityChecked: number;
+  /** How many the contract check was aimed at. See `OPTION_QUALITY_TOP_N`. */
+  qualityTargeted: number;
+  /** Names whose chain request failed, so the grey badge can say which. */
+  qualityFailures: string[];
   notes: string[];
 }
 
