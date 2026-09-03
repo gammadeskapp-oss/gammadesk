@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { DataQuality } from './DataQuality';
 import { DealerConventionNote } from './DealerConventionNote';
 import { ExplainPanel } from './ExplainPanel';
+import { GammaProfile } from './GammaProfile';
 import { PageBar } from './PageBar';
 import { PositioningSearch } from './PositioningSearch';
 import { PositioningTable } from './PositioningTable';
@@ -39,6 +40,13 @@ interface DashboardProps {
    * the numbers above it.
    */
   methodology: Methodology;
+  /**
+   * The drawer under the gamma profile. Separate from `methodology` because it
+   * states three things that are true of the chart and not of the table — what
+   * one bar is, how the walls are picked, and that the strike window is a
+   * display choice — on top of the same shared facts.
+   */
+  profileMethodology: Methodology;
   /*
    * Rendered on the server and passed through as a node.
    *
@@ -98,6 +106,7 @@ export function Dashboard({
   data,
   staleness,
   methodology,
+  profileMethodology,
   contextRow,
   researchLine,
   whatChanged,
@@ -239,6 +248,16 @@ export function Dashboard({
         and the explanation of where they came from is the one thing that should
         stay fully legible.
       */}
+      {/*
+        The picture of the same book, under both reads rather than inside the
+        advanced one. It is the spatial answer to "where is price relative to
+        the levels", which is exactly the question the simple read leaves a
+        reader holding — and it needs no jargon to look at.
+      */}
+      <div className={mutedIf(staleness.stale)}>
+        <GammaProfile data={data} methodology={profileMethodology} />
+      </div>
+
       <MethodologyDrawer methodology={methodology} anchor="levels" />
 
       {/*

@@ -12,7 +12,7 @@ import { getBreadth } from '@/lib/breadth';
 import type { BreadthReading } from '@/lib/breadth/types';
 import { getMarketContextQuotes } from '@/lib/marketContext/quotes';
 import type { MarketContextQuotes } from '@/lib/marketContext/quotes';
-import { positioningMethodology } from '@/lib/methodology';
+import { gammaProfileMethodology, positioningMethodology } from '@/lib/methodology';
 import { researchLine } from '@/lib/simple/research';
 import { moodOf } from '@/lib/simple/translate';
 import {
@@ -135,6 +135,12 @@ export default async function HomePage({ searchParams }: PageProps) {
             this view rather than a general case — see lib/methodology.ts.
           */
           methodology={positioningMethodology(data)}
+          /*
+            The gamma profile's own drawer. Built from the same snapshot and
+            layered on the same facts — see `gammaProfileMethodology` — so the
+            chart cannot describe a different book than the table beside it.
+          */
+          profileMethodology={gammaProfileMethodology(data)}
           /*
             The one line under the verdict. Built here rather than in the
             client component because it needs the breadth reading, which is
