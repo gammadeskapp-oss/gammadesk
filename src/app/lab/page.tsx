@@ -1,0 +1,221 @@
+import type { Metadata } from 'next';
+import { Footer } from '@/components/Footer';
+import { LabBoard } from '@/components/LabBoard';
+import { PageBar } from '@/components/PageBar';
+import { getLabView } from '@/lib/lab';
+import { LAB_ANALOGUE_HORIZON } from '@/lib/lab/types';
+import { formatAsOf } from '@/lib/time';
+
+/**
+ * Unlisted, and deliberately not private.
+ *
+ * Same treatment as `/previousscanner`: `noindex, nofollow` overrides the
+ * site-wide `index, follow` from the root layout, and nothing in the
+ * navigation links here. That keeps it out of search results and out of the
+ * way — it does not keep anyone out. Anybody who types the URL can read it. If
+ * it needs to be genuinely restricted, the way to do that is a passcode from
+ * an environment variable, checked here before anything renders.
+ */
+export const metadata: Metadata = {
+  title: 'Lab',
+  description: 'A private testbed for a combined score. Not a scanner.',
+  robots: { index: false, follow: false },
+};
+
+export const dynamic = 'force-dynamic';
+
+export default async function LabPage() {
+  const view = await getLabView();
+
+  return (
+    <>
+      <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+        {/*
+          First thing on the page. Everything below it is an experiment whose
+          result is not in yet, and a reader arriving at a ranked table of
+          tickers should be told that before they read a single row.
+        */}
+        <div className="panel border-l-2 border-l-flip px-3.5 py-2.5 text-xs leading-relaxed">
+          <p className="font-bold text-flip">
+            Testbed. Nothing here has been validated against anything.
+          </p>
+          <p className="mt-1 text-term-dim">
+            This page exists to answer one question by eye over a few days: does
+            blending these six readings into a single number surface names the
+            individual pages would not have, or does it reshuffle the same list?
+            Until that question has an answer, the ordering below is a
+            hypothesis with a table around it. The pages the components come
+            from — <a href="/scanner" className="underline decoration-dotted hover:text-term-text">/scanner</a>,{' '}
+            <a href="/strength" className="underline decoration-dotted hover:text-term-text">/strength</a>,{' '}
+            <a href="/flow" className="underline decoration-dotted hover:text-term-text">/flow</a> and{' '}
+            <a href="/analogues" className="underline decoration-dotted hover:text-term-text">/analogues</a>{' '}
+            — each say what their own numbers mean, and none of them says this.
+          </p>
+        </div>
+
+        <PageBar
+          title="Lab"
+          description="Six stored readings, blended into one ranking over the whole index, at weights you set."
+          meta={
+            view.scanDate
+              ? `${view.rows.length} names · ${view.scanDate} scan`
+              : 'Nothing stored'
+          }
+          asOfLabel={
+            view.scannedAt ? formatAsOf(new Date(view.scannedAt)) : undefined
+          }
+        />
+
+        {/*
+          Above the table rather than under it, because it changes how every
+          row reads: three of the six components are absent for most of the
+          index, and a total blended from two readings looks exactly like one
+          blended from six unless something says otherwise.
+        */}
+        <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
+          <h2 className="label-xs">What is actually measured</h2>
+          <ul className="mt-1.5 space-y-1">
+            {view.notes.map((note) => (
+              <li key={note}>— {note}</li>
+            ))}
+          </ul>
+          {view.scanDate && (
+            <p className="mt-2 text-term-dim">
+              Coverage over {view.rows.length} names: gamma regime{' '}
+              {view.coverage.gammaRegime}, flip distance{' '}
+              {view.coverage.flipDistance}, magnet distance{' '}
+              {view.coverage.magnetDistance}, relative strength{' '}
+              {view.coverage.rs}, flow {view.coverage.flow}. The analogue hit
+              rate is loaded on request and starts at zero every time the page
+              opens.
+            </p>
+          )}
+        </section>
+
+        {view.rows.length > 0 ? (
+          <LabBoard view={view} />
+        ) : (
+          <div className="panel px-4 py-10 text-center text-xs">
+            <p className="font-bold text-term-text">Nothing to rank.</p>
+            <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-dim">
+              This page reads the scanner&rsquo;s stored document and never
+              computes one — a page view here must not be able to spend the
+              chain budget. No scan is stored, so there are no readings to
+              blend. It will populate once the scanner has run.
+            </p>
+          </div>
+        )}
+
+        <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
+          <h2 className="label-xs">How this is built</h2>
+
+          <p className="mt-1.5">
+            <span className="text-term-dim">
+              It reads stores and it reads nothing else.{' '}
+            </span>
+            Five of the six components come from documents the scanner, the
+            gamma refresh and the flow scan have already written, joined by
+            ticker. Opening this page costs the chain providers nothing. The
+            sixth — the analogue hit rate — is not stored anywhere and costs a
+            full price history per name, so it is fetched in batches only when
+            asked for, and is absent until then.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              It ranks the whole universe and never filters it.{' '}
+            </span>
+            Every name the scan scored is on the list at every setting. There is
+            no combination of weights that removes a name, empties the page or
+            produces a shortlist. The weights change the order and nothing else,
+            which is the only arrangement under which &ldquo;did this surface
+            something new&rdquo; is a question the page can answer.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              An absent reading is dropped from the blend, never scored zero.{' '}
+            </span>
+            Most of the index has no flow reading because the flow scan covers
+            around eighty names, and any name without a chain in the last gamma
+            refresh has no gamma, flip or magnet reading. Scoring those absences
+            as zero would rank the index by which jobs had time for which names
+            — a statement about this site&rsquo;s request budget dressed up as a
+            statement about the market. So the weights renormalise over what is
+            left, and every row prints how many of the six actually took part.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              A covered chain that flagged nothing is a zero, and it is a real
+              one.{' '}
+            </span>
+            The flow component distinguishes a name the scan looked at and found
+            nothing unusual on from a name the scan never reached. The first
+            scores zero; the second has no reading at all. Collapsing them is
+            the same mistake as scoring an absence, one level down.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              Two of the six are scored in a direction this page chose.{' '}
+            </span>
+            Distance to the flip and distance to the nearest magnet are both
+            scored so that <em>nearer is higher</em>. That is a guess about what
+            is worth looking at, not something the data implies — proximity to a
+            level is interesting, it is not good. Both say so wherever they
+            appear, and setting either weight to zero takes the guess back out,
+            which is the fastest way to find out whether it was doing any work.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              Relative strength is used exactly as /strength publishes it.{' '}
+            </span>
+            Rescaling a score a reader can go and look up would make the two
+            pages disagree about the same name, and this page is worth nothing
+            if its inputs cannot be checked against their source.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              The analogue column is one condition, named, not several averaged.{' '}
+            </span>
+            A name can meet three conditions on the same session, and their
+            match sets are overlapping samples of the same days — averaging
+            their hit rates produces a number with no meaning. So the active
+            condition with the largest elapsed sample at {LAB_ANALOGUE_HORIZON}{' '}
+            sessions is used, it is named on the row, and every other active
+            condition is listed beside it. A name meeting no condition today has
+            no reading rather than a poor one, and a sample under ten matches is
+            scored and flagged rather than hidden.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              Weights are not saved, and that is deliberate.{' '}
+            </span>
+            The page opens with every component worth one vote. A saved
+            weighting would mean coming back to a ranking assembled by a version
+            of yourself who is no longer in the room, under a heading that does
+            not mention it. Reloading resets to flat; the panel always shows
+            what is currently applied.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              There is no verdict on this page and there is not going to be one.{' '}
+            </span>
+            A name at the top is the name nothing else scored higher than, at
+            weights that were chosen a minute ago, over components that are
+            missing for most of the index. That is an ordering. It is not a
+            shortlist, it is not a recommendation, and nothing here says what to
+            do about any row on it.
+          </p>
+        </section>
+      </main>
+
+      <Footer />
+    </>
+  );
+}
