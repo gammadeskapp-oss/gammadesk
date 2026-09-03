@@ -26,6 +26,22 @@
       "schedule": "35 14 * * 1-5"
     },
     {
+      "path": "/api/trackrecord/log?when=scheduled",
+      "schedule": "15 20 * * 1-5"
+    },
+    {
+      "path": "/api/trackrecord/log?when=scheduled",
+      "schedule": "15 21 * * 1-5"
+    },
+    {
+      "path": "/api/trackrecord/settle?when=scheduled",
+      "schedule": "20 20 * * 1-5"
+    },
+    {
+      "path": "/api/trackrecord/settle?when=scheduled",
+      "schedule": "20 21 * * 1-5"
+    },
+    {
       "path": "/api/post",
       "schedule": "0 13 * * 1-5"
     },

@@ -12,7 +12,7 @@
  *
  * ## Only what differs is written
  *
- * A URL carrying all twelve controls at their shipped values would be
+ * A URL carrying all of the controls at their shipped values would be
  * unreadable and would make every link look like a custom configuration. Only
  * fields that differ from `DEFAULT_FILTERS` are serialised, so `/scanner` is
  * the default set, `/scanner?rs=75` is one deliberate change, and the
@@ -35,16 +35,16 @@ import { RULE_KEYS, type RuleKey } from './types';
  */
 const KEY = {
   rsMin: 'rs',
+  trendMin: 'trend',
   volumeMult: 'vol',
   minDollarVolume: 'liq',
-  trendPct: 'trend',
   dteMin: 'dte0',
   dteMax: 'dte1',
   deltaMin: 'd0',
   deltaMax: 'd1',
   earningsBufferDays: 'earn',
   off: 'off',
-  calm: 'calm',
+  on: 'on',
 } as const;
 
 function num(params: URLSearchParams, key: string, fallback: number): number {
@@ -64,25 +64,33 @@ function num(params: URLSearchParams, key: string, fallback: number): number {
  */
 export function settingsFromParams(params: URLSearchParams): FilterSettings {
   /*
-   * Disabled rules travel as one comma-separated `off` list rather than five
-   * booleans. Five `rs=1&ema=1&...` pairs would be most of the URL and would
-   * be there on every link, including the ones where nothing was switched off.
+   * Two comma-separated lists rather than eight booleans, and both directions
+   * are needed now that the defaults are mixed. `off` names filters switched
+   * off that ship on; `on` names filters switched on that ship off. Eight
+   * `rs=1&trend=0&...` pairs would be most of the URL and would be there on
+   * every link, including the ones where nothing was changed at all.
    */
-  const off = new Set(
-    (params.get(KEY.off) ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
+  const list = (key: string) =>
+    new Set(
+      (params.get(key) ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+
+  const off = list(KEY.off);
+  const on = list(KEY.on);
 
   const enabled = {} as Record<RuleKey, boolean>;
-  for (const key of RULE_KEYS) enabled[key] = !off.has(key);
+  for (const key of RULE_KEYS) {
+    enabled[key] = on.has(key) ? true : off.has(key) ? false : DEFAULT_FILTERS.enabled[key];
+  }
 
   return clampSettings({
     rsMin: num(params, KEY.rsMin, DEFAULT_FILTERS.rsMin),
     volumeMult: num(params, KEY.volumeMult, DEFAULT_FILTERS.volumeMult),
     minDollarVolume: num(params, KEY.minDollarVolume, DEFAULT_FILTERS.minDollarVolume),
-    trendPct: num(params, KEY.trendPct, DEFAULT_FILTERS.trendPct),
+    trendMin: num(params, KEY.trendMin, DEFAULT_FILTERS.trendMin),
     dteMin: num(params, KEY.dteMin, DEFAULT_FILTERS.dteMin),
     dteMax: num(params, KEY.dteMax, DEFAULT_FILTERS.dteMax),
     deltaMin: num(params, KEY.deltaMin, DEFAULT_FILTERS.deltaMin),
@@ -93,7 +101,6 @@ export function settingsFromParams(params: URLSearchParams): FilterSettings {
       DEFAULT_FILTERS.earningsBufferDays,
     ),
     enabled,
-    requireCalmMarket: params.get(KEY.calm) === '1',
   });
 }
 
@@ -107,19 +114,22 @@ export function paramsFromSettings(settings: FilterSettings): string {
   };
 
   put(KEY.rsMin, settings.rsMin, d.rsMin);
+  put(KEY.trendMin, settings.trendMin, d.trendMin);
   put(KEY.volumeMult, settings.volumeMult, d.volumeMult);
   put(KEY.minDollarVolume, settings.minDollarVolume, d.minDollarVolume);
-  put(KEY.trendPct, settings.trendPct, d.trendPct);
   put(KEY.dteMin, settings.dteMin, d.dteMin);
   put(KEY.dteMax, settings.dteMax, d.dteMax);
   put(KEY.deltaMin, settings.deltaMin, d.deltaMin);
   put(KEY.deltaMax, settings.deltaMax, d.deltaMax);
   put(KEY.earningsBufferDays, settings.earningsBufferDays, d.earningsBufferDays);
 
-  const off = RULE_KEYS.filter((key) => !settings.enabled[key]);
+  const off = RULE_KEYS.filter(
+    (key) => !settings.enabled[key] && d.enabled[key],
+  );
   if (off.length > 0) params.set(KEY.off, off.join(','));
 
-  if (settings.requireCalmMarket) params.set(KEY.calm, '1');
+  const on = RULE_KEYS.filter((key) => settings.enabled[key] && !d.enabled[key]);
+  if (on.length > 0) params.set(KEY.on, on.join(','));
 
   return params.toString();
 }

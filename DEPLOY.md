@@ -222,6 +222,61 @@ just is not delivered anywhere.
 **Deployments** → **…** on the newest one → **Redeploy**. Environment variables
 only take effect on a new build.
 
+### The scanner's chains come from Polygon when the plan allows it
+
+`/api/scanner/gamma` builds dealer positioning for the scanner. Cboe's free
+feed answers roughly **sixty chains per window** and then refuses, which is why
+that job used to request chains only for the top of the relative-strength
+ranking — and why two of the scanner's seven scoring components were available
+for about fifty names and missing for the other four hundred and fifty.
+
+On a paid Polygon **options** plan (Options Starter and up) the snapshot
+endpoint is included, with open interest and implied volatility, unlimited API
+calls, and a fifteen-minute delay. The delay does not matter here: gamma
+exposure is built from open interest, which publishes once a day after the
+close. So with `POLYGON_API_KEY` set the job asks for the whole ranked universe
+and the shortlisting is gone.
+
+| Variable | Default | What it does |
+|----------|---------|--------------|
+| `GAMMADESK_SCAN_GAMMA_SOURCE` | `auto` | `auto` probes Polygon's entitlement and falls back to Cboe; `polygon` or `cboe` pins one. |
+| `GAMMADESK_POLYGON_RPM` | `0` | Requests per minute. `0` means the plan is unlimited and the limiter is skipped. Set `5` for the free plan. |
+| `GAMMADESK_POLYGON_MAX_PAGES` | `12` | Snapshot pages per chain. Four was the free plan's whole minute of quota. |
+| `GAMMADESK_SCAN_POLYGON_BUDGET` | `600` | Chains one run may request on the Polygon path. A wall-clock backstop, not a quota. |
+| `GAMMADESK_SCAN_POLYGON_CONCURRENCY` | `24` | Chains in flight at once on the Polygon path. |
+| `GAMMADESK_SCAN_POLYGON_PAGES` | `3` | Snapshot pages per chain during a sweep. Later pages are trimmed away unread. |
+| `GAMMADESK_SCAN_POLYGON_SYMBOL_TIMEOUT_MS` | `10000` | A chain slower than this is abandoned and reported as unmeasured. |
+
+**Nothing fails over silently.** `auto` asks the key what it is entitled to
+before spending anything, and the decision is printed in the job's log line
+(`[scanner/gamma] source=… — reason`), stored on the document, returned by the
+endpoint, and shown on /scanner. Falling back to Cboe means going from five
+hundred chains to sixty, and a reader comparing two mornings has to be able to
+see that it happened.
+
+**An options plan does not buy stocks entitlement.** The spot price used to
+come from `/v2/aggs/.../prev`, which is a *stocks* call still capped at five a
+minute — so a five-hundred-symbol sweep spent five requests and then queued
+sixty seconds per symbol. Measured: 5 chains from Polygon, 67 from Cboe, 432
+failures. The scanner now passes the previous close it already holds in the
+relative-strength digest, and that endpoint is never touched during a sweep.
+
+Measured end to end on the real universe, 2026-09-02: **461 of 503 chains in
+24 seconds**, no Cboe fallback, 42 abandoned at the per-symbol deadline and
+reported as unmeasured. The remaining knobs above are what that run was tuned
+with; a wave scheduler ran the same job at 168 chains in 242 seconds, which is
+why the Polygon path uses a continuous worker pool (`runPool`) instead.
+
+Check the entitlement without spending a run:
+
+```
+curl "https://your-site/api/scanner/gamma?token=$CRON_SECRET&dry=1&format=text"
+```
+
+The two cron lines for this job are **not** a chunking workaround — they are the
+summer/winter pair every ET-precise job here has, and exactly one of them passes
+the New York clock check. Leave both.
+
 ### What happens next
 
 `vercel.json` schedules the jobs:
@@ -231,10 +286,32 @@ only take effect on a new build.
 | `/api/scanner/gamma` — refresh gamma for scanner candidates | 12:30 **and** 13:30 | 08:30 | 08:30 |
 | `/api/scanner/run` — run the morning scan | 13:35 **and** 14:35 | 09:35 | 09:35 |
 | `/api/log/snapshot` — record the day's flip level and magnets | 14:45 | 10:45 | 09:45 |
+| `/api/trackrecord/log` — write down the scanner's top five picks | 20:15 **and** 21:15 | 16:15 | 16:15 |
+| `/api/trackrecord/settle` — fill in their 1-, 3- and 5-day returns | 20:20 **and** 21:20 | 16:20 | 16:20 |
 | `/api/log/settle` — score it against the session's high and low | 21:15 | 17:15 | **16:15** |
 | `/api/flow/refresh` — rescan chains for unusual activity | 21:40 | 17:40 | 16:40 |
 | `/api/groups/refresh` — recompute group scores and breadth | 22:00 | 18:00 | 17:00 |
 | `/api/digest` — build the digest and post it to Discord | 22:20 | 18:20 | 17:20 |
+
+### The scanner's track record also needs two jobs, and for the same reason
+
+`/api/trackrecord/log` writes down what the scanner put at the top *this
+morning*, along with the closing price. It does not re-score anything: the
+picks come from the scan stored at 09:35, so the pick always precedes the
+outcome. `/api/trackrecord/settle` then fills in what those closes did one,
+three and five trading sessions later, for every past pick.
+
+Both are registered at two UTC times with `?when=scheduled`, like the scanner
+jobs, because a winter run at the summer time would fire at 15:15 New York —
+before the bell — and write an intraday quote into a permanent record under the
+heading "close". The guard in `lib/scanner/schedule.ts` lets exactly one of the
+two through.
+
+The settling job only ever *adds*: it never rewrites a filled horizon and never
+removes an entry. That is deliberate and it is the whole safety property of the
+record — see `lib/trackRecord/settle.ts`. There is also no backfill, and there
+will not be one: reconstructing which names the scanner would have picked on
+past mornings means choosing them already knowing what happened next.
 
 ### Why the log needs two jobs, not one
 

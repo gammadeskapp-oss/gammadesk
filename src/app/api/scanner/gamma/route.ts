@@ -2,13 +2,28 @@ import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
 import { refreshScannerGamma, scanCandidates, storeStatus } from '@/lib/scanner';
+import { resolveChainSource } from '@/lib/scanner/gammaSource';
 import { checkSchedule } from '@/lib/scanner/schedule';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 /**
- * The 08:30 ET gamma refresh for scanner candidates — see `vercel.json`.
+ * The 08:30 ET gamma refresh — see `vercel.json`.
+ *
+ * ## It asks for the whole ranked universe now, not a shortlist
+ *
+ * It used to request chains only for names above the relative-strength floor,
+ * because Cboe answers roughly sixty per window. That shortlisting was a
+ * workaround for a quota, and it had a cost the page could not show: two of
+ * the seven scoring components come out of this document, so the shortlisted
+ * names were scored on seven readings and everything else on five.
+ *
+ * With a paid Polygon options plan there is no quota, so the list handed to
+ * the refresh is every ranked name. When the source resolver falls back to
+ * Cboe the list is cut to what a Cboe window can actually serve — the request
+ * budget is a property of the provider, so it is read from the resolver rather
+ * than assumed here, and the response says which one applied.
  *
  * Also the manual endpoint for the same job: `denyUnauthorisedCron` accepts
  * either the bearer token Vercel Cron sends or `?token=` in the query, so this
@@ -44,7 +59,18 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { rows } = await scanCandidates();
+    const [{ rows }, source] = await Promise.all([
+      scanCandidates(),
+      resolveChainSource(),
+    ]);
+
+    /*
+     * Cut to the budget here rather than letting `runScan` stop mid-list, so
+     * the names that do get chains are the strongest ones. `scanCandidates`
+     * returns the universe in score order, and on the Cboe path the tail is
+     * what has to go.
+     */
+    const wanted = rows.slice(0, Math.max(1, source.budget - 1));
 
     /*
      * `?dry=1` reports the candidate list without fetching a single chain.
@@ -54,12 +80,14 @@ export async function GET(request: Request) {
      * RS floor change, say — without spending the window to find out.
      */
     if (params.get('dry') === '1') {
-      const budget = config.scanner.gammaRefreshBudget;
-      const wanted = rows.length + (rows.some((r) => r.symbol === 'SPY') ? 0 : 1);
+      const requested = wanted.length + (wanted.some((r) => r.symbol === 'SPY') ? 0 : 1);
       const message =
-        `Dry run: ${rows.length} names clear RS ${config.scanner.rsMin}. ` +
-        `With SPY that is ${wanted} chains against a budget of ${budget}` +
-        (wanted > budget ? ` — ${wanted - budget} would be skipped.` : '.');
+        `Dry run: ${rows.length} ranked names, ${requested} chains would be requested ` +
+        `against a budget of ${source.budget} on ${source.primary}` +
+        (rows.length > wanted.length
+          ? ` — the ${rows.length - wanted.length} weakest would go without gamma.`
+          : ' — the whole ranked universe fits.') +
+        ` ${source.reason}`;
 
       return wantsText
         ? new NextResponse(`${message}
@@ -69,16 +97,24 @@ export async function GET(request: Request) {
         : NextResponse.json({
             summary: message,
             status: 'dry-run',
-            candidates: rows.map((r) => r.symbol),
-            budget,
+            ranked: rows.length,
+            candidates: wanted.map((r) => r.symbol),
+            budget: source.budget,
+            source: source.primary,
+            fallback: source.fallback,
+            reason: source.reason,
           });
     }
 
-    const outcome = await refreshScannerGamma(rows.map((r) => r.symbol));
+    const outcome = await refreshScannerGamma(
+      wanted.map((r) => ({ symbol: r.symbol, close: r.close })),
+    );
 
     const spy = outcome.stored.symbols.SPY;
     const summary =
-      `Refreshed ${outcome.refreshed} chains, ${outcome.failed} failed` +
+      `Refreshed ${outcome.refreshed} of ${outcome.requested} chains via ${outcome.source.primary}` +
+      (outcome.fellBack.length > 0 ? ` (${outcome.fellBack.length} fell back to Cboe)` : '') +
+      `, ${outcome.failed} failed` +
       (outcome.skipped > 0 ? `, ${outcome.skipped} skipped` : '') +
       `. SPY gamma ${spy ? spy.regime : 'unread'}.`;
 
@@ -92,7 +128,12 @@ export async function GET(request: Request) {
       summary,
       status: 'refreshed',
       date: outcome.stored.date,
-      candidates: rows.length,
+      ranked: rows.length,
+      candidates: wanted.length,
+      source: outcome.stored.source,
+      byProvider: outcome.stored.byProvider,
+      sourceReason: outcome.source.reason,
+      fellBack: outcome.fellBack,
       requested: outcome.requested,
       refreshed: outcome.refreshed,
       failed: outcome.failed,

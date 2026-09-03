@@ -9,6 +9,7 @@ import { readPosts } from './post';
 import { peekRetestDoc } from './retest/store';
 import { peekRsMeta } from './rs';
 import { peekScannerGamma, readLatestScan } from './scanner';
+import { readTrackRecord } from './trackRecord/store';
 import { peekStoredSectors } from './sectors';
 import { ageHours } from './staleness';
 import { peekVelocity } from './velocity';
@@ -91,6 +92,7 @@ export async function readCronHealth(now: Date = new Date()): Promise<CronHealth
     retests,
     gamma,
     scan,
+    trackRecord,
     posts,
     log,
     groups,
@@ -104,6 +106,7 @@ export async function readCronHealth(now: Date = new Date()): Promise<CronHealth
     peekRetestDoc().catch(() => null),
     peekScannerGamma().catch(() => null),
     readLatestScan().catch(() => null),
+    readTrackRecord().catch(() => []),
     readPosts().catch(() => []),
     readLog().catch(() => []),
     peekStoredGroups().catch(() => null),
@@ -125,6 +128,8 @@ export async function readCronHealth(now: Date = new Date()): Promise<CronHealth
   const rsLast = rsRanAt.length > 0 ? rsRanAt[rsRanAt.length - 1] : null;
 
   const settled = log.filter((e) => e.settled);
+  /** Picks whose five-day return has been filled in — the headline sample. */
+  const settledPicks = trackRecord.filter((entry) => entry.forward.d5 !== undefined);
 
   const defs: Array<Omit<CronSource, 'ageHours' | 'state'>> = [
     {
@@ -157,7 +162,9 @@ export async function readCronHealth(now: Date = new Date()): Promise<CronHealth
       lastSuccess: gamma?.refreshedAt ?? null,
       staleAfterHours: WEEKEND_SLACK_HOURS,
       detail: gamma
-        ? `${Object.keys(gamma.symbols).length} symbols on ${gamma.date}`
+        ? `${Object.keys(gamma.symbols).length} symbols on ${gamma.date} — ${
+            gamma.source ?? 'chain source not recorded for this run'
+          }`
         : null,
     },
     {
@@ -167,6 +174,31 @@ export async function readCronHealth(now: Date = new Date()): Promise<CronHealth
       lastSuccess: scan?.scannedAt ?? null,
       staleAfterHours: WEEKEND_SLACK_HOURS,
       detail: scan ? `${scan.rows.length} rows on ${scan.date}` : null,
+    },
+    {
+      path: '/api/trackrecord/log',
+      label: 'Scanner track record - logging',
+      schedule: '20:15 and 21:15 UTC, Mon-Fri',
+      lastSuccess: trackRecord[0]?.loggedAt ?? null,
+      staleAfterHours: WEEKEND_SLACK_HOURS,
+      detail:
+        trackRecord.length > 0
+          ? `${trackRecord.length} picks logged, latest ${trackRecord[0].date}`
+          : 'nothing logged yet - the record starts the first evening this runs, and is never backfilled',
+    },
+    {
+      path: '/api/trackrecord/settle',
+      label: 'Scanner track record - forward returns',
+      schedule: '20:20 and 21:20 UTC, Mon-Fri',
+      /*
+       * Settling writes no stamp of its own, so the newest *settled* pick's
+       * logging time stands in and is labelled as approximate. A borrowed
+       * timestamp shown without the caveat would report this job healthy on a
+       * day it never ran — the same trap `/api/log/settle` documents below.
+       */
+      lastSuccess: settledPicks[0]?.loggedAt ?? null,
+      staleAfterHours: WEEKEND_SLACK_HOURS,
+      detail: `${settledPicks.length} of ${trackRecord.length} picks settled at 5 days - dated from the pick, not the settle run`,
     },
     {
       path: '/api/post',

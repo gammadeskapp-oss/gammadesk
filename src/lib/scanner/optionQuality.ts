@@ -11,7 +11,7 @@ import {
  *
  * ## Why this gate exists
  *
- * Everything upstream measures the *stock*. A name can clear all five gates —
+ * Everything upstream measures the *stock*. A name can clear every filter —
  * strong, trending, confirmed, liquid in shares, in a calm market — and still
  * have an options chain nobody should touch: a 12% bid/ask spread on 40 open
  * interest hands the whole edge to the market maker before the trade has done

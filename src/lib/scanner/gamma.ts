@@ -1,47 +1,56 @@
 import 'server-only';
 
-import { fetchCboeSnapshot } from '../cboe';
 import { config } from '../config';
 import { buildPositioning } from '../exposure';
 import { createJsonStore } from '../jsonStore';
-import { runScan, SCAN_CONCURRENCY } from '../scanUniverse';
+import { runPool, runScan, SCAN_CONCURRENCY } from '../scanUniverse';
 import { marketToday } from '../time';
+import {
+  fetchChainFor,
+  resolveChainSource,
+  type ResolvedChainSource,
+} from './gammaSource';
 import type { GammaEntry, Magnet, StoredGamma } from './types';
 
 /**
- * The 8:30 ET gamma refresh — filters 4 and 5.
+ * The 08:30 ET gamma refresh.
  *
- * ## Why this job exists at all
+ * ## What this job used to be, and why it changed
  *
- * The nightly rotation in `velocity`/`flow` covers a quarter of the tracked
- * universe per night, because Cboe's free feed answers roughly sixty chain
- * requests per window and then refuses. That is a quota rather than a rate:
- * running longer, or slower, or on a bigger plan does not raise it. So any
- * given ticker's cached gamma can be up to four days old, which is fine for a
- * page about how positioning drifts and far too stale for a scan that runs
- * this morning.
+ * It used to refresh chains only for names that had already cleared a
+ * relative-strength floor — about fifty of them — because Cboe's free feed
+ * answers roughly sixty chain requests per window and then refuses. That is a
+ * quota rather than a rate: running longer, slower, or on a bigger plan does
+ * not raise it. Asking for less was the only lever, so the job asked for the
+ * top of the list and the rest of the index went without.
  *
- * The way out is to ask for less. Only names that already cleared filter 1
- * need gamma at all — about fifty at the default RS floor of 82 — and fifty
- * fits inside one window. The nightly rotation keeps running unchanged for
- * every other page; this job is separate and its output is used by nothing
- * else.
+ * The cost of that was not obvious from the page. Two of the scanner's seven
+ * scoring components come out of this document — the name's own dealer
+ * positioning and its whole-chain option liquidity — so under Cboe, fifty
+ * names were scored on seven readings and four hundred and fifty on five. The
+ * two groups were never comparable, and the reason had nothing to do with any
+ * of the stocks.
  *
- * The margin is thinner than it looks. Fifty candidates plus SPY is fifty-one
- * chains against a window of roughly sixty, so the RS floor cannot drop much
- * further without the tail of the list going unrefreshed — and an unrefreshed
- * candidate reports its gamma filters as unknown, which excludes it. See
- * `config.scanner.gammaRefreshBudget`.
+ * On a paid Polygon options plan there is no per-minute quota, so this job now
+ * asks for the whole ranked universe and the shortlisting is gone. The
+ * fifteen-minute delay Polygon's plan carries is irrelevant to what is being
+ * computed: gamma exposure is built from open interest, and open interest
+ * publishes once a day after the close.
  *
- * 8:30 also happens to be the freshest the data gets: open interest publishes
- * before it, and nothing further arrives until tomorrow.
+ * Which provider actually served a run is decided in `gammaSource.ts`,
+ * recorded per symbol, stored on the document, printed in the log line, and
+ * shown on the page. There is no silent failover — falling back to Cboe means
+ * going from five hundred chains to sixty, and a reader comparing two
+ * mornings has to be able to see that.
+ *
+ * 08:30 is still the freshest the data gets: open interest publishes before
+ * it, and nothing further arrives until tomorrow.
  *
  * ## One request per symbol, two answers
  *
  * The chain snapshot carries whole-chain volume and open interest alongside
- * the contracts (see `ChainActivityTotals`), so filter 3's options tier comes
- * out of the same fetch as filter 4's regime. Reading them separately would
- * have doubled the request count and put the job back over the quota.
+ * the contracts (see `ChainActivityTotals`), so the option-liquidity component
+ * comes out of the same fetch as the regime. Both adapters fill it in.
  */
 
 /** Magnet lines drawn on the expanded chart. */
@@ -81,8 +90,12 @@ function magnetsFrom(rows: Array<{ strike: number; total: { gex: number } }>): M
 }
 
 /** One symbol's chain, reduced to what the scanner stores. */
-async function readSymbol(symbol: string): Promise<GammaEntry> {
-  const snapshot = await fetchCboeSnapshot(symbol);
+async function readSymbol(
+  symbol: string,
+  source: ResolvedChainSource,
+  spotHint?: number,
+): Promise<{ entry: GammaEntry; provider: string; fellBackFrom: string | null }> {
+  const { snapshot, provider, fellBackFrom } = await fetchChainFor(symbol, source, spotHint);
   const now = new Date();
 
   const positioning = buildPositioning(snapshot.contracts, {
@@ -93,8 +106,9 @@ async function readSymbol(symbol: string): Promise<GammaEntry> {
     expirationCount: config.expirationCount,
     strikesEachSide: config.strikesEachSide,
     meta: {
-      source: 'cboe',
-      sourceLabel: 'Cboe (delayed)',
+      source: provider,
+      sourceLabel:
+        provider === 'polygon' ? 'Polygon (15-minute delayed)' : 'Cboe (delayed)',
       asOfLabel: '',
       asOfIso: now.toISOString(),
       quoteDateLabel: '',
@@ -107,19 +121,22 @@ async function readSymbol(symbol: string): Promise<GammaEntry> {
     },
   });
 
-  return {
+  const entry: GammaEntry = {
     symbol,
+    source: provider,
     regime: positioning.summary.regime,
     netGex: positioning.summary.netGex,
     spot: positioning.spot,
     flipLevel: positioning.summary.flipLevel,
     magnets: magnetsFrom(positioning.rows),
-    // Absent only on adapters that cannot see the whole book. On Cboe, which
-    // is what this job uses, it is always present.
+    // Absent only on adapters that cannot see the whole book. Both adapters
+    // this job uses report it.
     optionsVolume: snapshot.activity?.volume ?? 0,
     optionsOpenInterest: snapshot.activity?.openInterest ?? 0,
     quoteDateIso: snapshot.quoteDate.toISOString(),
   };
+
+  return { entry, provider, fellBackFrom };
 }
 
 export interface GammaRefreshOutcome {
@@ -129,6 +146,10 @@ export interface GammaRefreshOutcome {
   failed: number;
   skipped: number;
   requested: number;
+  /** What the run decided to use, and why. */
+  source: ResolvedChainSource;
+  /** Symbols the primary source could not serve. */
+  fellBack: string[];
 }
 
 /**
@@ -144,33 +165,84 @@ export interface GammaRefreshOutcome {
  * "we never got the chain", and the two are different filter states.
  */
 export async function refreshScannerGamma(
-  candidates: string[],
+  /**
+   * The names to refresh, each with the previous close the caller already
+   * holds.
+   *
+   * The close is not decoration. Polygon's price endpoint is a stocks call
+   * that an options plan does not cover, so a run without it queues sixty
+   * seconds per symbol behind a five-a-minute limiter — which is the
+   * difference between covering the index and covering two dozen names. The
+   * scanner has this figure for every ranked name already.
+   */
+  candidates: Array<{ symbol: string; close: number | null }>,
 ): Promise<GammaRefreshOutcome> {
-  const wanted = ['SPY', ...candidates.filter((s) => s !== 'SPY')];
+  const closes = new Map(candidates.map((c) => [c.symbol, c.close]));
+  const wanted = [
+    'SPY',
+    ...candidates.map((c) => c.symbol).filter((s) => s !== 'SPY'),
+  ];
+
+  /*
+   * The source is resolved once, before a single chain is spent, and it is the
+   * first thing this job logs. On `auto` that costs one probe request and buys
+   * the difference between "the whole index has gamma" and "sixty names do" —
+   * which is worth knowing before the run rather than after it.
+   */
+  const source = await resolveChainSource();
+  console.log(
+    `[scanner/gamma] source=${source.primary} fallback=${source.fallback ?? 'none'} ` +
+      `budget=${source.budget} wanted=${wanted.length} — ${source.reason}`,
+  );
 
   const failures: Array<{ symbol: string; reason: string }> = [];
   const symbols: Record<string, GammaEntry> = {};
+  /** Symbols the primary could not serve and the fallback could. */
+  const fellBack: string[] = [];
 
-  const outcome = await runScan(
-    wanted,
-    async (symbol) => {
-      try {
-        symbols[symbol] = await readSymbol(symbol);
-      } catch (error) {
-        failures.push({
-          symbol,
-          reason: error instanceof Error ? error.message : String(error),
+  const read = async (symbol: string) => {
+    try {
+      const result = await readSymbol(symbol, source, closes.get(symbol) ?? undefined);
+      symbols[symbol] = result.entry;
+      if (result.fellBackFrom) fellBack.push(symbol);
+    } catch (error) {
+      failures.push({
+        symbol,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  /*
+   * Two schedulers, because the two providers are constrained by different
+   * things. Cboe is a quota — waves with a pause between them, which is what
+   * `runScan` is for. Polygon is latency with no quota, and a wave scheduler
+   * there runs at the speed of the slowest chain in each wave; a continuous
+   * pool with a per-symbol deadline covers the index instead of a third of it.
+   */
+  const outcome: { skipped: string[]; timedOut?: string[] } =
+    source.primary === 'polygon'
+      ? await runPool(wanted, read, {
+          concurrency: config.scanner.polygonConcurrency,
+          maxRequests: source.budget,
+          perSymbolMs: config.scanner.polygonSymbolTimeoutMs,
+          // The route allows five minutes; stop well before it so the document
+          // is still written rather than the run being killed mid-flight.
+          budgetMs: 240_000,
+        })
+      : await runScan(wanted, read, {
+          concurrency: SCAN_CONCURRENCY,
+          maxRequests: source.budget,
+          budgetMs: 240_000,
         });
-      }
-    },
-    {
-      concurrency: SCAN_CONCURRENCY,
-      maxRequests: config.scanner.gammaRefreshBudget,
-      // The route allows five minutes; stop well before it so the document is
-      // still written rather than the run being killed mid-flight.
-      budgetMs: 240_000,
-    },
-  );
+
+  const timedOut = outcome.timedOut ?? [];
+
+  const byProvider = { polygon: 0, cboe: 0 };
+  for (const entry of Object.values(symbols)) {
+    if (entry.source === 'polygon') byProvider.polygon += 1;
+    else byProvider.cboe += 1;
+  }
 
   const stored: StoredGamma = {
     date: marketToday(),
@@ -179,7 +251,15 @@ export async function refreshScannerGamma(
     failures,
     skipped: outcome.skipped,
     requested: wanted.length,
+    source: describeSource(source, byProvider, fellBack.length, timedOut.length),
+    byProvider,
   };
+
+  console.log(
+    `[scanner/gamma] refreshed=${Object.keys(symbols).length}/${wanted.length} ` +
+      `polygon=${byProvider.polygon} cboe=${byProvider.cboe} fellBack=${fellBack.length} ` +
+      `failed=${failures.length} timedOut=${timedOut.length} skipped=${outcome.skipped.length}`,
+  );
 
   try {
     await gammaStore.write(stored);
@@ -196,7 +276,53 @@ export async function refreshScannerGamma(
     failed: failures.length,
     skipped: outcome.skipped.length,
     requested: wanted.length,
+    source,
+    fellBack,
   };
+}
+
+/**
+ * The provenance sentence stored on the document and shown on the page.
+ *
+ * It names the counts rather than the intent, because the intent is what a
+ * configuration flag would tell you and the counts are what actually happened.
+ * A run that meant to use Polygon and served four hundred of its five hundred
+ * chains from Cboe is a materially different document, and this is where a
+ * reader finds that out.
+ */
+function describeSource(
+  source: ResolvedChainSource,
+  byProvider: { polygon: number; cboe: number },
+  fellBack: number,
+  timedOut: number,
+): string {
+  const parts: string[] = [];
+
+  if (byProvider.polygon > 0 && byProvider.cboe > 0) {
+    parts.push(
+      `${byProvider.polygon} chains from Polygon (15-minute delayed) and ${byProvider.cboe} from Cboe`,
+    );
+  } else if (byProvider.polygon > 0) {
+    parts.push(`Polygon (15-minute delayed), ${byProvider.polygon} chains`);
+  } else if (byProvider.cboe > 0) {
+    parts.push(`Cboe (delayed), ${byProvider.cboe} chains`);
+  } else {
+    parts.push('no chains were read');
+  }
+
+  if (fellBack > 0) {
+    parts.push(
+      `${fellBack} fell back from ${source.primary} after it could not serve them`,
+    );
+  }
+
+  if (timedOut > 0) {
+    parts.push(
+      `${timedOut} were abandoned at the per-symbol deadline and carry no reading`,
+    );
+  }
+
+  return `${parts.join('; ')}.`;
 }
 
 /**

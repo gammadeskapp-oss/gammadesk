@@ -88,8 +88,28 @@ export interface ArchivedDay {
   /** New York date. */
   date: string;
   scannedAt: string;
-  /** The number this file exists for. */
+  /**
+   * Names matching every filter at the shipped defaults.
+   *
+   * ## What this number means changed on the day the gamma source did
+   *
+   * It used to mean "failed nothing and was tested on everything", because an
+   * untestable filter excluded a name exactly as a failed one did. It now
+   * means "failed nothing", with untested filters not counting against a name
+   * — which was the only way to stop the chain provider's coverage from
+   * deciding the count. `fullyTested` below carries the stricter reading, so a
+   * reader comparing a Tuesday in one regime against a Tuesday in the other
+   * has both numbers rather than one number that quietly changed meaning.
+   */
   passed: number;
+  /**
+   * Of `passed`, how many were tested against every enabled filter.
+   *
+   * Absent on days archived before this existed, which is why it is optional
+   * rather than backfilled with `passed` — writing the two as equal would be
+   * inventing a coverage figure for a day nobody measured one.
+   */
+  fullyTested?: number;
   /**
    * Names scored that morning.
    *
@@ -140,15 +160,19 @@ export const ARCHIVE_KEEP_DAYS = 90;
  * incomparable numbers.
  */
 export async function archiveScan(result: ScanResult): Promise<void> {
-  const judged = scoreAndJudge(result.rows, DEFAULT_FILTERS);
+  const judged = scoreAndJudge(result.rows, DEFAULT_FILTERS, {
+    spyRegime: result.spyRegime,
+  });
   const passed = judged.filter(
     (entry) => entry.passes && !entry.earningsExcluded,
   );
+  const fullyTested = passed.filter((entry) => entry.unmeasured.length === 0).length;
 
   const day: ArchivedDay = {
     date: result.date,
     scannedAt: result.scannedAt,
     passed: passed.length,
+    fullyTested,
     candidates: result.scored,
     universe: result.universe,
     rsMin: result.rsMin,

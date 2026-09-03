@@ -192,3 +192,107 @@ export async function runScan<T>(
 
   return { results, covered, skipped: symbols.slice(covered.length) };
 }
+
+
+/**
+ * The same job as `runScan`, scheduled as a continuous pool rather than waves.
+ *
+ * ## Why waves are wrong for a five-hundred-symbol sweep
+ *
+ * `runScan` awaits a whole wave before starting the next, which is exactly
+ * right when the constraint is a quota: the pause between waves is manners,
+ * and the wave boundary is where the budget is checked. It is the wrong shape
+ * when the constraint is latency and the symbols vary wildly in cost, because
+ * throughput collapses to `waves x slowest symbol in each wave`. Measured on
+ * the index at concurrency 24: 168 chains in 242 seconds — about 34 seconds a
+ * wave, while a typical chain takes under half a second.
+ *
+ * Here each worker takes the next symbol the moment it is free, so one
+ * pathological chain delays one worker instead of twenty-three.
+ *
+ * ## And why there is a per-symbol deadline
+ *
+ * Without one, a single hung request holds a worker for the entire run. Each
+ * symbol contributes one component of seven to one row, so abandoning a slow
+ * one costs far less than the names it would otherwise crowd out — and an
+ * abandoned symbol is reported as unmeasured, which the page renders honestly
+ * rather than as a bad reading.
+ */
+export async function runPool<T>(
+  symbols: string[],
+  worker: (symbol: string) => Promise<T>,
+  options: {
+    concurrency?: number;
+    budgetMs?: number;
+    /** Longest one symbol may take before it is abandoned. */
+    perSymbolMs?: number;
+    maxRequests?: number;
+  } = {},
+): Promise<ScanOutcome<T> & { timedOut: string[] }> {
+  const {
+    concurrency = SCAN_CONCURRENCY,
+    budgetMs = SCAN_BUDGET_MS,
+    perSymbolMs = 15_000,
+    maxRequests = SCAN_MAX_REQUESTS,
+  } = options;
+
+  const allowed = symbols.slice(0, maxRequests);
+  const startedAt = Date.now();
+
+  const results: T[] = [];
+  const covered: string[] = [];
+  const timedOut: string[] = [];
+
+  let cursor = 0;
+
+  async function drain(): Promise<void> {
+    for (;;) {
+      if (Date.now() - startedAt > budgetMs) return;
+
+      const index = cursor;
+      cursor += 1;
+      if (index >= allowed.length) return;
+
+      const symbol = allowed[index];
+
+      /*
+       * The timer is cleared on both paths. A pending timer keeps the process
+       * alive on Node, which in a script turns a finished run into one that
+       * hangs for the length of the longest deadline.
+       */
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          worker(symbol),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`timed out after ${perSymbolMs}ms`)),
+              perSymbolMs,
+            );
+          }),
+        ]);
+        results.push(result);
+        covered.push(symbol);
+      } catch (error) {
+        covered.push(symbol);
+        if (error instanceof Error && error.message.startsWith('timed out')) {
+          timedOut.push(symbol);
+        }
+        // Anything else is the worker's own failure, which it has already
+        // recorded — see `refreshScannerGamma`.
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => drain()));
+
+  const attempted = new Set(covered);
+  return {
+    results,
+    covered,
+    skipped: allowed.filter((s) => !attempted.has(s)),
+    timedOut,
+  };
+}

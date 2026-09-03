@@ -5,7 +5,8 @@ import { SHARDS } from '../rs/universe';
 import { ema } from '../ticker/indicators';
 
 /**
- * The 20-day and 200-day averages for every name in the index.
+ * The 20-, 50- and 200-day averages and the daily VWAP, for every name in the
+ * index.
  *
  * ## Why this is not just read off the digest
  *
@@ -39,11 +40,45 @@ import { ema } from '../ticker/indicators';
 
 export interface MovingAverages {
   ema20: number | null;
+  /**
+   * The 50-day average, which only ever comes from the bar history.
+   *
+   * The digest carries 20 and 200 and nothing else, and it is deliberately not
+   * being extended to carry a third: adding a field means recomputing every
+   * shard before any name has one, and the trend sub-score would read
+   * "unknown" for the whole index until the nightly job had walked all four.
+   * Computing it here costs the bar read that is happening anyway.
+   */
+  ema50: number | null;
   ema200: number | null;
+  /**
+   * Volume-weighted average price over the last 20 sessions.
+   *
+   * ## This is a daily VWAP, and it is not the intraday one
+   *
+   * Worth being exact about, because the two get called the same thing. A
+   * trading-platform VWAP is anchored at the opening bell and computed from
+   * intraday bars; this is sum(close x volume) / sum(volume) over the last
+   * twenty *daily* bars. It answers "is price above the level most of the
+   * recent shares actually changed hands at", which is the question the score
+   * uses it for.
+   *
+   * It is not the session VWAP because the session VWAP cannot be had for 503
+   * names without 503 intraday bar requests every morning, and the whole
+   * reason the index can be scored at all is that this file touches no
+   * upstream at all. A number that is nearly right and costs nothing beats a
+   * number that is exactly right and empties the page whenever the intraday
+   * feed is slow. The page and the tooltip both say which one this is.
+   */
+  vwap20: number | null;
 }
 
 const SHORT = 20;
+const MID = 50;
 const LONG = 200;
+
+/** Sessions the daily VWAP is computed over. */
+const VWAP_WINDOW = 20;
 
 /** Last non-null value of a series. */
 function last(values: (number | null)[]): number | null {
@@ -52,6 +87,38 @@ function last(values: (number | null)[]): number | null {
     if (v !== null && Number.isFinite(v)) return v;
   }
   return null;
+}
+
+/**
+ * Volume-weighted average close over the last `VWAP_WINDOW` sessions.
+ *
+ * Sessions where either leg is missing are dropped in pairs, so the weights
+ * and the prices always describe the same days. Null when fewer than the full
+ * window survives — a VWAP over nine of twenty sessions is a different number
+ * wearing the same label.
+ */
+function vwap(
+  closes: (number | null)[],
+  volumes: (number | null)[] | undefined,
+): number | null {
+  if (!volumes) return null;
+
+  let priceVolume = 0;
+  let volume = 0;
+  let used = 0;
+
+  for (let i = closes.length - 1; i >= 0 && used < VWAP_WINDOW; i -= 1) {
+    const close = closes[i];
+    const size = volumes[i];
+    if (close === null || size === null) continue;
+    if (!Number.isFinite(close) || !Number.isFinite(size) || size <= 0) continue;
+    priceVolume += close * size;
+    volume += size;
+    used += 1;
+  }
+
+  if (used < VWAP_WINDOW || !(volume > 0)) return null;
+  return priceVolume / volume;
 }
 
 export async function readMovingAverages(): Promise<{
@@ -74,29 +141,41 @@ export async function readMovingAverages(): Promise<{
     ),
   );
 
-  /** Symbols the digest could not answer for, per shard. */
+  /** Symbols per shard, all of which need their bars read — see below. */
   const needBars: Array<Set<string>> = [];
+  /** What the digest already knew, preferred over a recomputation. */
+  const digestAverages = new Map<string, { ema20: number | null; ema200: number | null }>();
 
   digests.forEach((doc, shard) => {
     const need = new Set<string>();
+    /*
+     * Every symbol needs its bars now, whatever the digest holds.
+     *
+     * The digest can answer for the 20 and the 200 and can never answer for
+     * the 50 or the VWAP, and a row carrying two of the four would report the
+     * trend sub-score over half its inputs while looking exactly like a row
+     * that had all of them. So the digest values are kept where they exist —
+     * they are the same function on the same closes, and preferring them keeps
+     * this page and /movers from disagreeing about the same stock — and the
+     * shard is read regardless to fill in the rest.
+     */
     for (const entry of doc?.entries ?? []) {
-      const ema20 = entry.ema20 ?? null;
-      const ema200 = entry.ema200 ?? null;
-      if (ema200 !== null) {
-        bySymbol.set(entry.symbol, { ema20, ema200 });
-        fromDigest += 1;
-      } else {
-        need.add(entry.symbol);
-      }
+      need.add(entry.symbol);
+      if ((entry.ema200 ?? null) !== null) fromDigest += 1;
+      digestAverages.set(entry.symbol, {
+        ema20: entry.ema20 ?? null,
+        ema200: entry.ema200 ?? null,
+      });
     }
     needBars[shard] = need;
   });
 
   /*
-   * Bar shards are read only for the shards that actually need them. On a
-   * fully-refreshed store that is none of them and this costs one skipped
-   * branch; on the store as it stands it is all four, which is the case worth
-   * being correct in.
+   * All four bar shards, every run. It used to be only the shards the digest
+   * could not answer for; the 50-day average and the VWAP are not in the
+   * digest and never will be, so there is no longer a case where the bars can
+   * be skipped. The read is of stored documents and costs no upstream request,
+   * which is the property that matters.
    */
   await Promise.all(
     needBars.map(async (need, shard) => {
@@ -105,8 +184,14 @@ export async function readMovingAverages(): Promise<{
       const doc = await barStore(shard).read().catch(() => null);
       if (!doc) {
         for (const symbol of need) {
-          bySymbol.set(symbol, { ema20: null, ema200: null });
-          missing += 1;
+          const known = digestAverages.get(symbol);
+          bySymbol.set(symbol, {
+            ema20: known?.ema20 ?? null,
+            ema50: null,
+            ema200: known?.ema200 ?? null,
+            vwap20: null,
+          });
+          if ((known?.ema200 ?? null) === null) missing += 1;
         }
         return;
       }
@@ -115,16 +200,32 @@ export async function readMovingAverages(): Promise<{
         // `null` marks a session the symbol did not trade, or any date before
         // it listed. Dropped rather than carried forward: an average taken
         // over a series with holes in it is not the average it claims to be.
-        const closes = (doc.closes[symbol] ?? []).filter(
+        const rawCloses = doc.closes[symbol] ?? [];
+        const closes = rawCloses.filter(
           (c): c is number => c !== null && Number.isFinite(c),
         );
 
-        const ema20 = closes.length >= SHORT ? last(ema(closes, SHORT)) : null;
-        const ema200 = closes.length >= LONG ? last(ema(closes, LONG)) : null;
+        const known = digestAverages.get(symbol);
+        const ema20 = known?.ema20 ?? (closes.length >= SHORT ? last(ema(closes, SHORT)) : null);
+        const ema50 = closes.length >= MID ? last(ema(closes, MID)) : null;
+        const ema200 =
+          known?.ema200 ?? (closes.length >= LONG ? last(ema(closes, LONG)) : null);
 
-        bySymbol.set(symbol, { ema20, ema200 });
+        /*
+         * The VWAP reads the unfiltered series, unlike the averages above.
+         * Closes and volumes are stored against one shared date index, so
+         * compacting one and not the other would multiply a Tuesday's price by
+         * a Wednesday's volume.
+         */
+        bySymbol.set(symbol, {
+          ema20,
+          ema50,
+          ema200,
+          vwap20: vwap(rawCloses, doc.volumes[symbol]),
+        });
+
         if (ema200 === null) missing += 1;
-        else computed += 1;
+        else if ((known?.ema200 ?? null) === null) computed += 1;
       }
     }),
   );

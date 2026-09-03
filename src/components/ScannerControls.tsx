@@ -210,7 +210,7 @@ export function ScannerControls({
     <section className="panel px-3.5 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-dim">
-          The rules, and where you have set them
+          The filters, and where you have set them
         </h2>
         <div className="flex flex-wrap items-center gap-1.5">
           {!isDefault && (
@@ -277,15 +277,15 @@ export function ScannerControls({
         </Row>
 
         <Row
-          label="Distance above 200-day"
-          value={`${settings.trendPct > 0 ? '+' : ''}${settings.trendPct}%`}
-          hint="Negative is allowed: a name 3% under its 200-day is a coherent thing to look for, and a slider stopping at zero would be quietly denying it."
+          label="Trend score cutoff"
+          value={String(settings.trendMin)}
+          hint="0-100, averaged over four readings: above the 50-day, above the 200-day, the 50 above the 200, and where its last month ranks against the index."
         >
           <Slider
-            {...b.trendPct}
-            value={settings.trendPct}
-            ariaLabel="Distance above the 200-day average"
-            onChange={(v) => set('trendPct', v)}
+            {...b.trendMin}
+            value={settings.trendMin}
+            ariaLabel="Trend score cutoff"
+            onChange={(v) => set('trendMin', v)}
           />
         </Row>
 
@@ -326,7 +326,7 @@ export function ScannerControls({
 
       {/* --- the on/off switches ------------------------------------------- */}
       <div className="mt-3 border-t border-term-line pt-3">
-        <span className="label-xs">Rules in force</span>
+        <span className="label-xs">Filters in force</span>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {RULE_KEYS.map((key) => {
             const on = settings.enabled[key];
@@ -350,33 +350,14 @@ export function ScannerControls({
           })}
         </div>
         <p className="mt-1.5 text-2xs leading-relaxed text-term-faint">
-          A rule switched off stops counting toward the funnel and toward
-          whether a name passes — but its reading is still shown on every row,
-          greyed. Switching a rule off should not be able to make its number
-          disappear.
+          These narrow the list; they do not empty it. A filter switched off
+          stops counting toward the funnel and toward whether a name matches —
+          but its reading is still shown on every row, greyed, because
+          switching a filter off should not be able to make its number
+          disappear. The table always shows the top twenty by score whatever is
+          set here, so a filter nothing matches produces a sentence saying so
+          rather than a blank page.
         </p>
-      </div>
-
-      {/* --- the market-wide toggle ----------------------------------------- */}
-      <div className="mt-3 border-t border-term-line pt-3">
-        <label className="flex items-start gap-2 text-2xs leading-relaxed text-term-dim">
-          <input
-            type="checkbox"
-            checked={settings.requireCalmMarket}
-            onChange={(e) => set('requireCalmMarket', e.target.checked)}
-            className="mt-0.5 accent-pos"
-          />
-          <span>
-            <span className="font-bold text-term-text">
-              Only show names when the wider market is calm.
-            </span>{' '}
-            Off by default. This used to be a sixth rule applied to every name,
-            which meant that on a volatile morning all five hundred failed at
-            the same step and the page went blank for a reason that had nothing
-            to do with any of them. It is one market-wide condition and it is
-            stated once, in the banner at the top.
-          </span>
-        </label>
       </div>
 
       {/* --- saved presets ---------------------------------------------------- */}
