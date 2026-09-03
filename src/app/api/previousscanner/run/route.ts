@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { legacyScannerEnabled } from '@/lib/pageFlag';
 import { legacyConfig as config } from '@/lib/previousscanner/config';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
 import { runScanner, storeStatus } from '@/lib/previousscanner';
@@ -18,6 +19,13 @@ export const maxDuration = 300;
  * keeps the same dual-auth and the same `?format=text` as the other manual
  * endpoints so it cannot be walked by anyone who finds the URL.
  *
+ * It is gated on `GAMMADESK_LEGACY_SCANNER=1` before the auth check, the same
+ * way `/api/lab/analogue` is gated on its page's flag. Without the flag this
+ * answers 404 and never reaches the token comparison, so a deploy that does
+ * not serve the page cannot be made to run its scan either — the page and its
+ * one endpoint are switched on and off together, which is the only arrangement
+ * where "this page is off" is a true statement about the whole feature.
+ *
  * The `when=scheduled` branch below is inherited from the original and is
  * dead here: nothing schedules this. It is left in place because the point of
  * the page is to show what the old build did, and quietly editing its
@@ -30,6 +38,10 @@ export const maxDuration = 300;
  * rather than the most flattering.
  */
 export async function GET(request: Request) {
+  if (!legacyScannerEnabled()) {
+    return new NextResponse('Not found', { status: 404 });
+  }
+
   const denied = denyUnauthorisedCron(request);
   if (denied) return denied;
 

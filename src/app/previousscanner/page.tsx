@@ -1,20 +1,37 @@
 import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { PreviousScannerBoard } from '@/components/PreviousScannerBoard';
+import { legacyScannerEnabled } from '@/lib/pageFlag';
 import { getScannerView, storeStatus } from '@/lib/previousscanner';
 import { formatEtClock } from '@/lib/previousscanner/schedule';
 import { formatAsOf } from '@/lib/time';
 
 /**
- * Unlisted, and deliberately not private.
+ * Unlisted, and switched off unless somebody switched it on.
  *
  * `noindex, nofollow` overrides the site-wide `index, follow` from the root
- * layout, and there is no link to this route anywhere in the navigation. That
- * keeps it out of search results and out of the way — it does not keep anyone
- * out. Anybody who types the URL can read it. If it needs to be genuinely
- * restricted, the way to do that is a passcode from an environment variable,
- * checked here before anything renders.
+ * layout and there is no link to this route anywhere in the navigation. That
+ * used to be the whole of it, and it was not enough: unlisted is not private,
+ * and anybody who typed the URL could read it.
+ *
+ * So this now also refuses to exist without `GAMMADESK_LEGACY_SCANNER=1`, the
+ * same arrangement `/lab` has — its own variable rather than a shared one, so
+ * turning on one page does not republish the other. See `lib/pageFlag.ts`.
+ *
+ * The gate is a 404 and not a 403, because a 403 confirms the route is there.
+ * It is a switch and not authentication: it keeps a superseded rule set from
+ * shipping with whatever deploy happens to contain it. If this ever needs to
+ * be readable in production by one person, the way to do that is a passcode
+ * from an environment variable, checked here before anything renders.
+ *
+ * ## The gate sits in front of the scan, not just the markup
+ *
+ * This page is the one place here where a *page view* triggers work — see
+ * `getScannerView`, which runs the scanner on demand when today's document is
+ * missing. Checking the flag before that call is the point: a stray request in
+ * production cannot start a run that spends bar series and writes a document.
  */
 export const metadata: Metadata = {
   title: 'Legacy Scanner',
@@ -29,6 +46,9 @@ const LEGACY_DESCRIPTION =
   'The earlier seven-filter build, across three timeframes, ranked by Nadaraya-Watson extension.';
 
 export default async function PreviousScannerPage() {
+  // Before `getScannerView`, which can start a scan. See the note above.
+  if (!legacyScannerEnabled()) notFound();
+
   const view = await getScannerView();
   const store = storeStatus();
   const { scan, latest, gamma, schedule } = view;
