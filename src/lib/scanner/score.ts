@@ -655,12 +655,40 @@ export interface ScoredRow {
   row: ScanRow;
   score: RowScore;
   verdicts: Record<RuleKey, FilterVerdict>;
-  /** Filters that are enabled and did not come back `pass`, in display order. */
+  /** Enabled filters this name actually failed a measured test against. */
   failing: RuleKey[];
-  /** True when every *enabled* filter passed. `unknown` is not a pass. */
+  /**
+   * Enabled filters that could not be tested for this name at all.
+   *
+   * Kept apart from `failing`, and it is the whole point of this field: an
+   * unmeasured filter is neither a pass nor a fail, so it must not sit in a
+   * list headed "what it missed".
+   */
+  unmeasured: RuleKey[];
+  /**
+   * True when no enabled filter came back `fail`.
+   *
+   * ## An unmeasured filter does not stop a name matching
+   *
+   * This is the rule that changed, and it is worth being exact about what it
+   * costs. Before, `unknown` excluded a name exactly as `fail` did — so on a
+   * morning when the chain provider answered for forty names out of five
+   * hundred, every one of the other four hundred and sixty "failed" the gamma
+   * filter and nothing matched. That is a page reporting the request budget as
+   * if it were a fact about the market.
+   *
+   * So a filter nobody could test no longer counts against the name. What it
+   * costs is that "matches every filter in force" now means *matches every
+   * filter that could be tested*, which is a weaker claim — and because it is
+   * weaker, it is never left implicit: the row lists its unmeasured filters
+   * beside its matched ones, its badges stay grey rather than turning green,
+   * and the count in the header is stated with the coverage behind it.
+   */
   passes: boolean;
-  /** Phrase naming what stopped it. Empty when nothing did. */
+  /** Phrase naming what it failed. Empty when nothing did. */
   failingLabel: string;
+  /** Phrase naming what could not be tested. Empty when everything could. */
+  unmeasuredLabel: string;
   /** Set when an upcoming report removes it at the reader's buffer. */
   earningsExcluded: boolean;
 }
@@ -675,7 +703,10 @@ export function scoreAndJudge(
     .map((row) => {
       const verdicts = ruleVerdicts(row, settings, market);
       const failing = RULE_KEYS.filter(
-        (key) => settings.enabled[key] && verdicts[key].state !== 'pass',
+        (key) => settings.enabled[key] && verdicts[key].state === 'fail',
+      );
+      const unmeasured = RULE_KEYS.filter(
+        (key) => settings.enabled[key] && verdicts[key].state === 'unknown',
       );
 
       return {
@@ -683,8 +714,12 @@ export function scoreAndJudge(
         score: scoreRow(row, market, weights),
         verdicts,
         failing,
+        unmeasured,
         passes: failing.length === 0,
         failingLabel: failing
+          .map((key) => `${RULE_LABEL[key]} (${verdicts[key].detail})`)
+          .join('; '),
+        unmeasuredLabel: unmeasured
           .map((key) => `${RULE_LABEL[key]} (${verdicts[key].detail})`)
           .join('; '),
         earningsExcluded: excludedByEarnings(row, settings.earningsBufferDays),
@@ -723,6 +758,16 @@ export interface FunnelStage {
   key: 'scanned' | RuleKey | 'earnings';
   label: string;
   count: number;
+  /**
+   * Of `count`, how many reached this stage without the filter being testable
+   * on them.
+   *
+   * Reported separately and never folded in. "412 cleared the gamma filter" is
+   * a very different statement when 380 of those had no chain to test, and the
+   * strip says so rather than letting the number carry an implication it has
+   * not earned.
+   */
+  untested: number;
   /** Names that reached this stage, for the click-to-filter. */
   symbols: string[];
 }
@@ -748,6 +793,7 @@ export function buildFunnel(
       key: 'scanned',
       label: 'scanned',
       count: scored.length,
+      untested: 0,
       symbols: scored.map((s) => s.row.symbol),
     },
   ];
@@ -756,11 +802,19 @@ export function buildFunnel(
 
   for (const key of FUNNEL_ORDER) {
     if (!settings.enabled[key]) continue;
-    alive = alive.filter((s) => s.verdicts[key].state === 'pass');
+    /*
+     * `!== 'fail'` and not `=== 'pass'`. A name whose chain nobody pulled has
+     * not failed the gamma stage, and dropping it here would put the request
+     * budget into the funnel as if it were a property of the market — which is
+     * exactly what used to empty this page. The stage label says how many of
+     * the survivors were untested.
+     */
+    alive = alive.filter((s) => s.verdicts[key].state !== 'fail');
     stages.push({
       key,
       label: FUNNEL_STAGE_LABEL[key](settings),
       count: alive.length,
+      untested: alive.filter((s) => s.verdicts[key].state === 'unknown').length,
       symbols: alive.map((s) => s.row.symbol),
     });
   }
@@ -773,6 +827,7 @@ export function buildFunnel(
     key: 'earnings',
     label: `clear of earnings (${settings.earningsBufferDays}d)`,
     count: alive.length,
+    untested: alive.filter((s) => s.row.earnings.state === 'unknown').length,
     symbols: alive.map((s) => s.row.symbol),
   });
 

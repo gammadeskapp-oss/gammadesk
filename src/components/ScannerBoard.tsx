@@ -251,6 +251,15 @@ function FunnelStrip({
             >
               <span className="font-bold tabular-nums">{stage.count}</span>{' '}
               <span className="text-term-faint">{stage.label}</span>
+              {stage.untested > 0 && (
+                <span
+                  className="text-term-faint/80"
+                  title={`${stage.untested} of these could not be tested against this filter at all — no reading was available. They are not counted as having cleared it.`}
+                >
+                  {' '}
+                  ({stage.untested} untested)
+                </span>
+              )}
             </button>
           </span>
         ))}
@@ -267,8 +276,11 @@ function FunnelStrip({
       <p className="mt-2 text-2xs leading-relaxed text-term-faint">
         Each count is the names that cleared that step <em>and every step
         before it</em>, so the numbers only ever go down and you can check the
-        arithmetic by eye. Click one to mark, in the table below, which of the
-        twenty rows reached it. It marks rather than filters: a stage that
+        arithmetic by eye. A name that could not be tested against a filter at
+        all &mdash; no chain pulled for it, no history to measure &mdash; stays
+        in the count and is reported beside it as untested, because a filter
+        cannot fail a name it never read. Click a step to mark, in the table
+        below, which of the twenty rows reached it. It marks rather than filters: a stage that
         nothing reaches is a number worth reading, and hiding the rows it
         excluded would leave you nothing to compare it against.
       </p>
@@ -427,10 +439,14 @@ function componentDetail(key: ScoreKey, scored: ScoredRow): string {
 /**
  * One component's 0-100 on one row.
  *
- * A dash for an unmeasured component, in the same grey the unknown badges use
- * and never a zero. The distinction is the one this whole page is built
- * around: most of the index has no dealer-positioning reading at all, and
- * printing 0 for it would read as "measured, and bad".
+ * An unmeasured component says "no data" in grey. Not a zero, and not a dash
+ * either — a dash is ambiguous enough that a reader scanning a column of
+ * numbers will read it as "nothing there", which is one short step from
+ * "nothing good there". The words are unambiguous, and the tooltip says which
+ * reading was missing and why.
+ *
+ * It costs the component nothing: the blend renormalises over what was
+ * measured, and a filter cannot fail a name on a reading nobody took.
  */
 function ComponentCell({
   component,
@@ -448,7 +464,11 @@ function ComponentCell({
         value === null ? 'text-term-faint' : 'text-term-dim'
       }`}
     >
-      {value === null ? '—' : value.toFixed(0)}
+      {value === null ? (
+        <span className="text-2xs italic tracking-tight">no data</span>
+      ) : (
+        value.toFixed(0)
+      )}
       <span className="sr-only">
         {' '}
         {SCORE_LABEL[component]}: {value === null ? 'not measured' : value.toFixed(0)}. {detail}
@@ -489,7 +509,16 @@ function ResultRow({
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { row, verdicts, score, passes, failingLabel, earningsExcluded } = scored;
+  const {
+    row,
+    verdicts,
+    score,
+    failing,
+    failingLabel,
+    unmeasured,
+    unmeasuredLabel,
+    earningsExcluded,
+  } = scored;
   const m = row.metrics;
 
   /*
@@ -497,8 +526,13 @@ function ResultRow({
    * ranking put here, and the reader has to be able to see both facts at once
    * — which is exactly what the old page could not do, because a failing name
    * simply was not on it.
+   *
+   * Untested is deliberately not dimmed. Dimming is this table's way of saying
+   * "this one missed something", and a name whose chain nobody pulled has
+   * missed nothing — dimming it would render the request budget as a verdict
+   * on the stock, in the most literal way available: by making it fainter.
    */
-  const dimmed = !passes || earningsExcluded;
+  const dimmed = failing.length > 0 || earningsExcluded;
 
   const check = async () => {
     setChecking(true);
@@ -584,10 +618,31 @@ function ResultRow({
               Reports in {row.earnings.daysAway} days ({row.earnings.dateIso}) —
               inside your {settings.earningsBufferDays}-day buffer.
             </span>
-          ) : passes ? (
-            <span className="text-bull">Matches every filter in force.</span>
           ) : (
-            failingLabel
+            <>
+              {/*
+                Failed and untested are two different columns' worth of
+                meaning crammed into one cell, so they are rendered as two
+                separate sentences in two different colours. A name that
+                missed nothing but could not be tested on three filters is
+                not a match in the same sense as one that passed all three,
+                and the cell has to be able to say which.
+              */}
+              {failing.length > 0 && <span className="text-bear">{failingLabel}</span>}
+              {failing.length === 0 && unmeasured.length === 0 && (
+                <span className="text-bull">Matches every filter in force.</span>
+              )}
+              {failing.length === 0 && unmeasured.length > 0 && (
+                <span className="text-bull">
+                  Missed nothing it could be tested on.
+                </span>
+              )}
+              {unmeasured.length > 0 && (
+                <span className="block text-term-faint">
+                  Not tested: {unmeasuredLabel}
+                </span>
+              )}
+            </>
           )}
         </td>
         <td className="border-b border-term-line/60 px-2 py-2 align-top">
@@ -950,6 +1005,26 @@ export function ScannerBoard({
           paramsFromSettings(settings) ? `?${paramsFromSettings(settings)}` : ''
         }`;
 
+  /*
+   * Counted from the rows on screen rather than read off a stored number.
+   *
+   * The stored `coverage` block says what the run measured; this counts what
+   * the document actually contains. They should agree, and when a document
+   * predates the coverage block there is still a real number here rather than
+   * a blank — but it is always the rows, never an assumption, that decide what
+   * the header claims.
+   */
+  const gammaCoverage = useMemo(() => {
+    const withGamma = scan.rows.filter((row) => row.regime !== null).length;
+    return {
+      withGamma,
+      partial: withGamma < scan.rows.length,
+      sourceNote:
+        scan.coverage?.gammaSource ??
+        'The chain source for this run was not recorded.',
+    };
+  }, [scan.rows, scan.coverage]);
+
   const gammaStamp = scan.gammaDate
     ? `gamma as of ${gammaTimeEt} ET on ${scan.gammaDate}`
     : 'no same-day gamma';
@@ -980,13 +1055,36 @@ export function ScannerBoard({
       </div>
 
       <div className="panel px-3.5 py-3">
+        {/*
+          ## The header states coverage, not intent
+          
+          "The S&P 500, scored" is a claim about what this page meant to do.
+          The three numbers below are what it did: how many names were scored,
+          how many of those actually had a dealer-positioning reading, and how
+          many match the filters in force. The middle one is the one that used
+          to be invisible — the chain provider decided it, it moved between 40
+          and 500 depending on which provider served the morning, and nothing
+          on screen said so. It is never rounded and never inferred.
+        */}
         <p className="text-xs text-term-text">
           <span className="font-bold">
-            Scanned at {scannedAtEt} ET · {scan.scored} names scored ·{' '}
-            {matchingCount} match every filter in force
+            Scanned at {scannedAtEt} ET · {scan.scored} scored ·{' '}
+            <span className={gammaCoverage.partial ? 'text-flip' : undefined}>
+              {gammaCoverage.withGamma} with gamma data
+            </span>{' '}
+            · {matchingCount} match every filter in force
           </span>{' '}
           <span className="text-term-dim">· {gammaStamp}</span>
         </p>
+        {gammaCoverage.partial && (
+          <p className="mt-1 text-2xs leading-relaxed text-flip/90">
+            {scan.scored - gammaCoverage.withGamma} of the {scan.scored} scored
+            names carry no dealer-positioning reading, so their gamma and
+            option-liquidity components are unmeasured — left out of the blend
+            rather than scored zero, and never counted against them when those
+            filters are switched on. {gammaCoverage.sourceNote}
+          </p>
+        )}
         {scannedAtEt !== scan.scheduledEt && (
           <p className="mt-1 text-2xs text-flip">
             Scheduled for {scan.scheduledEt} ET. It ran at {scannedAtEt}, so the

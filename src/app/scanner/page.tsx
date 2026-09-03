@@ -31,9 +31,26 @@ export default async function ScannerPage() {
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+        {/*
+          ## The subtitle names the run, not the ambition
+
+          It read "the S&P 500 scored 0-100" while the line below it said
+          thirty names were scored. Both were rendered from the same page and
+          they contradicted each other — and the one that was wrong was the one
+          in larger type at the top. The static description is now only used
+          before the first scan of the day exists, when there is no real number
+          to state.
+        */}
         <PageBar
           title="Scanner"
-          description={PAGE_DESCRIPTIONS['/scanner']}
+          description={
+            scan
+              ? `${scan.scored} S&P 500 names scored 0-100 and ranked this morning` +
+                (scan.universe > scan.scored
+                  ? `, out of ${scan.universe} in the index — the rest had no usable price history or sit below the ranking engine's turnover floor.`
+                  : ' — every name in the index.')
+              : PAGE_DESCRIPTIONS['/scanner']
+          }
           meta={
             scan
               ? `Run ${formatAsOf(new Date(scan.scannedAt))}`
@@ -175,8 +192,10 @@ export default async function ScannerPage() {
             <span className="text-term-dim">
               One score, seven components, the whole index.{' '}
             </span>
-            Every scoreable name in the S&amp;P 500 gets a 0&ndash;100
-            composite: relative strength (counted double), trend, volume,
+            Every name the relative-strength engine can rank &mdash;{' '}
+            {scan ? scan.scored : 'all of them'} this morning, and the header
+            above always states the real figure rather than the size of the
+            index &mdash; gets a 0&ndash;100 composite: relative strength (counted double), trend, volume,
             distance above its daily VWAP, its own dealer gamma, the
             market&rsquo;s dealer gamma, and how well its options actually
             trade. The top {SCANNER_TOP_N} by that score are always on the page,
@@ -252,6 +271,24 @@ export default async function ScannerPage() {
             ungraded reads{' '}
             <span className="text-term-dim">contract not checked</span> in grey
             &mdash; unknown, not failed.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              A filter cannot fail a name it could not read.{' '}
+            </span>
+            Dealer positioning comes from an option chain, and until recently
+            chains were rationed &mdash; the free source answers about sixty per
+            morning, so most of the index had no gamma reading and every one of
+            those names &ldquo;failed&rdquo; the gamma and market filters. That
+            is the request budget being reported as a fact about the market.
+            Now an untestable filter counts neither way: the row says{' '}
+            <span className="text-term-dim">not tested</span> beside the
+            filters in question, its component column says{' '}
+            <span className="text-term-dim">no data</span>, and the funnel
+            reports how many of the survivors at each step were untested rather
+            than folding them in. The header states how many of the scored
+            names actually had gamma, every morning, whatever that number is.
           </p>
 
           <p className="mt-2">

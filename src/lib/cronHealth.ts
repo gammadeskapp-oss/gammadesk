@@ -162,7 +162,9 @@ export async function readCronHealth(now: Date = new Date()): Promise<CronHealth
       lastSuccess: gamma?.refreshedAt ?? null,
       staleAfterHours: WEEKEND_SLACK_HOURS,
       detail: gamma
-        ? `${Object.keys(gamma.symbols).length} symbols on ${gamma.date}`
+        ? `${Object.keys(gamma.symbols).length} symbols on ${gamma.date} — ${
+            gamma.source ?? 'chain source not recorded for this run'
+          }`
         : null,
     },
     {

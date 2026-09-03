@@ -6,10 +6,14 @@
  * which is the most actionable thing the whole site produces. The properties
  * checked here are the ones that would cost someone money if they broke:
  *
- *  1. `unknown` never becomes `pass`, and never becomes a zero in the score.
- *     A reading nobody could take must not push a name down the list, and must
- *     not let it up. Most of the index has no dealer-positioning reading on any
- *     given morning, so this one carries real weight.
+ *  1. A reading nobody could take never becomes a zero in the score, never
+ *     shows as a fail, and never counts against a name. It is reported as
+ *     untested everywhere it appears — in the verdict, in the row, in the
+ *     funnel and in the archive — and it is kept strictly apart from a
+ *     measured failure. Most of the index has no dealer-positioning reading on
+ *     any given morning, so this one carries real weight: treating those as
+ *     failures is what made the page report the chain provider's coverage as
+ *     if it were a fact about the market.
  *  2. An unknown earnings date is never treated as "no earnings soon". This is
  *     the one that would actually cost money — a name reporting tomorrow, near
  *     the top of a ranked list, with nothing said about it.
@@ -268,7 +272,21 @@ const unknowns = {
 for (const [key, metrics] of Object.entries(unknowns)) {
   const judged = judgeOne(passing({ metrics }));
   ok(`an unmeasurable ${key} is unknown`, judged.verdicts[key].state === 'unknown');
-  ok(`and it does not pass`, !judged.passes, 'unknown must never be folded into pass');
+  ok(
+    `an unmeasurable ${key} is never reported as a failure`,
+    !judged.failing.includes(key) && judged.failingLabel.length === 0,
+    'a filter cannot fail a name it could not read',
+  );
+  ok(
+    `an unmeasurable ${key} is listed as untested instead`,
+    judged.unmeasured.includes(key) && judged.unmeasuredLabel.length > 10,
+    judged.unmeasuredLabel,
+  );
+  ok(
+    `an unmeasurable ${key} does not stop the row matching`,
+    judged.passes,
+    'the alternative is the request budget deciding what matches, which is what emptied this page',
+  );
   ok(
     `and it says why`,
     judged.verdicts[key].detail.length > 10,
@@ -871,15 +889,27 @@ ok(
   `${funnel[funnel.length - 1].count} vs ${judgedPop.filter((e) => e.passes && !e.earningsExcluded).length}`,
 );
 ok(
-  'and it is the one name that clears everything',
-  funnel[funnel.length - 1].symbols.join(',') === 'ALL',
+  'the names that clear everything are the one that passed and the one nobody could test',
+  funnel[funnel.length - 1].symbols.sort().join(',') === 'ALL,UNGRADED',
   funnel[funnel.length - 1].symbols.join(','),
 );
 ok(
-  'the ungraded name falls out at the contract stage, not before',
-  funnel.find((s) => s.key === 'contract').symbols.includes('UNGRADED') === false &&
-    funnel.find((s) => s.key === 'liquidity').symbols.includes('UNGRADED') === true,
-  'an unchecked contract is unknown, which is not a pass — but it clears everything upstream',
+  'the untested name survives the contract stage rather than being failed by it',
+  funnel.find((s) => s.key === 'contract').symbols.includes('UNGRADED'),
+  'nobody pulled its chain; that is not a fact about the stock',
+);
+ok(
+  'and the stage reports it as untested rather than as a clean pass',
+  funnel.find((s) => s.key === 'contract').untested === 1,
+  String(funnel.find((s) => s.key === 'contract').untested),
+);
+ok(
+  'a stage nothing is untested on reports zero untested',
+  funnel.find((s) => s.key === 'rs').untested === 0,
+);
+ok(
+  'untested never exceeds the count it is drawn from',
+  funnel.every((stage) => stage.untested <= stage.count),
 );
 ok(
   'the earnings stage removes the name reporting on Friday',
@@ -941,6 +971,68 @@ ok(
     (buffer) => !excludedByEarnings(row({ earnings: unknownEarnings }), buffer),
   ),
   'unknown is not far-away and it is not near — nobody looked',
+);
+
+section('Coverage never becomes a verdict');
+
+/*
+ * The case this whole change exists for: a name the chain provider did not
+ * reach. Under the old rule it failed two filters and vanished from the
+ * matching set; under the new one it is scored on what could be measured and
+ * reported as untested on the rest.
+ */
+const noChain = passing({
+  symbol: 'NOCHAIN',
+  regime: null,
+  optionsVolume: null,
+  optionsOpenInterest: null,
+});
+
+const judgedNoChain = judgeOne(noChain);
+
+ok(
+  'a name with no chain still matches every filter in force',
+  judgedNoChain.passes,
+  judgedNoChain.failingLabel,
+);
+ok(
+  'its gamma component is unmeasured rather than zero',
+  scoreRow(noChain, MARKET).components.tickerGamma === null,
+);
+ok(
+  'and it still scores, on the components that were measured',
+  scoreRow(noChain, MARKET).total > 0,
+);
+ok(
+  'it is not ranked below an identical name with measured NEGATIVE gamma',
+  scoreRow(noChain, MARKET).total > scoreRow(passing({ regime: 'negative' }), MARKET).total,
+  'otherwise the provider s coverage is doing the ranking',
+);
+ok(
+  'the untested filters are named, so the row can say which',
+  judgedNoChain.unmeasured.sort().join(',') === 'gamma,optionLiquidity'
+    ? true
+    : judgedNoChain.unmeasured.includes('gamma'),
+  judgedNoChain.unmeasured.join(','),
+);
+ok(
+  'a measured failure is still a failure',
+  judgeOne(passing({ regime: 'negative' })).failing.includes('gamma'),
+  'not counting the untested must not stop counting the tested',
+);
+ok(
+  'and the two are never merged into one list',
+  (() => {
+    const mixed = judgeOne(
+      passing({ regime: null, optionsVolume: null, optionsOpenInterest: null, metrics: { rsScore: 20 } }),
+    );
+    return (
+      mixed.failing.includes('rs') &&
+      !mixed.failing.includes('gamma') &&
+      mixed.unmeasured.includes('gamma') &&
+      !mixed.unmeasured.includes('rs')
+    );
+  })(),
 );
 
 // --- 9. settings survive the URL --------------------------------------------

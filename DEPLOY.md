@@ -222,6 +222,46 @@ just is not delivered anywhere.
 **Deployments** → **…** on the newest one → **Redeploy**. Environment variables
 only take effect on a new build.
 
+### The scanner's chains come from Polygon when the plan allows it
+
+`/api/scanner/gamma` builds dealer positioning for the scanner. Cboe's free
+feed answers roughly **sixty chains per window** and then refuses, which is why
+that job used to request chains only for the top of the relative-strength
+ranking — and why two of the scanner's seven scoring components were available
+for about fifty names and missing for the other four hundred and fifty.
+
+On a paid Polygon **options** plan (Options Starter and up) the snapshot
+endpoint is included, with open interest and implied volatility, unlimited API
+calls, and a fifteen-minute delay. The delay does not matter here: gamma
+exposure is built from open interest, which publishes once a day after the
+close. So with `POLYGON_API_KEY` set the job asks for the whole ranked universe
+and the shortlisting is gone.
+
+| Variable | Default | What it does |
+|----------|---------|--------------|
+| `GAMMADESK_SCAN_GAMMA_SOURCE` | `auto` | `auto` probes Polygon's entitlement and falls back to Cboe; `polygon` or `cboe` pins one. |
+| `GAMMADESK_POLYGON_RPM` | `0` | Requests per minute. `0` means the plan is unlimited and the limiter is skipped. Set `5` for the free plan. |
+| `GAMMADESK_POLYGON_MAX_PAGES` | `12` | Snapshot pages per chain. Four was the free plan's whole minute of quota. |
+| `GAMMADESK_SCAN_POLYGON_BUDGET` | `600` | Chains one run may request on the Polygon path. A wall-clock backstop, not a quota. |
+| `GAMMADESK_SCAN_POLYGON_CONCURRENCY` | `12` | Chains in flight at once on the Polygon path. |
+
+**Nothing fails over silently.** `auto` asks the key what it is entitled to
+before spending anything, and the decision is printed in the job's log line
+(`[scanner/gamma] source=… — reason`), stored on the document, returned by the
+endpoint, and shown on /scanner. Falling back to Cboe means going from five
+hundred chains to sixty, and a reader comparing two mornings has to be able to
+see that it happened.
+
+Check the entitlement without spending a run:
+
+```
+curl "https://your-site/api/scanner/gamma?token=$CRON_SECRET&dry=1&format=text"
+```
+
+The two cron lines for this job are **not** a chunking workaround — they are the
+summer/winter pair every ET-precise job here has, and exactly one of them passes
+the New York clock check. Leave both.
+
 ### What happens next
 
 `vercel.json` schedules the jobs:

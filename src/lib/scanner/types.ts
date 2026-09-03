@@ -358,6 +358,16 @@ export type LiquidityTier = 'HIGH' | 'MEDIUM' | 'LOW';
 /** What the 8:30 job stored for one symbol. */
 export interface GammaEntry {
   symbol: string;
+  /**
+   * Which chain provider answered for this symbol.
+   *
+   * Per symbol rather than per run, because the fallback is per symbol: one
+   * ticker Polygon has no chain for costs that ticker a Cboe request and
+   * leaves the other five hundred where they were. Optional so a document
+   * stored before the Polygon path reads back as unattributed rather than
+   * being claimed for whichever provider happens to run today.
+   */
+  source?: string;
   /** `positive` = dealers dampen moves, `negative` = they amplify them. */
   regime: 'positive' | 'negative';
   netGex: number;
@@ -377,6 +387,17 @@ export interface StoredGamma {
   /** New York date this refresh belongs to. */
   date: string;
   refreshedAt: string;
+  /**
+   * Where the chains came from, in a sentence with the counts in it.
+   *
+   * Stored rather than derived at read time, because the provider can change
+   * between runs and a page describing today's document with today's
+   * configuration would misattribute every older one. Optional for documents
+   * written before this existed; those render as "not recorded".
+   */
+  source?: string;
+  /** How many chains each provider actually served. */
+  byProvider?: { polygon: number; cboe: number };
   /** Symbol to reading. */
   symbols: Record<string, GammaEntry>;
   failures: Array<{ symbol: string; reason: string }>;
@@ -510,6 +531,55 @@ export interface ScanRow {
  * the old document held three bar-series summaries per candidate and covered
  * twenty-seven names.
  */
+/**
+ * Where the universe went, counted at every step of the run.
+ *
+ * ## Why this is stored rather than logged and forgotten
+ *
+ * The question "why is this page showing thirty names" has exactly one honest
+ * answer and it is arithmetic: this many were in the index, this many had
+ * price history, this many were ranked, this many were scored, this many had a
+ * chain. Without the counts the answer is a guess, and the guess is usually
+ * wrong — the request budget, the ranking floor and the nightly price refresh
+ * all narrow the list at different points and all of them look identical from
+ * the outside.
+ *
+ * So the run counts itself, stores the counts, prints them as one log line,
+ * and the page renders the two that matter in its header. A number that
+ * shrinks is then attributable rather than mysterious.
+ */
+export interface ScanCoverage {
+  /** Names in the S&P 500 membership list this run started from. */
+  universe: number;
+  /** Names the relative-strength engine could rank. These enter the scoring. */
+  entered: number;
+  /** Names that came out of scoring with a row. Equal to `entered` or it is a bug. */
+  exited: number;
+  /**
+   * Ranked names that were dropped for having no price at all.
+   *
+   * The only exclusion the scoring step performs. Anything else missing —
+   * averages, VWAP, volume history, a chain — leaves the component unmeasured
+   * and the name on the list.
+   */
+  droppedNoPrice: string[];
+  /** Names the relative-strength engine could not rank, and why. */
+  notRanked: {
+    /** No usable stored price history yet — the nightly job has not reached them. */
+    pending: number;
+    /** Below the ranking engine's own turnover floor, which fixes the pool. */
+    illiquid: number;
+  };
+  /** How many scored names carry each reading. The rest are unmeasured. */
+  withGamma: number;
+  withOptionLiquidity: number;
+  withTrend: number;
+  withVwap: number;
+  withVolume: number;
+  /** Which chain source actually served the gamma this run read. */
+  gammaSource: string;
+}
+
 export interface ScanResult {
   /** New York date the scan belongs to. */
   date: string;
@@ -520,6 +590,14 @@ export interface ScanResult {
   rows: ScanRow[];
   /** Names in the S&P 500 universe considered. */
   universe: number;
+  /**
+   * The full count of what happened to the universe. See `ScanCoverage`.
+   *
+   * Optional only so that a document stored by an older build still reads
+   * back; the page falls back to counting the rows it can see and says the
+   * coverage was not recorded, rather than printing a zero it invented.
+   */
+  coverage?: ScanCoverage;
   /** Names that had enough stored history to be scored at all. */
   scored: number;
   /**

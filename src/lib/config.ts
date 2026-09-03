@@ -210,6 +210,43 @@ export const config = {
     };
   },
   /**
+   * Polygon's options entitlement, and what this app may spend against it.
+   *
+   * The adapter was written against the free plan, where the options snapshot
+   * is not included at all. On the Options Starter plan it is, with unlimited
+   * calls and a fifteen-minute delay — which is why the scanner can now ask
+   * for the whole index instead of the few dozen chains a free Cboe window
+   * allows. The delay does not matter for this use: gamma exposure is built
+   * from open interest, and open interest publishes once a day after the
+   * close.
+   *
+   * `rpm` is the per-minute cap the limiter applies. Zero means "do not
+   * throttle", which is the Starter plan's actual entitlement; set
+   * `GAMMADESK_POLYGON_RPM=5` to put the free-plan limiter back.
+   */
+  get polygonOptions() {
+    return {
+      rpm: Math.max(0, num(process.env.GAMMADESK_POLYGON_RPM, 0)),
+      /** Snapshot pages per chain. Four was the free plan's whole minute. */
+      maxPages: Math.max(1, num(process.env.GAMMADESK_POLYGON_MAX_PAGES, 12)),
+    };
+  },
+
+  /**
+   * Which chain source the scanner's gamma job asks first.
+   *
+   * `auto` prefers Polygon when a key is configured and falls back to Cboe per
+   * symbol; `polygon` and `cboe` pin one. Whichever runs, the run says so in
+   * its log line, in the stored document, and on the page — a silent failover
+   * would leave a reader looking at a number whose provenance changed
+   * underneath them.
+   */
+  get scanGammaSource(): 'auto' | 'polygon' | 'cboe' {
+    const raw = (process.env.GAMMADESK_SCAN_GAMMA_SOURCE ?? 'auto').trim().toLowerCase();
+    return raw === 'polygon' || raw === 'cboe' ? raw : 'auto';
+  },
+
+  /**
    * The scanner's track record — /trackrecord.
    *
    * Two jobs, both after the close, both scheduled to the New York clock via
@@ -293,6 +330,32 @@ export const config = {
       gammaRefreshBudget: Math.min(
         60,
         Math.max(5, num(process.env.GAMMADESK_SCAN_GAMMA_BUDGET, 55)),
+      ),
+
+      /**
+       * Chains the gamma job may request when Polygon is serving.
+       *
+       * Not a quota — the paid options plan has none — but a wall-clock
+       * backstop. The constraint that replaces the old sixty-chain ceiling is
+       * the platform's five-minute function limit, so this is set to cover the
+       * whole ranked universe with headroom and the run still stops cleanly
+       * and stores what it has if it gets there first.
+       */
+      polygonGammaBudget: Math.max(
+        60,
+        num(process.env.GAMMADESK_SCAN_POLYGON_BUDGET, 600),
+      ),
+
+      /**
+       * Chains in flight at once against Polygon.
+       *
+       * Higher than the Cboe path's six because there is no per-minute quota
+       * to trip and the binding constraint is wall-clock: five hundred chains
+       * at six in flight does not finish inside the function ceiling.
+       */
+      polygonConcurrency: Math.max(
+        1,
+        num(process.env.GAMMADESK_SCAN_POLYGON_CONCURRENCY, 12),
       ),
 
       /** Trend EMA the price must sit above for filter 7. */
