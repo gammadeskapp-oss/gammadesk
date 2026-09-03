@@ -210,6 +210,24 @@ export const config = {
     };
   },
   /**
+   * The scanner's track record — /trackrecord.
+   *
+   * Two jobs, both after the close, both scheduled to the New York clock via
+   * `checkSchedule` rather than trusting the UTC cron line — see
+   * `lib/scanner/schedule.ts`. Fifteen minutes past the bell is late enough
+   * that the closing bar has published and early enough that it is still the
+   * same session.
+   */
+  get trackRecord() {
+    return {
+      /** When the day's top picks are written down. */
+      logTimeEt: (process.env.GAMMADESK_TRACK_LOG_TIME_ET ?? '16:15').trim(),
+      /** When forward returns are filled in for every past pick. */
+      settleTimeEt: (process.env.GAMMADESK_TRACK_SETTLE_TIME_ET ?? '16:20').trim(),
+    };
+  },
+
+  /**
    * The morning scanner — /scanner.
    *
    * Everything the scan can be argued about lives here, because most of it

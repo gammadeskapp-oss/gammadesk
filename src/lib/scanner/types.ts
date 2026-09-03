@@ -30,57 +30,51 @@ export const TIMEFRAME_LABEL: Record<ScanTimeframe, string> = {
 export type FilterState = 'pass' | 'fail' | 'unknown';
 
 /**
- * The five rules the scanner scores against.
+ * The eight filters a reader can narrow the list with.
  *
- * ## They rank now; they do not gate
+ * ## Filters, not gates, and not the score either
  *
- * These were five hard ANDed gates and the scan printed whatever survived all
- * five. Twice in a row that was zero names out of 503 — and an empty page
- * cannot even tell you which rule ate the list. So the five are scored and
- * weighted (`score.ts`), the list is always ordered, and the top of it is
- * always rendered. A name that fails a rule still fails it, in red, dimmed,
- * with the number that failed it printed beside it. Failing just no longer
- * makes a name invisible.
+ * Two separate things happen to a name on this page and keeping them apart is
+ * the whole design. `score.ts` blends seven *components* into a 0-100 number
+ * that decides the ordering; these eight filters then decide which of the
+ * ordered names are highlighted as matching what the reader asked for. The
+ * table renders the top `SCANNER_TOP_N` by score either way, so a filter can
+ * narrow the highlighted set to nothing and the page still says something.
  *
- * ## Market regime is gone, and contract quality took its place
+ * That is why "empty" is no longer reachable. These were ANDed gates once, and
+ * twice in a row they produced zero names out of 503 — a page that cannot even
+ * tell you which rule ate the list.
  *
- * The regime was the fifth key. It is one *market-wide* condition, so when it
- * failed it failed identically for every name in the universe and the page
- * went blank for a reason that had nothing to do with any of them. It is a
- * banner now — see `MARKET_REGIME_NOTE` — with one optional, default-off
- * toggle for a reader who wants the old behaviour.
+ * ## Defaults are deliberately loose
  *
- * Contract quality is the fifth rule in its place. It was always a hard
- * requirement, it was simply resolved somewhere the rule list did not show;
- * naming it makes the thing that most often stops a good stock from being a
- * tradable idea visible in the same row as the reasons it looked good.
+ * `DEFAULT_FILTERS` switches on relative strength (at 80) and the turnover
+ * floor, and nothing else. Everything else is off, so opening the page shows
+ * the ranking rather than one particular opinion about it, and every filter a
+ * reader switches on is visibly their own choice.
  *
- * ## What was removed earlier, and why
+ * ## The market-wide one is a filter now, not a hidden page-emptier
  *
- * There were seven, across three timeframes, with a strictness toggle
- * governing how many had to agree. Three are gone:
+ * `spy` is SPY's own dealer positioning: one market-wide condition, identical
+ * for all 503 names. As a *gate* that was a category error that blanked the
+ * page on every volatile morning. As a filter over a list that always renders,
+ * it costs nothing — it dims rows rather than deleting them, and the banner
+ * still states the regime once in plain English.
  *
- *  - **VWAP** left the scan entirely. Anchored on a session five minutes old
- *    it was a coin toss, and on the daily series it was very nearly the
- *    typical price. It survives on /decision, where the reader is looking at
- *    one name on a live chart and can see what it is doing.
- *  - **Nadaraya-Watson** is a line on the result chart now and nothing else.
- *    It already ranked rather than gated; ranking on it as well was giving a
- *    band-position score authority over the order of the list that the
- *    reading does not earn.
- *  - **Per-stock gamma** stopped gating because the single-name dealer-sign
- *    assumption is the weakest thing this app relies on. It shows as context
- *    text on the card, with that caveat attached, rather than silently
- *    removing names on the strength of an assumption.
+ * ## Contract quality filters but no longer scores
  *
- * The 200 EMA rule is the **daily** one only. "Above the 200-day average" is a
- * statement someone can check; "above the 200-period average on two of three
- * timeframes, at the current agreement setting" is not.
+ * Only the top names by score get a chain pulled, so making the grade a
+ * scoring component made the score depend on an ordering derived from the
+ * score. It is a filter and a caution instead: an ungraded contract is grey
+ * and unknown, it never pushes a name down the ranking, and the ranking no
+ * longer has to be computed twice.
  */
 export const RULE_KEYS = [
   'rs',
-  'ema',
+  'trend',
   'volume',
+  'vwap',
+  'gamma',
+  'spy',
   'liquidity',
   'contract',
 ] as const;
@@ -88,8 +82,11 @@ export type RuleKey = (typeof RULE_KEYS)[number];
 
 export const RULE_LABEL: Record<RuleKey, string> = {
   rs: 'Relative strength',
-  ema: '200-day average',
+  trend: 'Trend',
   volume: 'Volume',
+  vwap: 'Above daily VWAP',
+  gamma: 'Ticker gamma',
+  spy: 'Market gamma',
   liquidity: 'Liquidity',
   contract: 'Contract',
 };
@@ -97,8 +94,11 @@ export const RULE_LABEL: Record<RuleKey, string> = {
 /** Short form, for the badge row on a table line. */
 export const RULE_SHORT: Record<RuleKey, string> = {
   rs: 'RS',
-  ema: '200D',
+  trend: 'TRND',
   volume: 'VOL',
+  vwap: 'VWAP',
+  gamma: 'GEX',
+  spy: 'SPY',
   liquidity: 'LIQ',
   contract: 'OPT',
 };
@@ -106,19 +106,41 @@ export const RULE_SHORT: Record<RuleKey, string> = {
 /**
  * One sentence per filter, saying what passing it means in plain English.
  *
- * Rendered next to every gate, not tucked behind a tooltip. A pass/fail chip
+ * Rendered next to every filter, not tucked behind a tooltip. A pass/fail chip
  * labelled "SPY" tells a reader who already knows the rules that the rule
  * fired; it tells everyone else nothing at all, which on a page whose entire
  * output is a shortlist of stock tickers is the wrong way round.
  */
 export const RULE_EXPLANATION: Record<RuleKey, string> = {
   rs: 'Outperforming most of the market over the last few months.',
-  ema: 'Above the 200-day average — the long-term trend is up.',
-  volume: 'Trading more than its own normal volume, so the move has participation behind it.',
+  trend:
+    'Above its 50- and 200-day averages, with the 50 above the 200 and a strong last month against the rest of the index.',
+  volume:
+    'Trading more than its own normal volume, so the move has participation behind it.',
+  vwap:
+    'Above the price most of the last twenty sessions of shares actually changed hands at.',
+  gamma:
+    "This name's own dealer positioning reads positive, which tends to damp its moves rather than amplify them.",
+  spy: 'The wider market’s dealer positioning reads positive.',
   liquidity: 'Enough turnover to get in and out without moving the price.',
   contract:
     'There is an option in the chosen expiry and delta window that is actually worth trading.',
 };
+
+/**
+ * How many rows the page always renders.
+ *
+ * A fixed twenty, and it no longer tracks the number of names that had chains
+ * pulled. It used to: the contract grade was a scoring component, so only the
+ * graded names had a complete score and the table stopped where the grading
+ * did. The contract is a filter now and not a component, so every name in the
+ * index carries the same seven readings and the length of the list is a
+ * presentation decision rather than a data one.
+ *
+ * The table is padded to this length whatever the filters are set to. See
+ * `ScannerBoard`: filters narrow the list, they never empty it.
+ */
+export const SCANNER_TOP_N = 20;
 
 /** One filter's outcome, with the reading behind it. */
 export interface FilterVerdict {
@@ -388,9 +410,21 @@ export interface RowMetrics {
   rsScore: number;
   /** Position in the full universe ranking, 1 = strongest. */
   rsRank: number;
+  /**
+   * Percentile of the last month's return against the whole ranked universe,
+   * 0-100. One of the four inputs to the trend sub-score.
+   *
+   * Comes straight off the relative-strength engine, which is the only place
+   * it can honestly come from: a percentile is a property of the pool, so it
+   * cannot be computed from one name's numbers.
+   */
+  m1Percentile: number | null;
   /** Percent above (positive) or below (negative) the 200-day average. */
   pctAbove200: number | null;
   ema200: number | null;
+  /** Percent above or below the 50-day average. */
+  pctAbove50: number | null;
+  ema50: number | null;
   /** Percent above or below the 20-day average. Drives the extended flag. */
   pctAbove20: number | null;
   ema20: number | null;
@@ -402,6 +436,18 @@ export interface RowMetrics {
   volumeRatio: number | null;
   /** Average daily dollar turnover over the last 20 sessions. */
   avgDollarVolume: number;
+  /**
+   * The 20-session volume-weighted average price, and where the close sits
+   * against it.
+   *
+   * A *daily* VWAP, not the intraday session one — see `MovingAverages.vwap20`
+   * for why, and note that the page and the tooltip both say so. Calling a
+   * 20-day figure "VWAP" without qualification would let a reader think the
+   * scan knows where price is trading against today's session average, which
+   * it does not.
+   */
+  vwap20: number | null;
+  pctAboveVwap: number | null;
 }
 
 /** One ticker as the page renders it. */
@@ -424,6 +470,17 @@ export interface ScanRow {
   regime: 'positive' | 'negative' | null;
   netGex: number | null;
   magnets: Magnet[];
+  /**
+   * The whole-chain option volume and open interest behind `optionsTier`.
+   *
+   * Carried on the row rather than only summarised into a tier, because the
+   * option-liquidity component scores on a continuum and a three-value tier
+   * cannot express it. Null for most names: only the chains the morning gamma
+   * job pulled have these, which is the shortlist and not the index — an
+   * absent reading is dropped from the blend rather than scored zero.
+   */
+  optionsVolume: number | null;
+  optionsOpenInterest: number | null;
   /** When it next reports. See `EarningsInfo` — unknown is not "no earnings". */
   earnings: EarningsInfo;
   /** How far it has run from its 20-day average. A flag, not a rule. */

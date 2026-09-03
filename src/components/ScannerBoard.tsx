@@ -1,11 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { InfoTip } from '@/components/InfoTip';
 import { ScannerChart } from '@/components/ScannerChart';
 import { ScannerControls } from '@/components/ScannerControls';
 import { TickerLink } from '@/components/TickerLink';
 import { formatUsd } from '@/lib/format';
-import { buildWatchLine, whyItRanks } from '@/lib/scanner/evaluate';
+import { buildWatchLine, whyItMatched, whyItRanks } from '@/lib/scanner/evaluate';
 import {
   isDefault as settingsAreDefault,
   paramsFromSettings,
@@ -19,11 +20,17 @@ import { contractSummary } from '@/lib/scanner/optionQuality';
 import {
   buildFunnel,
   DEFAULT_FILTERS,
+  describeTrendParts,
   MARKET_REGIME_NOTE,
+  SCORE_EXPLANATION,
+  SCORE_KEYS,
+  SCORE_LABEL,
   SCORE_WEIGHTS,
   scoreAndJudge,
   type FilterSettings,
   type FunnelStage,
+  type MarketContext,
+  type ScoreKey,
   type ScoredRow,
 } from '@/lib/scanner/score';
 import {
@@ -32,6 +39,7 @@ import {
   RULE_KEYS,
   RULE_LABEL,
   RULE_SHORT,
+  SCANNER_TOP_N,
   type FilterState,
   type OptionQuality,
   type OptionQualityBadge,
@@ -92,12 +100,12 @@ const BADGE_CLASS: Record<OptionQualityBadge, string> = {
 };
 
 /**
- * One rule's state on one row.
+ * One filter's state on one row.
  *
  * The reading travels with the colour, in the `title` and in the screen-reader
  * text, because a red chip labelled `VOL` is a colour a reader has to take on
- * trust. A disabled rule keeps its chip and loses its colour: switching a rule
- * off must not be able to delete the number it was measuring.
+ * trust. A disabled filter keeps its chip and loses its colour: switching a
+ * filter off must not be able to delete the number it was measuring.
  */
 function RuleBadge({
   rule,
@@ -112,7 +120,7 @@ function RuleBadge({
 }) {
   return (
     <span
-      title={`${RULE_LABEL[rule]}: ${detail}${enabled ? '' : ' (rule switched off)'}`}
+      title={`${RULE_LABEL[rule]}: ${detail}${enabled ? '' : ' (filter switched off)'}`}
       className={`inline-flex items-center gap-1 whitespace-nowrap border px-1.5 py-0.5 text-2xs font-bold tracking-[0.06em] ${
         enabled ? STATE_CLASS[state] : 'border-term-line/60 text-term-faint/70'
       }`}
@@ -121,7 +129,7 @@ function RuleBadge({
       <span aria-hidden>{STATE_GLYPH[state]}</span>
       <span className="sr-only">
         {RULE_LABEL[rule]} {state}: {detail}
-        {enabled ? '' : ' — this rule is switched off'}
+        {enabled ? '' : ' — this filter is switched off'}
       </span>
     </span>
   );
@@ -134,6 +142,69 @@ function OptionBadge({ badge }: { badge: OptionQualityBadge }) {
     >
       {OPTION_BADGE_LABEL[badge]}
     </span>
+  );
+}
+
+// --- the sortable component headers ------------------------------------------
+
+/**
+ * One component column's heading, with the tooltip that says what it measures.
+ *
+ * The tooltip is the point, not decoration. "Trend" as a bare column heading
+ * over a number between 0 and 100 is a number a reader has to take on trust;
+ * the bubble says, in plain English, that it is four readings averaged and
+ * names all four. Every component column carries one, from `SCORE_EXPLANATION`
+ * — the same wording the list under the table uses, so the two cannot drift.
+ */
+function SortableHead({
+  component,
+  sort,
+  onSort,
+}: {
+  component: ScoreKey;
+  sort: { key: ScoreKey; dir: 'desc' | 'asc' } | null;
+  onSort: (next: { key: ScoreKey; dir: 'desc' | 'asc' } | null) => void;
+}) {
+  const active = sort?.key === component ? sort.dir : null;
+
+  return (
+    <th
+      scope="col"
+      aria-sort={
+        active === null ? 'none' : active === 'desc' ? 'descending' : 'ascending'
+      }
+      className={`${HEAD_CLASS} text-right`}
+    >
+      <span className="inline-flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() =>
+            onSort(
+              active === null
+                ? { key: component, dir: 'desc' }
+                : active === 'desc'
+                  ? { key: component, dir: 'asc' }
+                  : null,
+            )
+          }
+          title={`${SCORE_LABEL[component]} — ${SCORE_EXPLANATION[component]} Click to sort these twenty rows by it.`}
+          className={`uppercase tracking-[0.1em] transition-colors ${
+            active ? 'text-pos' : 'hover:text-term-text'
+          }`}
+        >
+          {SCORE_LABEL[component]}
+          <span aria-hidden>{active === 'desc' ? ' ↓' : active === 'asc' ? ' ↑' : ''}</span>
+        </button>
+        <InfoTip
+          tip={{
+            label: SCORE_LABEL[component],
+            plain: SCORE_EXPLANATION[component],
+            detail:
+              'Scored 0-100 and blended into the composite at the weight shown under the table. A dash means it could not be measured for this name — which is left out of the blend, never counted as zero.',
+          }}
+        />
+      </span>
+    </th>
   );
 }
 
@@ -196,8 +267,10 @@ function FunnelStrip({
       <p className="mt-2 text-2xs leading-relaxed text-term-faint">
         Each count is the names that cleared that step <em>and every step
         before it</em>, so the numbers only ever go down and you can check the
-        arithmetic by eye. Click one to see exactly which names reached it —
-        including, at the last stage, none of them.
+        arithmetic by eye. Click one to mark, in the table below, which of the
+        twenty rows reached it. It marks rather than filters: a stage that
+        nothing reaches is a number worth reading, and hiding the rows it
+        excluded would leave you nothing to compare it against.
       </p>
     </section>
   );
@@ -303,16 +376,95 @@ function OptionPanel({
   );
 }
 
+// --- the component columns ---------------------------------------------------
+
+/**
+ * Columns in the table, counted once.
+ *
+ * Rank, ticker, score, seven components, turnover, filters, what stopped it,
+ * and the detail button. Kept as a constant because three `colSpan`s depend on
+ * it and a table whose spans disagree with its header silently loses a column
+ * on some browsers and not others.
+ */
+const COLUMN_COUNT = 3 + SCORE_KEYS.length + 4;
+
+/**
+ * The reading behind one component, for its cell tooltip.
+ *
+ * Every number on this page has to be checkable without opening anything. The
+ * cell shows the 0-100 component; hovering it says what that component was
+ * measured from, in the same words the filter verdict uses, so the two cannot
+ * come apart.
+ */
+function componentDetail(key: ScoreKey, scored: ScoredRow): string {
+  const { row, verdicts, score } = scored;
+  const m = row.metrics;
+
+  switch (key) {
+    case 'rs':
+      return `${verdicts.rs.detail} — #${m.rsRank} in the index.`;
+    case 'trend':
+      return `${describeTrendParts(score.trend)}. ${
+        score.trend.measured === 4
+          ? 'All four readings were available.'
+          : `${score.trend.measured} of the four readings were available; the rest are left out rather than counted against it.`
+      }`;
+    case 'volume':
+      return verdicts.volume.detail;
+    case 'vwap':
+      return verdicts.vwap.detail;
+    case 'tickerGamma':
+      return verdicts.gamma.detail;
+    case 'spyGamma':
+      return verdicts.spy.detail;
+    case 'optionLiquidity':
+      return row.optionsVolume === null || row.optionsOpenInterest === null
+        ? 'No chain was pulled for this name this morning, so its option liquidity was not measured. That is unknown, not poor — it is left out of the score rather than counted as zero.'
+        : `${row.optionsVolume.toLocaleString('en-US')} contracts traded and ${row.optionsOpenInterest.toLocaleString('en-US')} open across the whole chain. The score is the weaker of the two.`;
+  }
+}
+
+/**
+ * One component's 0-100 on one row.
+ *
+ * A dash for an unmeasured component, in the same grey the unknown badges use
+ * and never a zero. The distinction is the one this whole page is built
+ * around: most of the index has no dealer-positioning reading at all, and
+ * printing 0 for it would read as "measured, and bad".
+ */
+function ComponentCell({
+  component,
+  value,
+  detail,
+}: {
+  component: ScoreKey;
+  value: number | null;
+  detail: string;
+}) {
+  return (
+    <td
+      title={`${SCORE_LABEL[component]}: ${detail}`}
+      className={`border-b border-term-line/60 px-2 py-2 text-right align-top tabular-nums ${
+        value === null ? 'text-term-faint' : 'text-term-dim'
+      }`}
+    >
+      {value === null ? '—' : value.toFixed(0)}
+      <span className="sr-only">
+        {' '}
+        {SCORE_LABEL[component]}: {value === null ? 'not measured' : value.toFixed(0)}. {detail}
+      </span>
+    </td>
+  );
+}
+
 // --- one row -----------------------------------------------------------------
 
-function num(value: number | null, digits = 0, suffix = ''): string {
-  return value === null ? '—' : `${value.toFixed(digits)}${suffix}`;
-}
 
 function ResultRow({
   scored,
   settings,
   rank,
+  inStage,
   nwSettings,
   trendEmaPeriod,
   contractTopN,
@@ -321,6 +473,11 @@ function ResultRow({
   scored: ScoredRow;
   settings: FilterSettings;
   rank: number;
+  /**
+   * Whether this row reached the funnel stage the reader clicked, or null when
+   * no stage is selected. Marks the row; never removes it.
+   */
+  inStage: boolean | null;
   nwSettings: NwSettings;
   trendEmaPeriod: number;
   contractTopN: number;
@@ -370,9 +527,16 @@ function ResultRow({
 
   return (
     <>
-      <tr className={dimmed ? 'opacity-60' : undefined}>
+      <tr
+        className={`${dimmed ? 'opacity-60' : ''}${
+          inStage ? ' bg-pos/5' : ''
+        }`}
+      >
         <td className="border-b border-term-line/60 px-2 py-2 text-right align-top tabular-nums text-term-faint">
           {rank}
+          {inStage && (
+            <span className="sr-only"> — reached the selected funnel stage</span>
+          )}
         </td>
         <th
           scope="row"
@@ -383,15 +547,21 @@ function ResultRow({
         <td className="border-b border-term-line/60 px-2 py-2 text-right align-top tabular-nums font-bold text-term-text">
           {score.total.toFixed(0)}
         </td>
-        <td className="border-b border-term-line/60 px-2 py-2 text-right align-top tabular-nums text-term-dim">
-          {m.rsScore.toFixed(0)}
-        </td>
-        <td className="border-b border-term-line/60 px-2 py-2 text-right align-top tabular-nums text-term-dim">
-          {num(m.pctAbove200, 0, '%')}
-        </td>
-        <td className="border-b border-term-line/60 px-2 py-2 text-right align-top tabular-nums text-term-dim">
-          {num(m.volumeRatio, 2, 'x')}
-        </td>
+        {/*
+          The seven components, each on the same 0-100 scale as the score they
+          add up to. This is what makes the composite checkable rather than
+          authoritative: a reader can see that a name is at the top on strength
+          and volume and is carrying an unmeasured gamma, rather than being
+          handed one number and asked to trust it.
+        */}
+        {SCORE_KEYS.map((key) => (
+          <ComponentCell
+            key={key}
+            component={key}
+            value={score.components[key]}
+            detail={componentDetail(key, scored)}
+          />
+        ))}
         <td className="border-b border-term-line/60 px-2 py-2 text-right align-top tabular-nums text-term-dim">
           {formatUsd(m.avgDollarVolume)}
         </td>
@@ -415,7 +585,7 @@ function ResultRow({
               inside your {settings.earningsBufferDays}-day buffer.
             </span>
           ) : passes ? (
-            <span className="text-bull">Passes every rule in force.</span>
+            <span className="text-bull">Matches every filter in force.</span>
           ) : (
             failingLabel
           )}
@@ -433,22 +603,43 @@ function ResultRow({
       </tr>
 
       {/*
-        The watch line, on its own row under every result and never behind the
-        Detail toggle. A result rendered with nothing to watch reads as a
-        result with nothing to watch, and that is a claim.
+        Two lines under every row, side by side, and neither behind the Detail
+        toggle.
+
+        The green account and the red one are rendered together on purpose. A
+        page that puts the reasons a name looks interesting on screen and the
+        reasons to be careful one click away has stopped describing a stock and
+        started arguing for it. So they share a row, in the same type size, and
+        the reader sees both or neither.
       */}
       <tr className={dimmed ? 'opacity-60' : undefined}>
         <td />
-        <td colSpan={8} className="border-b border-term-line/60 px-2 pb-2 text-2xs leading-relaxed text-flip">
-          <span className="font-bold tracking-[0.06em]">Watch: </span>
-          {watch}
+        <td
+          colSpan={COLUMN_COUNT - 1}
+          className="border-b border-term-line/60 px-2 pb-2"
+        >
+          <div className="grid gap-1 sm:grid-cols-2 sm:gap-4">
+            <p className="text-2xs leading-relaxed text-term-dim">
+              <span className="font-bold tracking-[0.06em] text-term-faint">
+                Why it&rsquo;s on the list:{' '}
+              </span>
+              {whyItMatched(score, row)}
+            </p>
+            <p className="text-2xs leading-relaxed text-flip">
+              <span className="font-bold tracking-[0.06em]">Watch: </span>
+              {watch}
+            </p>
+          </div>
         </td>
       </tr>
 
       {open && (
         <tr>
           <td />
-          <td colSpan={8} className="border-b border-term-line px-2 pb-4 pt-1">
+          <td
+            colSpan={COLUMN_COUNT - 1}
+            className="border-b border-term-line px-2 pb-4 pt-1"
+          >
             <div className="space-y-2.5">
               <dl className="space-y-1 text-xs">
                 {whyItRanks(scored, settings)
@@ -468,14 +659,12 @@ function ResultRow({
               {/* What the score is made of, so the number is checkable. */}
               <p className="text-2xs leading-relaxed text-term-faint">
                 <span className="label-xs mr-1.5">Score {score.total.toFixed(1)}</span>
-                {(Object.keys(SCORE_WEIGHTS) as Array<keyof typeof SCORE_WEIGHTS>)
-                  .map((key) => {
-                    const value = score.components[key];
-                    return `${key} ${
-                      value === null ? 'not measured' : value.toFixed(0)
-                    } × ${SCORE_WEIGHTS[key]}`;
-                  })
-                  .join(' · ')}
+                {SCORE_KEYS.map((key) => {
+                  const value = score.components[key];
+                  return `${SCORE_LABEL[key]} ${
+                    value === null ? 'not measured' : value.toFixed(0)
+                  } × ${SCORE_WEIGHTS[key]}`;
+                }).join(' · ')}
                 {score.missing.length > 0 && (
                   <>
                     {' '}
@@ -563,6 +752,10 @@ export function ScannerBoard({
   contractTopN: number;
 }) {
   const [stage, setStage] = useState<string | null>(null);
+  /** Which component column the visible rows are sorted on. Null = by score. */
+  const [sort, setSort] = useState<{ key: ScoreKey; dir: 'desc' | 'asc' } | null>(
+    null,
+  );
 
   /*
    * On-demand grades, held here rather than in the row.
@@ -650,7 +843,20 @@ export function ScannerBoard({
     [scan.rows, graded],
   );
 
-  const judged = useMemo(() => scoreAndJudge(rows, settings), [rows, settings]);
+  /*
+   * SPY's regime, resolved once and passed down. It is one of the seven
+   * components and one of the eight filters, and the stored scan holds it in
+   * exactly one place — see `MarketContext`.
+   */
+  const market: MarketContext = useMemo(
+    () => ({ spyRegime: scan.spyRegime }),
+    [scan.spyRegime],
+  );
+
+  const judged = useMemo(
+    () => scoreAndJudge(rows, settings, market),
+    [rows, settings, market],
+  );
   const stages = useMemo(() => buildFunnel(judged, settings), [judged, settings]);
 
   const onGraded = useCallback(
@@ -660,52 +866,81 @@ export function ScannerBoard({
   );
 
   const regime = scan.spyRegime ?? 'unknown';
-  const marketBlocks = settings.requireCalmMarket && regime !== 'positive';
 
   /*
-   * ## What ends up on screen, and why it is always full
+   * ## What ends up on screen, and why it can never be empty
    *
-   * Names clearing every rule in force come first, in score order. The table
-   * is then padded to `contractTopN` with the next-highest scorers, dimmed and
-   * carrying their red badges.
+   * Names matching every filter in force come first, in score order. The table
+   * is then padded to `SCANNER_TOP_N` with the next-highest scorers, dimmed
+   * and carrying their red badges.
    *
-   * Both halves matter. Without the first, moving a slider would not visibly
-   * re-partition anything — the score does not depend on the cutoffs, so the
+   * Both halves matter. Without the first, moving a control would not visibly
+   * re-partition anything — the score does not depend on the filters, so the
    * top of the raw ranking barely moves. Without the second, a morning where
-   * nothing passes renders an empty table again, which is the whole failure
-   * being fixed.
+   * nothing matches renders an empty table, which is the failure this whole
+   * page exists to prevent: an empty page cannot tell you which filter ate the
+   * list, how close anything came, or whether the market or the settings were
+   * the problem.
    *
-   * `contractTopN` is the length for a reason beyond neatness: it is exactly
-   * how many names had a chain pulled, so every row on screen has had all five
-   * of its rules actually tested rather than five with the last one grey.
+   * The funnel above can still read zero. That is the honest number and it is
+   * printed; it just no longer takes the table down with it.
    */
-  const { shown, passingCount } = useMemo(() => {
+  const { shown, matchingCount } = useMemo(() => {
     const stageEntry = stages.find((s) => s.key === stage);
     const allowed = stageEntry ? new Set(stageEntry.symbols) : null;
 
-    /*
-     * The calm-market toggle is deliberately not applied here. When it is on
-     * and the market is not calm it replaces the whole table with a statement
-     * saying so — an empty table under a full funnel would look like a bug,
-     * and the reader needs to know their own toggle is what hid the list.
-     */
-    const filtered = allowed
-      ? judged.filter((entry) => allowed.has(entry.row.symbol))
-      : judged;
-
-    const passing = filtered.filter(
+    const matching = judged.filter(
       (entry) => entry.passes && !entry.earningsExcluded,
     );
-    const passingSymbols = new Set(passing.map((entry) => entry.row.symbol));
-    const rest = filtered.filter(
-      (entry) => !passingSymbols.has(entry.row.symbol),
+    const matchingSymbols = new Set(matching.map((entry) => entry.row.symbol));
+    const rest = judged.filter(
+      (entry) => !matchingSymbols.has(entry.row.symbol),
     );
 
+    const top = [...matching, ...rest].slice(0, SCANNER_TOP_N);
+
+    /*
+     * A selected funnel stage highlights rather than filters, for the same
+     * reason everything else here does: clicking "3 cleared RS 80" used to
+     * leave three rows on screen and hide the seventeen the reader was
+     * comparing them against.
+     */
     return {
-      shown: [...passing, ...rest].slice(0, contractTopN),
-      passingCount: passing.length,
+      shown: top.map((entry) => ({
+        entry,
+        inStage: allowed ? allowed.has(entry.row.symbol) : null,
+      })),
+      matchingCount: matching.length,
     };
-  }, [judged, stages, stage, contractTopN]);
+  }, [judged, stages, stage]);
+
+  /*
+   * ## Sorting reorders the twenty; it never chooses them
+   *
+   * The list is the top `SCANNER_TOP_N` by composite score, always, and a sort
+   * on one column rearranges those twenty rather than pulling in a
+   * twenty-first. Otherwise sorting by any single component would quietly
+   * replace the ranked list with a one-factor screen wearing the ranked list's
+   * heading — which is the thing the composite exists to avoid. The caption
+   * says so.
+   */
+  const sorted = useMemo(() => {
+    if (sort === null) return shown;
+    const factor = sort.dir === 'desc' ? 1 : -1;
+    return [...shown].sort((a, b) => {
+      const av = a.entry.score.components[sort.key];
+      const bv = b.entry.score.components[sort.key];
+      // Unmeasured sorts to the bottom in both directions. It is not a low
+      // reading and it must not be ordered as one.
+      if (av === null && bv === null) {
+        return a.entry.row.symbol.localeCompare(b.entry.row.symbol);
+      }
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      if (av === bv) return a.entry.row.symbol.localeCompare(b.entry.row.symbol);
+      return (bv - av) * factor;
+    });
+  }, [shown, sort]);
 
   const isDefault = settingsAreDefault(settings);
   const shareUrl =
@@ -736,11 +971,11 @@ export function ScannerBoard({
           {MARKET_REGIME_NOTE[regime]}
         </p>
         <p className="mt-1.5 text-2xs leading-relaxed text-term-faint">
-          One market-wide condition, stated once. It is not one of the five
-          rules and it removes no name from the list below — it used to, and
-          because it is identical for every stock in the index, that alone
-          could empty this page on any volatile morning. The toggle in the
-          controls restores that behaviour if you want it.
+          One market-wide condition, stated once. It is one of the seven
+          scoring components and one of the eight filters, and because it is
+          identical for every stock in the index it lifts or lowers the whole
+          list without changing the order of it. It used to be a per-name gate,
+          which is how this page went blank on volatile mornings.
         </p>
       </div>
 
@@ -748,7 +983,7 @@ export function ScannerBoard({
         <p className="text-xs text-term-text">
           <span className="font-bold">
             Scanned at {scannedAtEt} ET · {scan.scored} names scored ·{' '}
-            {passingCount} pass every rule in force
+            {matchingCount} match every filter in force
           </span>{' '}
           <span className="text-term-dim">· {gammaStamp}</span>
         </p>
@@ -759,12 +994,12 @@ export function ScannerBoard({
           </p>
         )}
         <p className="mt-1.5 text-2xs leading-relaxed text-term-faint">
-          The table below always shows the top {contractTopN} by score, however
-          many pass. Names that pass every rule in force come first; the rest
-          are shown dimmed, with the rules they failed in red and the number
-          that failed them beside it. A ranking is an ordering. It is not a
-          recommendation, and nothing on this page says what to do about any of
-          these names.
+          The table below always shows the top {SCANNER_TOP_N} by score, however
+          many match. Names matching every filter in force come first; the rest
+          are shown dimmed, with the filters they missed in red and the number
+          that missed beside it. A ranking is an ordering. It is not a
+          recommendation, nothing on this page says what to do about any of
+          these names, and no row here is a reason to buy or sell anything.
         </p>
       </div>
 
@@ -778,10 +1013,10 @@ export function ScannerBoard({
 
       <FunnelStrip stages={stages} active={stage} onSelect={setStage} />
 
-      {/* --- the five rules, in plain English ------------------------------- */}
+      {/* --- the filters, in plain English ---------------------------------- */}
       <section className="panel px-3.5 py-3">
         <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-dim">
-          The five rules, and what each is worth in the score
+          The eight filters you can narrow with
         </h2>
         <ol className="mt-2 space-y-1.5">
           {RULE_KEYS.map((key, i) => (
@@ -798,81 +1033,96 @@ export function ScannerBoard({
           ))}
         </ol>
         <p className="mt-2.5 text-2xs leading-relaxed text-term-faint">
-          The score is a weighted blend of the five, renormalised over whichever
-          of them a name actually has a reading for — an unmeasured component is
-          dropped from the blend, never scored zero. Open any row&rsquo;s detail
-          to see its arithmetic.
+          These decide which rows are marked as matching. They do not decide
+          which rows are on the page — the score does that, and the score is a
+          separate thing built from the seven components below.
         </p>
       </section>
 
-      {marketBlocks ? (
-        <div className="panel border-l-2 border-l-bear/60 px-4 py-8 text-center text-xs">
-          <p className="font-bold text-bear">
-            Hidden: you have asked to see names only when the wider market is
-            calm, and it is not.
-          </p>
-          <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-dim">
-            {MARKET_REGIME_NOTE[regime]} {scan.scored} names were scored and{' '}
-            {passingCount} pass every rule in force — the list is there, this
-            toggle is hiding it. Switch &ldquo;only show names when the wider
-            market is calm&rdquo; off in the controls above to see it.
-          </p>
-        </div>
-      ) : (
-        <section className="scroll-term overflow-x-auto panel">
-          <table className="w-full border-separate border-spacing-0 text-xs">
-            <caption className="sr-only">
-              The top {contractTopN} names by composite score, with all five
-              rule states and the readings behind them.
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col" className={`${HEAD_CLASS} text-right`}>#</th>
-                <th scope="col" className={`${HEAD_CLASS} text-left`}>Ticker</th>
-                <th scope="col" className={`${HEAD_CLASS} text-right`}>Score</th>
-                <th scope="col" className={`${HEAD_CLASS} text-right`}>RS</th>
-                <th scope="col" className={`${HEAD_CLASS} text-right`}>vs 200D</th>
-                <th scope="col" className={`${HEAD_CLASS} text-right`}>Vol</th>
-                <th scope="col" className={`${HEAD_CLASS} text-right`}>$/day</th>
-                <th scope="col" className={`${HEAD_CLASS} text-left`}>Rules</th>
-                <th scope="col" className={`${HEAD_CLASS} text-left`}>What stopped it</th>
-                <th scope="col" className={HEAD_CLASS}>
-                  <span className="sr-only">Detail</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((entry, i) => (
-                <ResultRow
-                  key={entry.row.symbol}
-                  scored={entry}
-                  settings={settings}
-                  rank={i + 1}
-                  nwSettings={nwSettings}
-                  trendEmaPeriod={trendEmaPeriod}
-                  contractTopN={contractTopN}
-                  onGraded={onGraded}
+      {/* --- the seven components, in plain English -------------------------- */}
+      <section className="panel px-3.5 py-3">
+        <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-dim">
+          The seven components the score is built from
+        </h2>
+        <ol className="mt-2 space-y-1.5">
+          {SCORE_KEYS.map((key, i) => (
+            <li key={key} className="flex gap-2 text-xs leading-relaxed">
+              <span className="shrink-0 tabular-nums text-term-faint">{i + 1}.</span>
+              <span>
+                <span className="font-bold text-term-text">{SCORE_LABEL[key]}</span>
+                <span className="text-term-faint">
+                  {' '}
+                  ×{SCORE_WEIGHTS[key]}
+                </span>
+                <span className="text-term-dim"> — {SCORE_EXPLANATION[key]}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-2.5 text-2xs leading-relaxed text-term-faint">
+          Each is normalised to 0&ndash;100 and they are blended at the weights
+          shown, renormalised over whichever of them a name actually has a
+          reading for &mdash; an unmeasured component is dropped from the
+          blend, never scored zero. Every one of them is a column in the table,
+          so the composite can be checked rather than trusted. Open any
+          row&rsquo;s detail to see its arithmetic.
+        </p>
+      </section>
+
+      <section className="scroll-term overflow-x-auto panel">
+        <table className="w-full border-separate border-spacing-0 text-xs">
+          <caption className="sr-only">
+            The top {SCANNER_TOP_N} names by composite score, with each of the
+            seven components, all eight filter states, and the readings behind
+            them. Sorting a component column reorders these twenty rows; it
+            never changes which twenty are here.
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col" className={`${HEAD_CLASS} text-right`}>#</th>
+              <th scope="col" className={`${HEAD_CLASS} text-left`}>Ticker</th>
+              <th scope="col" className={`${HEAD_CLASS} text-right`}>Score</th>
+              {SCORE_KEYS.map((key) => (
+                <SortableHead
+                  key={key}
+                  component={key}
+                  sort={sort}
+                  onSort={setSort}
                 />
               ))}
-            </tbody>
-          </table>
+              <th scope="col" className={`${HEAD_CLASS} text-right`}>$/day</th>
+              <th scope="col" className={`${HEAD_CLASS} text-left`}>Filters</th>
+              <th scope="col" className={`${HEAD_CLASS} text-left`}>What it missed</th>
+              <th scope="col" className={HEAD_CLASS}>
+                <span className="sr-only">Detail</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(({ entry, inStage }, i) => (
+              <ResultRow
+                key={entry.row.symbol}
+                scored={entry}
+                settings={settings}
+                rank={i + 1}
+                inStage={inStage}
+                nwSettings={nwSettings}
+                trendEmaPeriod={trendEmaPeriod}
+                contractTopN={contractTopN}
+                onGraded={onGraded}
+              />
+            ))}
+          </tbody>
+        </table>
+      </section>
 
-          {shown.length === 0 && (
-            <p className="border-t border-term-line px-3.5 py-6 text-center text-2xs text-term-faint">
-              No names reached the funnel stage you selected. Clear it above to
-              see the full ranking — the stage count and this empty table are
-              the same fact stated twice.
-            </p>
-          )}
-        </section>
-      )}
-
-      {passingCount === 0 && !marketBlocks && (
+      {matchingCount === 0 && (
         <p className="panel px-3.5 py-2.5 text-2xs leading-relaxed text-flip/90">
-          ! Nothing clears every rule at these settings. That is a real answer
-          about the market, and it is why the table above is still full: the
-          rows are the closest things to passing, ranked, each with the rule it
-          failed marked in red. Read the funnel to see which step ate the list.
+          ! Nothing matches every filter at these settings. That is a real
+          answer about the market, and it is why the table above is still full:
+          the rows are the twenty highest-scoring names, each with the filter it
+          missed marked in red and the reading that missed it printed beside it.
+          Read the funnel to see which filter narrowed it to nothing.
         </p>
       )}
 

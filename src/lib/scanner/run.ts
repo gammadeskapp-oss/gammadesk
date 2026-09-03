@@ -12,7 +12,12 @@ import { readExtension } from './evaluate';
 import { lookupEarnings } from './earnings';
 import { readTodaysGamma } from './gamma';
 import { gradeSymbol } from './optionChain';
-import { DEFAULT_FILTERS, excludedByEarnings, scoreRow } from './score';
+import {
+  DEFAULT_FILTERS,
+  excludedByEarnings,
+  scoreRow,
+  type MarketContext,
+} from './score';
 import {
   EARNINGS_EXCLUSION_DAYS,
   type GammaEntry,
@@ -166,17 +171,24 @@ export async function runScanner(): Promise<ScanResult> {
   ]);
 
   const spy = gamma?.symbols.SPY;
+  /*
+   * The one market-wide reading a score needs, resolved once. It is a
+   * parameter to `scoreRow` rather than a field on every row: SPY's regime is
+   * a single fact, and copying it onto 503 rows would create 503 chances for
+   * it to disagree with itself.
+   */
+  const market: MarketContext = { spyRegime: spy?.regime ?? null };
   const notes: string[] = [];
 
   if (!gamma) {
     notes.push(
-      `No same-day gamma refresh was found, so the market regime is unknown and no name carries its own dealer positioning. The ${tuning.gammaTimeEt} ET job either has not run or could not store its result. The nightly cache is deliberately not used as a substitute — it can be four days old. Nothing is dropped for this: the regime is a banner rather than a rule, and the five rules never depended on it.`,
+      `No same-day gamma refresh was found, so the market regime is unknown and no name carries its own dealer positioning. The ${tuning.gammaTimeEt} ET job either has not run or could not store its result. The nightly cache is deliberately not used as a substitute — it can be four days old. Nothing is dropped for this: the regime is one component of seven and one optional filter, and an unmeasured component is left out of the blend rather than scored zero.`,
     );
   } else if (gamma.failures.length > 0) {
     notes.push(
       `${gamma.failures.length} chains could not be read at ${tuning.gammaTimeEt} ET: ${gamma.failures
         .map((f) => f.symbol)
-        .join(', ')}. Those names carry no dealer-positioning context, which is not one of the rules.`,
+        .join(', ')}. Those names carry no dealer-positioning context and no option-liquidity reading, so both components are left out of their blend rather than scored zero.`,
     );
   }
 
@@ -188,7 +200,9 @@ export async function runScanner(): Promise<ScanResult> {
   for (const row of ranked) {
     const ma = averages.bySymbol.get(row.symbol);
     const ema200 = ma?.ema200 ?? null;
+    const ema50 = ma?.ema50 ?? null;
     const ema20 = ma?.ema20 ?? null;
+    const vwap20 = ma?.vwap20 ?? null;
     if (ema200 === null) missingAverages += 1;
 
     const entry = gamma?.symbols[row.symbol];
@@ -196,12 +210,20 @@ export async function runScanner(): Promise<ScanResult> {
     const metrics: RowMetrics = {
       rsScore: row.score,
       rsRank: row.rank,
+      // Straight off the RS engine. A percentile is a property of the pool, so
+      // it is the one trend input that cannot be recomputed from this name's
+      // own numbers.
+      m1Percentile: row.percentiles.m1,
       pctAbove200: pctAbove(row.close, ema200),
       ema200,
+      pctAbove50: pctAbove(row.close, ema50),
+      ema50,
       pctAbove20: pctAbove(row.close, ema20),
       ema20,
       volumeRatio: row.volumeRatio,
       avgDollarVolume: row.avgDollarVolume,
+      vwap20,
+      pctAboveVwap: pctAbove(row.close, vwap20),
     };
 
     rows.push({
@@ -214,6 +236,8 @@ export async function runScanner(): Promise<ScanResult> {
       regime: entry?.regime ?? null,
       netGex: entry?.netGex ?? null,
       magnets: entry?.magnets ?? [],
+      optionsVolume: entry?.optionsVolume ?? null,
+      optionsOpenInterest: entry?.optionsOpenInterest ?? null,
       // Filled in below: the earnings lookup is batched across the whole list,
       // not run once per name.
       earnings: { state: 'unknown', dateIso: null, daysAway: null, source: 'not looked up' },
@@ -230,7 +254,7 @@ export async function runScanner(): Promise<ScanResult> {
 
   if (missingAverages > 0) {
     notes.push(
-      `${missingAverages} of ${rows.length} names have too little price history for a 200-day average, so their trend rule reads unknown rather than failed. A recent listing does not have two hundred sessions behind it, and reporting that as "below its 200-day average" would be a claim about the market assembled out of a gap in the data.`,
+      `${missingAverages} of ${rows.length} names have too little price history for a 200-day average, so that part of their trend score is left out rather than counted against them. A recent listing does not have two hundred sessions behind it, and reporting that as "below its 200-day average" would be a claim about the market assembled out of a gap in the data.`,
     );
   }
 
@@ -252,12 +276,12 @@ export async function runScanner(): Promise<ScanResult> {
    * on its watch line. `excludedByEarnings` reads the state rather than the day
    * count precisely so that unknown can never be mistaken for far-away.
    */
-  const provisionalOrder = [...rows]
-    .map((row) => ({ row, score: scoreRow(row).total }))
+  const ordered = [...rows]
+    .map((row) => ({ row, score: scoreRow(row, market).total }))
     .sort((a, b) => b.score - a.score || a.row.symbol.localeCompare(b.row.symbol))
     .map(({ row }) => row);
 
-  const lookedUp = provisionalOrder.slice(0, tuning.earningsLookupN);
+  const lookedUp = ordered.slice(0, tuning.earningsLookupN);
   const earnings = await lookupEarnings(lookedUp.map((r) => r.symbol), scanDate);
 
   for (const row of rows) {
@@ -293,27 +317,22 @@ export async function runScanner(): Promise<ScanResult> {
   // --- the contract check ----------------------------------------------------
 
   /*
-   * ## The circularity, resolved out loud
+   * ## Who gets a chain pulled
    *
-   * Contract quality is one of the five scored components, and only the top
-   * names by score get a chain pulled. So the score decides who is graded and
-   * the grade changes the score.
-   *
-   * It is resolved in two passes rather than pretended away. The first pass —
-   * `provisionalOrder` above, which the earnings lookup already used — scores
-   * the four components that cost nothing, which fixes an order; the top
-   * `contractTopN` of that order are graded; then every row is scored again,
-   * now with the contract folded in where there is one. A name can move a
-   * place or two between the passes, and the page says so rather than
-   * presenting the final number as if it had never depended on anything.
+   * The top `contractTopN` by score, and nothing else. That used to be a
+   * circular decision — contract quality was a scoring component, so the score
+   * chose who was graded and the grade changed the score, and it took two
+   * passes to settle. The contract is a filter now: it can mark a row red and
+   * put a caution on its watch line, and it cannot move a name up or down the
+   * ranking. One ordering, computed once, before any request is spent.
    *
    * Names already carrying a report inside the shipped buffer are skipped:
-   * spending a chain to grade a contract that is about to be removed from the
-   * default view buys nothing. They read "not checked", which is true.
+   * spending a chain to grade a contract on a name the default earnings buffer
+   * removes buys nothing. They read "not checked", which is true.
    */
   const excludedSymbols = new Set(earningsExcluded.map((e) => e.symbol));
 
-  const toGrade = provisionalOrder
+  const toGrade = ordered
     .filter((row) => !excludedSymbols.has(row.symbol))
     .slice(0, tuning.contractTopN);
 
@@ -376,12 +395,17 @@ export async function runScanner(): Promise<ScanResult> {
     `Option contracts were checked at scan time for the top ${graded} name${graded === 1 ? '' : 's'} by score, out of ${rows.length} scored. Everything below that reads "contract not checked" in grey until you open it — that is unknown, not failed. Raising the relative-strength cutoff or any other control can bring an unchecked name into view; its contract rule stays grey until it is checked.`,
   );
 
-  // Second pass. Sorted here so the stored document is already in the order the
-  // page opens on, and a reader reading the raw JSON sees the same ranking.
-  const scored = rows
-    .map((row) => ({ row, total: scoreRow(row).total }))
-    .sort((a, b) => b.total - a.total || a.row.symbol.localeCompare(b.row.symbol))
-    .map(({ row }) => row);
+  /*
+   * The stored document is written in score order, so a reader opening the raw
+   * JSON sees the same ranking the page does.
+   *
+   * `ordered` is that order and it was fixed before any chain was pulled.
+   * There is no second scoring pass any more: the contract grade filters and
+   * cautions but no longer scores, so grading a name cannot move it, and the
+   * circularity where the score chose who got graded and the grade changed the
+   * score is simply gone.
+   */
+  const scored = ordered;
 
   const result: ScanResult = {
     date: scanDate,
@@ -391,7 +415,7 @@ export async function runScanner(): Promise<ScanResult> {
     universe,
     scored: scored.length,
     rsMin: DEFAULT_FILTERS.rsMin,
-    spyRegime: spy?.regime ?? null,
+    spyRegime: market.spyRegime,
     gammaDate: gamma?.date ?? null,
     gammaRefreshedAt: gamma?.refreshedAt ?? null,
     earningsExcluded,

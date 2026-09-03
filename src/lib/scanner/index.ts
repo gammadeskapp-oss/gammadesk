@@ -50,7 +50,7 @@ export interface ScannerView {
   nw: { bandwidth: number; lookback: number; mult: number; minBars: number };
   trendEmaPeriod: number;
   /**
-   * How many names passed all five rules each archived morning, at the shipped
+   * How many names matched every filter each archived morning, at the shipped
    * defaults, newest first.
    *
    * On the page above the list, because the single most useful thing to know

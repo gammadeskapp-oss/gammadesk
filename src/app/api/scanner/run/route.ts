@@ -45,12 +45,14 @@ export async function GET(request: Request) {
 
   try {
     const result = await runScanner();
-    const passed = scoreAndJudge(result.rows, DEFAULT_FILTERS).filter(
+    const passed = scoreAndJudge(result.rows, DEFAULT_FILTERS, {
+      spyRegime: result.spyRegime,
+    }).filter(
       (entry) => entry.passes && !entry.earningsExcluded,
     );
 
     const summary =
-      `Scored ${result.scored} of ${result.universe} — ${passed.length} pass all five rules at the defaults, ` +
+      `Scored ${result.scored} of ${result.universe} — ${passed.length} match every filter on at the defaults, ` +
       `${result.earningsExcluded.length} reporting inside the earnings buffer, ` +
       `${result.qualityChecked} of ${result.qualityTargeted} contracts graded. ` +
       `Market regime ${result.spyRegime ?? 'unknown'}. ` +

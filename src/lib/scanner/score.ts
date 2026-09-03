@@ -1,35 +1,37 @@
 /**
- * Scoring, rule verdicts, and the funnel — the whole of the scanner's
+ * Scoring, filter verdicts, and the funnel — the whole of the scanner's
  * judgement, in one client-safe, dependency-free file.
  *
- * ## Why this is not `evaluate.ts`
+ * ## Two separate jobs, deliberately kept apart
  *
- * `evaluate.ts` turned *stored verdicts* into sentences. The verdicts were
- * resolved once, on the server, at scan time, against thresholds baked into
- * the run. That is exactly what has to stop: the reader now owns the
- * thresholds, and moving one has to re-decide every row instantly and without
- * touching the network. So nothing here reads a stored verdict. Everything is
- * derived from `ScanRow.metrics` — the raw readings — against a
- * `FilterSettings` the reader controls.
+ * **Scoring** blends seven components into one 0-100 number per name, over the
+ * whole ranked universe, and that number is the only thing that decides the
+ * order of the list. It does not read the reader's settings at all.
  *
- * The practical consequence is the constraint this file exists to enforce: the
- * server stores *numbers*, never conclusions. A stored `pass` would be a
- * conclusion drawn at one setting and rendered under another.
+ * **Filtering** then decides which of those ordered names match what the
+ * reader asked for. It reads nothing but `ScanRow.metrics` and a
+ * `FilterSettings` the reader owns, so moving a control re-decides every row
+ * instantly and without touching the network.
+ *
+ * Keeping them apart is what makes the page unemptiable. The table renders the
+ * top `SCANNER_TOP_N` by score whatever the filters say; filters narrow the
+ * set of rows marked as matching, and the rows that do not match stay on
+ * screen, dimmed, with the reading that missed printed beside them. "Nothing
+ * matched" is then a sentence on a full page rather than a blank one.
+ *
+ * ## The server stores numbers, never conclusions
+ *
+ * Nothing here reads a stored verdict. A stored `pass` would be a conclusion
+ * drawn at one cutoff and rendered under another, which is the single thing an
+ * adjustable filter set must not do.
  *
  * ## Ranking is not recommending
  *
- * The scan used to AND five gates together and print whatever survived. Twice
- * in a row that was nothing out of 503, and an empty page is a dead page — it
- * cannot even tell you which rule ate the list. So the five components are now
- * scored and summed, the list is always ordered, and the top of it is always
- * rendered.
- *
- * This must not be read as a softening. A name that fails a rule still fails
- * it, its badge is still red, and it is dimmed on the page. What changed is
- * that failing a rule no longer makes a name *invisible* — because "nothing
- * passed" and "these are the closest things to passing, and here is what each
- * of them failed" are answers of enormously different value, and the second
- * one is the honest one.
+ * A name at the top of this list is the name nothing scored higher than. It is
+ * not a suggestion. That is why failing names are dimmed rather than removed,
+ * why every caution stays visible next to every positive, and why nothing in
+ * this file or the page it feeds ever phrases a row as something to buy or
+ * sell.
  */
 
 import { excludedForEarnings } from './earningsRules';
@@ -38,48 +40,91 @@ import {
   RULE_KEYS,
   RULE_LABEL,
   type FilterVerdict,
-  type OptionQualityBadge,
+  type RowMetrics,
   type RuleKey,
   type ScanRow,
 } from './types';
 
+// --- the market-wide readings a score needs ----------------------------------
+
+/**
+ * Everything a score needs that is not a property of the name itself.
+ *
+ * One field today, and a parameter rather than a copy on every row on purpose:
+ * SPY's regime is one reading, and duplicating it 503 times into the stored
+ * document would create 503 opportunities for it to disagree with itself.
+ */
+export interface MarketContext {
+  spyRegime: 'positive' | 'negative' | null;
+}
+
 // --- the weights -------------------------------------------------------------
 
-export interface ScoreWeights {
-  rs: number;
-  trend: number;
-  volume: number;
-  liquidity: number;
-  contract: number;
-}
+export const SCORE_KEYS = [
+  'rs',
+  'trend',
+  'volume',
+  'vwap',
+  'tickerGamma',
+  'spyGamma',
+  'optionLiquidity',
+] as const;
+export type ScoreKey = (typeof SCORE_KEYS)[number];
+
+export type ScoreWeights = Record<ScoreKey, number>;
 
 /**
  * What each component is worth in the composite, before renormalisation.
  *
- * One object, at the top of the file, because these will be argued about and
- * the argument should cost one edit. They do not have to sum to anything —
- * `scoreRow` renormalises over the components a given name actually has.
+ * Equal weight everywhere except relative strength, which counts double. That
+ * is the one claim these numbers make, and it is deliberate: RS is the reading
+ * this whole page is built around, it is measured against the entire index
+ * rather than against the name's own history, and the reader can go and check
+ * it on /strength. The other six are each one vote.
  *
- * The shape of them is the claim being made: relative strength is the largest
- * single input because it is the reading this whole page is built around and
- * the one the reader can go and check on /strength. Liquidity is the smallest
- * because it is close to a floor rather than a gradient — the difference
- * between $400M and $4bn a day does not matter to anyone trading retail size,
- * while the difference between $8M and $80M very much does, which is what the
- * log scaling below is for.
+ * They do not have to sum to anything — `scoreRow` renormalises over the
+ * components a given name actually has a reading for.
  */
 export const SCORE_WEIGHTS: ScoreWeights = {
-  rs: 0.35,
-  trend: 0.2,
-  volume: 0.2,
-  liquidity: 0.1,
-  contract: 0.15,
+  rs: 2,
+  trend: 1,
+  volume: 1,
+  vwap: 1,
+  tickerGamma: 1,
+  spyGamma: 1,
+  optionLiquidity: 1,
+};
+
+/** Column headings and the plain-English account of each component. */
+export const SCORE_LABEL: Record<ScoreKey, string> = {
+  rs: 'RS',
+  trend: 'Trend',
+  volume: 'Volume',
+  vwap: 'VWAP',
+  tickerGamma: 'Gamma',
+  spyGamma: 'Market',
+  optionLiquidity: 'Options',
+};
+
+export const SCORE_EXPLANATION: Record<ScoreKey, string> = {
+  rs: 'Where it ranks against the whole index over the last one, three and six months. Counts double — it is the reading this page is built around.',
+  trend:
+    'Four readings averaged: above its 50-day average, above its 200-day average, the 50 above the 200, and where its last month ranks against the rest of the index.',
+  volume:
+    "The last month's average volume against the three months before it. 1.0x — merely confirmed — scores low; heavy participation scores high.",
+  vwap: 'How far the close sits above the volume-weighted average price of the last twenty sessions. This is a daily VWAP, not the intraday session one.',
+  tickerGamma:
+    "This name's own dealer positioning. Positive scores higher. On a single stock the assumption about which side dealers are on is weak, which is why it is one vote of seven.",
+  spyGamma:
+    "The wider market's dealer positioning. Identical for every name on the page — it moves the whole list, never the order of it.",
+  optionLiquidity:
+    'Whole-chain option volume and open interest, whichever is weaker. Whether the options on it trade at all, before any question of which contract.',
 };
 
 // --- the reader's settings ---------------------------------------------------
 
 /**
- * Every threshold the page exposes, and the on/off switch for each rule.
+ * Every threshold the page exposes, and the on/off switch for each filter.
  *
  * Serialised into the query string, so a configuration can be bookmarked and
  * sent to someone else — see `filterState.ts`. Nothing here reaches the
@@ -88,18 +133,12 @@ export const SCORE_WEIGHTS: ScoreWeights = {
 export interface FilterSettings {
   /** Composite relative-strength score a name must clear. */
   rsMin: number;
+  /** Trend sub-score a name must clear, 0-100. */
+  trendMin: number;
   /** Recent volume as a multiple of the name's own baseline. */
   volumeMult: number;
   /** Average daily dollar turnover floor. */
   minDollarVolume: number;
-  /**
-   * Percent above the 200-day average.
-   *
-   * Allowed to go negative, deliberately. "Within 3% below its 200-day" is a
-   * coherent thing to look for, and a slider that stopped at zero would be
-   * quietly asserting that it is not.
-   */
-  trendPct: number;
   /** Days to expiry the contract check looks in. */
   dteMin: number;
   dteMax: number;
@@ -107,51 +146,50 @@ export interface FilterSettings {
   deltaMax: number;
   /** Calendar days inside which an upcoming report excludes a name. */
   earningsBufferDays: number;
-  /** Which of the five rules are switched on. */
+  /** Which filters are switched on. */
   enabled: Record<RuleKey, boolean>;
-  /**
-   * Whether to hide names when the wider market is in a volatile regime.
-   *
-   * Off by default, and it is the only market-wide control on the page. See
-   * `MARKET_REGIME_NOTE` and the banner: the regime used to be a sixth
-   * per-name rule, which meant that on a volatile morning all 503 names died
-   * at the same step and the page went blank for a reason that had nothing to
-   * do with any of them.
-   */
-  requireCalmMarket: boolean;
 }
 
 /**
- * The shipped defaults — the rule set exactly as it stood before this page
- * could be adjusted.
+ * The shipped defaults: relative strength above 80, a turnover floor, and
+ * nothing else.
  *
- * This matters more than it looks. The controls open on these values, so the
- * first thing the reader sees is the old scan's answer, and every change they
- * make is visibly a change *from* something rather than a configuration
- * assembled out of nothing.
+ * Loose on purpose. The page opens on the ranking rather than on one
+ * particular opinion about it, and every filter beyond these two is visibly
+ * the reader's own choice rather than something they inherited. The two that
+ * are on are the two that are close to structural — a scanner with no strength
+ * requirement is not a scanner, and a name nobody can get out of is not
+ * tradable at any score.
  */
 export const DEFAULT_FILTERS: FilterSettings = {
-  rsMin: 90,
+  rsMin: 80,
+  trendMin: 50,
   volumeMult: 1,
-  // The equity `HIGH` tier cutoff from `config.tradeability`, which is what
-  // the liquidity gate used to require.
+  // The equity `HIGH` tier cutoff from `config.tradeability`.
   minDollarVolume: 250_000_000,
-  trendPct: 0,
   dteMin: OPTION_WINDOW.minDte,
   dteMax: OPTION_WINDOW.maxDte,
   deltaMin: OPTION_WINDOW.minDelta,
   deltaMax: OPTION_WINDOW.maxDelta,
   earningsBufferDays: 10,
-  enabled: { rs: true, ema: true, volume: true, liquidity: true, contract: true },
-  requireCalmMarket: false,
+  enabled: {
+    rs: true,
+    liquidity: true,
+    trend: false,
+    volume: false,
+    vwap: false,
+    gamma: false,
+    spy: false,
+    contract: false,
+  },
 };
 
 /** Slider bounds, kept here so the controls and the clamping cannot disagree. */
 export const FILTER_BOUNDS = {
   rsMin: { min: 50, max: 99, step: 1 },
+  trendMin: { min: 0, max: 100, step: 1 },
   volumeMult: { min: 1, max: 3, step: 0.05 },
   minDollarVolume: { min: 10_000_000, max: 1_000_000_000, step: 10_000_000 },
-  trendPct: { min: -20, max: 40, step: 1 },
   dte: { min: 7, max: 120, step: 1 },
   delta: { min: 0.2, max: 0.9, step: 0.01 },
   earningsBufferDays: { min: 0, max: 60, step: 1 },
@@ -168,13 +206,13 @@ export function clampSettings(s: FilterSettings): FilterSettings {
   return {
     ...s,
     rsMin: clamp(s.rsMin, b.rsMin.min, b.rsMin.max),
+    trendMin: clamp(s.trendMin, b.trendMin.min, b.trendMin.max),
     volumeMult: clamp(s.volumeMult, b.volumeMult.min, b.volumeMult.max),
     minDollarVolume: clamp(
       s.minDollarVolume,
       b.minDollarVolume.min,
       b.minDollarVolume.max,
     ),
-    trendPct: clamp(s.trendPct, b.trendPct.min, b.trendPct.max),
     dteMin,
     // The dual sliders cannot cross. Clamped rather than swapped: a crossed
     // range is a dragging accident, and swapping silently would leave the
@@ -199,35 +237,80 @@ function ramp(value: number, low: number, high: number): number {
 }
 
 /**
- * What each option-quality badge is worth.
+ * The trend sub-score, and the four readings behind it.
  *
- * `unknown` and "not checked" are deliberately absent — they are not scored at
- * all. See `scoreRow`: an ungraded contract removes the component and its
- * weight rather than contributing a zero, because a zero would push a name
- * down the list for something nobody measured.
+ * ## Why four, and why they are averaged rather than ANDed
+ *
+ * Three of them are structural facts about where price sits — above the 50,
+ * above the 200, and the 50 above the 200, which is the ordering that
+ * distinguishes a name that has been strong for months from one that bounced
+ * last week. The fourth is the last month's return as a percentile of the
+ * index, which is the only one of the four that knows anything about the rest
+ * of the market.
+ *
+ * ANDing them would produce a boolean, and the column exists precisely because
+ * a boolean cannot tell a name three of four from a name none of four.
+ * Averaging keeps the ordering inside the middle of the list, which is where
+ * every interesting name is.
+ *
+ * Each missing reading is dropped and the average is taken over what is left,
+ * for the same reason the composite renormalises: a name with fewer than 200
+ * daily bars has not fallen below its 200-day average, nobody could compute
+ * one. `null` — every reading missing — is not zero and never scores as one.
  */
-const CONTRACT_POINTS: Partial<Record<OptionQualityBadge, number>> = {
-  excellent: 100,
-  tradable: 75,
-  caution: 35,
-  avoid: 0,
-};
-
-export interface ScoreComponents {
-  /** Null where the reading is missing, which removes it from the blend. */
-  rs: number | null;
-  trend: number | null;
-  volume: number | null;
-  liquidity: number | null;
-  contract: number | null;
+export interface TrendParts {
+  above50: boolean | null;
+  above200: boolean | null;
+  goldenOrder: boolean | null;
+  m1Percentile: number | null;
 }
+
+export interface TrendScore {
+  /** 0-100, or null when not one of the four could be read. */
+  value: number | null;
+  parts: TrendParts;
+  /** How many of the four contributed. */
+  measured: number;
+}
+
+export function trendScore(m: RowMetrics): TrendScore {
+  const parts: TrendParts = {
+    above50: m.pctAbove50 === null ? null : m.pctAbove50 >= 0,
+    above200: m.pctAbove200 === null ? null : m.pctAbove200 >= 0,
+    goldenOrder:
+      m.ema50 === null || m.ema200 === null ? null : m.ema50 >= m.ema200,
+    m1Percentile:
+      m.m1Percentile === null
+        ? null
+        : Math.min(100, Math.max(0, m.m1Percentile)),
+  };
+
+  const values: number[] = [];
+  if (parts.above50 !== null) values.push(parts.above50 ? 100 : 0);
+  if (parts.above200 !== null) values.push(parts.above200 ? 100 : 0);
+  if (parts.goldenOrder !== null) values.push(parts.goldenOrder ? 100 : 0);
+  if (parts.m1Percentile !== null) values.push(parts.m1Percentile);
+
+  return {
+    value:
+      values.length === 0
+        ? null
+        : values.reduce((sum, v) => sum + v, 0) / values.length,
+    parts,
+    measured: values.length,
+  };
+}
+
+export type ScoreComponents = Record<ScoreKey, number | null>;
 
 export interface RowScore {
   /** 0-100. */
   total: number;
   components: ScoreComponents;
   /** Components that had no reading, so the blend can be reported honestly. */
-  missing: Array<keyof ScoreComponents>;
+  missing: ScoreKey[];
+  /** The trend arithmetic, kept for the column's tooltip and the detail row. */
+  trend: TrendScore;
 }
 
 /**
@@ -235,56 +318,72 @@ export interface RowScore {
  *
  * ## Missing readings shrink the blend, they do not score zero
  *
- * This is the same rule the earnings logic has always applied, moved somewhere
- * else it matters. A name whose contract was never checked has an unknown
- * contract, not a bad one, and scoring the unknown as zero would rank it below
- * a name graded `Avoid` — which would be a statement about the data pipeline
- * dressed up as a statement about the stock. So an absent component is dropped
- * and the remaining weights are renormalised over what is left.
+ * This is the rule the earnings logic has always applied, moved somewhere else
+ * it matters. Most of the index has no dealer-positioning reading at all — the
+ * morning gamma job pulls a few dozen chains, not five hundred — and scoring
+ * those absences as zero would rank the whole index below the shortlist on the
+ * strength of which chains the job had time for. That would be a statement
+ * about this site's request budget dressed up as a statement about the market.
  *
- * The visible consequence is that ranking and grading are circular: only the
- * top N have contracts checked (see `OPTION_QUALITY_TOP_N`), and the contract
- * is a scoring component. The scan resolves this by scoring the four cheap
- * components first, grading the top of *that* order, then rescoring. Names can
- * therefore move a place or two once graded, and the page says so rather than
- * hiding it behind a single final number.
+ * So an absent component is dropped and the remaining weights are renormalised
+ * over what is left. The page prints which ones were dropped on every row.
  */
-export function scoreRow(row: ScanRow, weights: ScoreWeights = SCORE_WEIGHTS): RowScore {
+export function scoreRow(
+  row: ScanRow,
+  market: MarketContext,
+  weights: ScoreWeights = SCORE_WEIGHTS,
+): RowScore {
   const m = row.metrics;
+  const trend = trendScore(m);
 
   const components: ScoreComponents = {
     // Already a 0-100 percentile composite. Used as-is: rescaling a score the
     // reader can look up on /strength would make the two pages disagree.
     rs: Number.isFinite(m.rsScore) ? Math.min(100, Math.max(0, m.rsScore)) : null,
 
-    // -20% to +40% above the 200-day. Below the average is not zero — a name
-    // 2% under is a different situation from one 20% under, and flattening
-    // both to nothing would throw away the ordering at the interesting end.
-    trend: m.pctAbove200 === null ? null : ramp(m.pctAbove200, -20, 40),
+    trend: trend.value,
 
     // 0.5x to 2.5x its own baseline. 1.0 — the confirmation line — lands at 25,
     // so merely confirmed is a low score and heavy participation is a high one.
     volume: m.volumeRatio === null ? null : ramp(m.volumeRatio, 0.5, 2.5),
 
-    // Log scale, $10M to $10bn a day. Linear would put every megacap at 100
-    // and every ordinary name near zero, which measures index membership
-    // rather than tradeability.
-    liquidity:
-      m.avgDollarVolume > 0
-        ? ramp(Math.log10(m.avgDollarVolume), 7, 10)
-        : null,
+    /*
+     * -5% to +10% against the 20-session VWAP, so the component is a distance
+     * rather than a coin flip. A name 4% above the price most of the recent
+     * volume traded at is in a different position from one 0.1% above, and
+     * scoring both 100 would throw that away — which is most of what this
+     * reading has to offer.
+     */
+    vwap: m.pctAboveVwap === null ? null : ramp(m.pctAboveVwap, -5, 10),
 
-    contract:
-      row.optionQuality === null
-        ? null
-        : CONTRACT_POINTS[row.optionQuality.badge] ?? null,
+    /*
+     * A two-valued reading, scored 100 and 25 rather than 100 and 0.
+     *
+     * Negative dealer gamma is a real caution and it is stated in words on
+     * every row that has it, but the single-name dealer-sign assumption is the
+     * weakest thing this site relies on — nobody publishes who is on which
+     * side of a single stock's chain. Scoring it zero would let an inference
+     * knock a name down the list as hard as a measured fact does.
+     */
+    tickerGamma: row.regime === null ? null : row.regime === 'positive' ? 100 : 25,
+
+    /*
+     * Identical for every name on the page, which is exactly why it is safe
+     * here and was not safe as a gate. As one component of seven it lifts or
+     * lowers the whole list without touching the order; as a gate it emptied
+     * the page on every volatile morning.
+     */
+    spyGamma:
+      market.spyRegime === null ? null : market.spyRegime === 'positive' ? 100 : 25,
+
+    optionLiquidity: optionLiquidityScore(row),
   };
 
   let weighted = 0;
   let totalWeight = 0;
-  const missing: Array<keyof ScoreComponents> = [];
+  const missing: ScoreKey[] = [];
 
-  for (const key of Object.keys(components) as Array<keyof ScoreComponents>) {
+  for (const key of SCORE_KEYS) {
     const value = components[key];
     if (value === null) {
       missing.push(key);
@@ -300,10 +399,36 @@ export function scoreRow(row: ScanRow, weights: ScoreWeights = SCORE_WEIGHTS): R
     total: totalWeight > 0 ? weighted / totalWeight : 0,
     components,
     missing,
+    trend,
   };
 }
 
-// --- rule verdicts -----------------------------------------------------------
+/**
+ * Whether the options on this name trade at all.
+ *
+ * The weaker of contract volume and open interest, never their average — the
+ * same rule `ticker/liquidity.ts` applies, and for the same reason: they fail
+ * in different ways and averaging lets either paper over the other. A chain
+ * with vast open interest and no volume today is not liquid.
+ *
+ * Log-scaled, because linear would put every mega-cap chain at 100 and
+ * everything else near zero, which measures index membership rather than
+ * tradability. Null for any name the morning job did not pull a chain for,
+ * which is most of them.
+ */
+function optionLiquidityScore(row: ScanRow): number | null {
+  const volume = row.optionsVolume;
+  const openInterest = row.optionsOpenInterest;
+  if (volume === null || openInterest === null) return null;
+
+  // 1k to 1M contracts, which spans the S&P chains from the barely-quoted to
+  // the index proxies.
+  const byVolume = volume > 0 ? ramp(Math.log10(volume), 3, 6) : 0;
+  const byOi = openInterest > 0 ? ramp(Math.log10(openInterest), 3, 6) : 0;
+  return Math.min(byVolume, byOi);
+}
+
+// --- filter verdicts ---------------------------------------------------------
 
 function fmtDollars(v: number): string {
   if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}bn`;
@@ -311,24 +436,25 @@ function fmtDollars(v: number): string {
 }
 
 /**
- * The five rules, resolved against the reader's settings.
+ * The eight filters, resolved against the reader's settings.
  *
- * Always all five, always in `RULE_KEYS` order, never filtered and never
- * suppressed when the answer is red. A rule the reader has switched off still
- * returns its verdict — the caller renders it dimmed and stops counting it —
- * because a rule that vanishes when disabled takes its reading with it, and
- * the reading was the point.
+ * Always all eight, always in `RULE_KEYS` order, never filtered and never
+ * suppressed when the answer is red. A filter the reader has switched off
+ * still returns its verdict — the caller renders it dimmed and stops counting
+ * it — because a filter that vanishes when disabled takes its reading with it,
+ * and the reading was the point.
  *
- * `unknown` is never a pass and never a fail. It is the third state the whole
- * scanner is built around: a name whose 200-day average could not be computed
- * has not fallen below it, and a contract nobody pulled a chain for has not
- * scored badly. See `types.ts`.
+ * `unknown` is never a pass and never a fail. It is the third state this whole
+ * page is built around: a name whose 200-day average could not be computed has
+ * not fallen below it, and a chain nobody pulled has not scored badly.
  */
 export function ruleVerdicts(
   row: ScanRow,
   settings: FilterSettings,
+  market: MarketContext,
 ): Record<RuleKey, FilterVerdict> {
   const m = row.metrics;
+  const trend = trendScore(m);
 
   const rs: FilterVerdict = Number.isFinite(m.rsScore)
     ? m.rsScore >= settings.rsMin
@@ -336,25 +462,21 @@ export function ruleVerdicts(
       : { state: 'fail', detail: `RS ${m.rsScore.toFixed(0)}, below the ${settings.rsMin} cutoff` }
     : { state: 'unknown', detail: 'no relative-strength reading' };
 
-  const ema: FilterVerdict =
-    m.pctAbove200 === null
+  const trendVerdict: FilterVerdict =
+    trend.value === null
       ? {
           state: 'unknown',
           detail:
-            'fewer than 200 daily bars, so the long-term trend could not be read',
+            'not one of the four trend readings could be taken, so there is no trend score',
         }
-      : m.pctAbove200 >= settings.trendPct
+      : trend.value >= settings.trendMin
         ? {
             state: 'pass',
-            detail: `${m.pctAbove200 >= 0 ? '' : '-'}${Math.abs(m.pctAbove200).toFixed(0)}% ${
-              m.pctAbove200 >= 0 ? 'above' : 'below'
-            } the 200-day average`,
+            detail: `trend ${trend.value.toFixed(0)}, at or above the ${settings.trendMin} cutoff (${describeTrendParts(trend)})`,
           }
         : {
             state: 'fail',
-            detail: `${Math.abs(m.pctAbove200).toFixed(0)}% ${
-              m.pctAbove200 >= 0 ? 'above' : 'below'
-            } the 200-day average, under the ${settings.trendPct}% cutoff`,
+            detail: `trend ${trend.value.toFixed(0)}, below the ${settings.trendMin} cutoff (${describeTrendParts(trend)})`,
           };
 
   const volume: FilterVerdict =
@@ -373,6 +495,41 @@ export function ruleVerdicts(
             detail: `${m.volumeRatio.toFixed(2)}x its normal volume, under the ${settings.volumeMult.toFixed(2)}x cutoff`,
           };
 
+  const vwap: FilterVerdict =
+    m.pctAboveVwap === null
+      ? {
+          state: 'unknown',
+          detail:
+            'fewer than twenty sessions of price and volume, so no daily VWAP could be computed',
+        }
+      : m.pctAboveVwap >= 0
+        ? {
+            state: 'pass',
+            detail: `${m.pctAboveVwap.toFixed(1)}% above its 20-session VWAP`,
+          }
+        : {
+            state: 'fail',
+            detail: `${Math.abs(m.pctAboveVwap).toFixed(1)}% below its 20-session VWAP`,
+          };
+
+  const gamma: FilterVerdict =
+    row.regime === null
+      ? {
+          state: 'unknown',
+          detail:
+            'no chain was pulled for this name this morning, so its own dealer positioning was not measured',
+        }
+      : row.regime === 'positive'
+        ? { state: 'pass', detail: 'its own dealer positioning reads positive' }
+        : { state: 'fail', detail: 'its own dealer positioning reads negative' };
+
+  const spy: FilterVerdict =
+    market.spyRegime === null
+      ? { state: 'unknown', detail: 'the SPY chain did not answer, so the market regime is unmeasured' }
+      : market.spyRegime === 'positive'
+        ? { state: 'pass', detail: "the wider market's dealer positioning reads positive" }
+        : { state: 'fail', detail: "the wider market's dealer positioning reads negative" };
+
   const liquidity: FilterVerdict =
     m.avgDollarVolume > 0
       ? m.avgDollarVolume >= settings.minDollarVolume
@@ -386,24 +543,56 @@ export function ruleVerdicts(
           }
       : { state: 'unknown', detail: 'no turnover reading' };
 
-  return { rs, ema, volume, liquidity, contract: contractVerdict(row, settings) };
+  return {
+    rs,
+    trend: trendVerdict,
+    volume,
+    vwap,
+    gamma,
+    spy,
+    liquidity,
+    contract: contractVerdict(row, settings),
+  };
+}
+
+/** The four trend readings, spelled out, for the detail beside the number. */
+export function describeTrendParts(trend: TrendScore): string {
+  const { parts } = trend;
+  const say = (value: boolean | null, yes: string, no: string) =>
+    value === null ? null : value ? yes : no;
+
+  const items = [
+    say(parts.above50, 'above its 50-day', 'below its 50-day'),
+    say(parts.above200, 'above its 200-day', 'below its 200-day'),
+    say(parts.goldenOrder, '50 above 200', '50 below 200'),
+    parts.m1Percentile === null
+      ? null
+      : `1-month return in the ${ordinal(Math.round(parts.m1Percentile))} percentile`,
+  ].filter((item): item is string => item !== null);
+
+  return items.length > 0 ? items.join(', ') : 'nothing measurable';
+}
+
+function ordinal(n: number): string {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  const suffix = { 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th';
+  return `${n}${suffix}`;
 }
 
 /**
- * The contract rule.
+ * The contract filter.
  *
  * ## Not checked is grey, not red
  *
  * The chain provider answers a limited number of requests a day and the
  * morning gamma job has first call on them, so only the top names by score are
- * graded — see `OPTION_QUALITY_TOP_N`. Everything below that has an *unknown*
- * contract. It is not dropped and it is not marked as failing, because it was
- * never tested; it renders grey and says so, exactly as an unknown earnings
- * date does.
+ * graded. Everything below that has an *unknown* contract. It is not dropped
+ * and it is not marked as failing, because it was never tested; it renders
+ * grey and says so, exactly as an unknown earnings date does.
  *
- * A graded contract is then checked against the reader's own DTE and delta
- * window as well as its badge, because the badge was computed against the
- * shipped window and the reader may have moved it.
+ * It filters and it does not score — see the note on `RULE_KEYS`. A name is
+ * never pushed down the ranking for a chain nobody had budget to pull.
  */
 function contractVerdict(row: ScanRow, settings: FilterSettings): FilterVerdict {
   const quality = row.optionQuality;
@@ -460,15 +649,15 @@ export function excludedByEarnings(row: ScanRow, bufferDays: number): boolean {
   return excludedForEarnings(row.earnings, bufferDays);
 }
 
-// --- the scored, filtered, ordered list --------------------------------------
+// --- the scored, judged, ordered list ----------------------------------------
 
 export interface ScoredRow {
   row: ScanRow;
   score: RowScore;
   verdicts: Record<RuleKey, FilterVerdict>;
-  /** Rules that are enabled and did not come back `pass`, in display order. */
+  /** Filters that are enabled and did not come back `pass`, in display order. */
   failing: RuleKey[];
-  /** True when every *enabled* rule passed. `unknown` is not a pass. */
+  /** True when every *enabled* filter passed. `unknown` is not a pass. */
   passes: boolean;
   /** Phrase naming what stopped it. Empty when nothing did. */
   failingLabel: string;
@@ -479,18 +668,19 @@ export interface ScoredRow {
 export function scoreAndJudge(
   rows: ScanRow[],
   settings: FilterSettings,
+  market: MarketContext,
   weights: ScoreWeights = SCORE_WEIGHTS,
 ): ScoredRow[] {
   return rows
     .map((row) => {
-      const verdicts = ruleVerdicts(row, settings);
+      const verdicts = ruleVerdicts(row, settings, market);
       const failing = RULE_KEYS.filter(
         (key) => settings.enabled[key] && verdicts[key].state !== 'pass',
       );
 
       return {
         row,
-        score: scoreRow(row, weights),
+        score: scoreRow(row, market, weights),
         verdicts,
         failing,
         passes: failing.length === 0,
@@ -506,9 +696,8 @@ export function scoreAndJudge(
 /**
  * Score descending, then symbol, so the order is total and stable.
  *
- * Ties are common — two names with no contract and the same RS band land on
- * the same number to several places — and an unstable sort would reshuffle the
- * list on every slider tick for no reason the reader could see.
+ * Ties are common and an unstable sort would reshuffle the list on every
+ * slider tick for no reason the reader could see.
  */
 function byScoreThenSymbol(a: ScoredRow, b: ScoredRow): number {
   if (b.score.total !== a.score.total) return b.score.total - a.score.total;
@@ -518,19 +707,17 @@ function byScoreThenSymbol(a: ScoredRow, b: ScoredRow): number {
 // --- the funnel --------------------------------------------------------------
 
 /**
- * Where the list drops out, stage by stage.
+ * Where the matching set narrows, stage by stage.
  *
- * This is the piece that was missing. The old page ANDed five rules and
- * printed the survivors, so on a zero-result morning there was no way at all
- * to see *which* step ate the list — whether the market had no strong names,
- * or the option window was set somewhere nothing lives. The counts are
- * cumulative and in the order a reader would ask them, and each stage is
- * clickable on the page.
+ * The counts are cumulative and in the order a reader would ask them, and each
+ * stage is clickable on the page. Every stage counts names that cleared *this
+ * stage and all before it*, so they are monotonically non-increasing by
+ * construction and the arithmetic is checkable by eye. A disabled filter is
+ * not a stage — it is omitted from the strip rather than shown as a step
+ * nothing fell out of.
  *
- * Every stage counts names that cleared *this stage and all before it*, so
- * they are monotonically non-increasing by construction and the arithmetic is
- * checkable by eye. A disabled rule is not a stage — it is omitted from the
- * strip rather than shown as a step nothing fell out of.
+ * Reaching zero here is now a fact about the filters rather than a blank page:
+ * the table underneath still renders the top of the ranking.
  */
 export interface FunnelStage {
   key: 'scanned' | RuleKey | 'earnings';
@@ -540,8 +727,17 @@ export interface FunnelStage {
   symbols: string[];
 }
 
-/** The order the stages are asked in. Trend first, because most names clear it. */
-export const FUNNEL_ORDER: RuleKey[] = ['ema', 'rs', 'volume', 'liquidity', 'contract'];
+/** The order the stages are asked in. */
+export const FUNNEL_ORDER: RuleKey[] = [
+  'rs',
+  'trend',
+  'volume',
+  'vwap',
+  'gamma',
+  'spy',
+  'liquidity',
+  'contract',
+];
 
 export function buildFunnel(
   scored: ScoredRow[],
@@ -569,9 +765,9 @@ export function buildFunnel(
     });
   }
 
-  // Earnings last, and always present: it is not one of the five rules and it
-  // is not switchable off, but it removes names and a funnel that hid that
-  // would not add up against the list underneath it.
+  // Earnings last, and always present: it is not one of the filters and it is
+  // not switchable off, but it removes names from the matching set and a
+  // funnel that hid that would not add up against the list underneath it.
   alive = alive.filter((s) => !s.earningsExcluded);
   stages.push({
     key: 'earnings',
@@ -584,26 +780,24 @@ export function buildFunnel(
 }
 
 const FUNNEL_STAGE_LABEL: Record<RuleKey, (s: FilterSettings) => string> = {
-  ema: (s) =>
-    s.trendPct === 0
-      ? 'above 200-day'
-      : `${s.trendPct > 0 ? '+' : ''}${s.trendPct}% vs 200-day`,
   rs: (s) => `cleared RS ${s.rsMin}`,
+  trend: (s) => `trend ${s.trendMin}+`,
   volume: (s) => `volume ${s.volumeMult.toFixed(2)}x`,
+  vwap: () => 'above daily VWAP',
+  gamma: () => 'own gamma positive',
+  spy: () => 'market gamma positive',
   liquidity: (s) => `liquid ${fmtDollars(s.minDollarVolume)}`,
   contract: () => 'contract OK',
 };
 
 /**
- * The market regime, as a sentence rather than a rule.
+ * The market regime, as a sentence.
  *
- * It used to be the fifth gate, evaluated per name. That was a category error
- * with a real cost: the regime is one market-wide condition, so on a volatile
- * morning it failed identically for all 503 names and the page went blank —
- * every day the market was volatile, regardless of what any individual name
- * was doing. A single banner says the same thing once, and the optional
- * `requireCalmMarket` toggle lets a reader who wants that behaviour back have
- * it, switched off by default.
+ * It is also one of the seven scoring components and one of the eight filters,
+ * but it is stated here in words because a reader needs to know it once, in
+ * plain English, before reading anything below it. It used to be a per-name
+ * gate, which was a category error with a real cost: one market-wide condition
+ * failing identically for all 503 names blanked the page on volatile mornings.
  */
 export const MARKET_REGIME_NOTE = {
   positive:

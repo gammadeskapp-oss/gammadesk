@@ -59,7 +59,9 @@ export default async function MoversPage() {
    * telling this page's reader something they cannot check.
    */
   const scannerPassed = scannerView?.scan
-    ? scoreAndJudge(scannerView.scan.rows, DEFAULT_FILTERS).filter(
+    ? scoreAndJudge(scannerView.scan.rows, DEFAULT_FILTERS, {
+        spyRegime: scannerView.scan.spyRegime,
+      }).filter(
         (entry) => entry.passes && !entry.earningsExcluded,
       ).length
     : null;
@@ -137,7 +139,7 @@ export default async function MoversPage() {
             <p className="mt-1.5 text-term-dim">
               <span className="font-bold text-term-text">
                 {scannerPassed} {scannerPassed === 1 ? 'name' : 'names'} passed
-                all five rules today, at the scanner&rsquo;s default settings.
+                every filter today, at the scanner&rsquo;s default settings.
               </span>{' '}
               Those are on{' '}
               <a href="/scanner" className="underline decoration-dotted hover:text-term-text">

@@ -29,7 +29,9 @@ export const PAGE_DESCRIPTIONS: Record<string, string> = {
   '/movers':
     'S&P 500 names that closed up on heavy volume in the last completed session, with the context to check each one against. Not a scanner result.',
   '/scanner':
-    'The S&P 500 scored against five rules and ranked, with every rule shown passed, failed or not measured.',
+    'The S&P 500 scored 0-100 and ranked, with every component of the score shown on every name.',
+  '/trackrecord':
+    'Every pick the scanner has logged and what the close did afterwards — losers included, nothing filtered out.',
   '/scanner/history':
     'Every past morning the scanner ran, and how many names it produced each day.',
   '/strength':

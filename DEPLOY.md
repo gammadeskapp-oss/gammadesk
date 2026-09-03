@@ -231,10 +231,32 @@ only take effect on a new build.
 | `/api/scanner/gamma` — refresh gamma for scanner candidates | 12:30 **and** 13:30 | 08:30 | 08:30 |
 | `/api/scanner/run` — run the morning scan | 13:35 **and** 14:35 | 09:35 | 09:35 |
 | `/api/log/snapshot` — record the day's flip level and magnets | 14:45 | 10:45 | 09:45 |
+| `/api/trackrecord/log` — write down the scanner's top five picks | 20:15 **and** 21:15 | 16:15 | 16:15 |
+| `/api/trackrecord/settle` — fill in their 1-, 3- and 5-day returns | 20:20 **and** 21:20 | 16:20 | 16:20 |
 | `/api/log/settle` — score it against the session's high and low | 21:15 | 17:15 | **16:15** |
 | `/api/flow/refresh` — rescan chains for unusual activity | 21:40 | 17:40 | 16:40 |
 | `/api/groups/refresh` — recompute group scores and breadth | 22:00 | 18:00 | 17:00 |
 | `/api/digest` — build the digest and post it to Discord | 22:20 | 18:20 | 17:20 |
+
+### The scanner's track record also needs two jobs, and for the same reason
+
+`/api/trackrecord/log` writes down what the scanner put at the top *this
+morning*, along with the closing price. It does not re-score anything: the
+picks come from the scan stored at 09:35, so the pick always precedes the
+outcome. `/api/trackrecord/settle` then fills in what those closes did one,
+three and five trading sessions later, for every past pick.
+
+Both are registered at two UTC times with `?when=scheduled`, like the scanner
+jobs, because a winter run at the summer time would fire at 15:15 New York —
+before the bell — and write an intraday quote into a permanent record under the
+heading "close". The guard in `lib/scanner/schedule.ts` lets exactly one of the
+two through.
+
+The settling job only ever *adds*: it never rewrites a filled horizon and never
+removes an entry. That is deliberate and it is the whole safety property of the
+record — see `lib/trackRecord/settle.ts`. There is also no backfill, and there
+will not be one: reconstructing which names the scanner would have picked on
+past mornings means choosing them already knowing what happened next.
 
 ### Why the log needs two jobs, not one
 

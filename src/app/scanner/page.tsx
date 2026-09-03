@@ -8,13 +8,15 @@ import { getBreadth } from '@/lib/breadth';
 import { breadthSentence } from '@/lib/breadth/wording';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { getScannerView, storeStatus } from '@/lib/scanner';
+import { DEFAULT_FILTERS } from '@/lib/scanner/score';
+import { SCANNER_TOP_N } from '@/lib/scanner/types';
 import { formatEtClock } from '@/lib/scanner/schedule';
 import { formatAsOf } from '@/lib/time';
 
 export const metadata: Metadata = {
   title: 'Scanner',
   description:
-    'The S&P 500 scored against five rules every morning and ranked, with every rule state shown on every name — passed, failed or not measured.',
+    'The S&P 500 scored 0-100 every morning and ranked, with every component of the score shown on every name — measured, or honestly marked as not measured.',
 };
 
 export const dynamic = 'force-dynamic';
@@ -47,8 +49,8 @@ export default async function ScannerPage() {
           It is here because it explains the shape of the list — a morning
           where almost nothing is participating produces few candidates, and
           knowing that is different from concluding the scan is broken. It is
-          deliberately NOT a rule: nothing downstream reads it, no row is
-          included or excluded by it, and the five rules are still five.
+          deliberately NOT part of the score: nothing downstream reads it, and
+          no row is ranked or marked by it.
         */}
         {breadth?.computed && (
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-2xs text-term-faint">
@@ -59,7 +61,7 @@ export default async function ScannerPage() {
             </span>
             <span>{breadthSentence(breadth.computed)}</span>
             <span className="text-term-dim">
-              Context only — it is not one of the rules.
+              Context only — it is not part of the score.
             </span>
           </p>
         )}
@@ -79,11 +81,11 @@ export default async function ScannerPage() {
             the day has barely started.
           </p>
           <p className="mt-2 text-term-dim">
-            This page reports which names passed the rules and which did not,
-            ranked. It does not say what to do about any of them, and there is
-            no position sizing, target or stop anywhere on it. A name at the
-            top of the list is the name nothing scored higher than — that is
-            all a rank is.
+            This page ranks names and shows what each part of the ranking was
+            built from. It does not say what to do about any of them, there is
+            no position sizing, target or stop anywhere on it, and no row here
+            is a suggestion to buy or sell. A name at the top of the list is the
+            name nothing scored higher than &mdash; that is all a rank is.
           </p>
         </div>
 
@@ -149,7 +151,7 @@ export default async function ScannerPage() {
               >
                 Moved Last Session
               </a>
-              . Nothing on it has passed these rules.
+              . Nothing on it has been scored or ranked here.
             </p>
 
             <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-faint">
@@ -171,126 +173,123 @@ export default async function ScannerPage() {
 
           <p className="mt-1.5">
             <span className="text-term-dim">
-              It ranks. It used to gate, and the gating is what broke it.{' '}
+              One score, seven components, the whole index.{' '}
             </span>
-            Five rules were ANDed together and the page printed whatever
-            survived all five. Two runs in a row that was zero names out of
-            five hundred, and an empty page cannot tell you anything &mdash;
-            not which rule ate the list, not how close anything came, not
-            whether the market was the problem or the numbers were. So the five
-            are scored and blended into one 0&ndash;100 composite, the whole
-            index is ordered by it, and the top {view.contractTopN} are always
-            on the page. Names clearing every rule come first; the rest fill
-            the table below them, dimmed, with the rules they failed in red and
-            the reading that failed them printed beside it.
+            Every scoreable name in the S&amp;P 500 gets a 0&ndash;100
+            composite: relative strength (counted double), trend, volume,
+            distance above its daily VWAP, its own dealer gamma, the
+            market&rsquo;s dealer gamma, and how well its options actually
+            trade. The top {SCANNER_TOP_N} by that score are always on the page,
+            and each of the seven is its own column, so the composite is a
+            number you can check rather than one you have to trust.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
-              Every cutoff is yours, and none of them costs a request.{' '}
+              The trend column is four readings averaged.{' '}
             </span>
-            The relative-strength cutoff, the volume multiple, the turnover
-            floor, the distance above the {view.trendEmaPeriod}-day average,
-            the expiry and delta window, the earnings buffer, and an on/off
-            switch for each of the five rules. They open on the shipped
-            defaults &mdash; RS {view.rsMin}, volume confirmed, above the
-            200-day &mdash; so every change you make is visibly a change from
-            something. All of it is applied in the browser to the snapshot the
-            morning job stored, so moving a slider makes no network request at
-            all. That is not a nicety: the scan spends the chain
-            provider&rsquo;s daily budget, and a control that could re-run it
-            would put that budget at the mercy of a drag gesture. Your settings
-            live in the address bar, so a configuration can be bookmarked or
-            sent to someone.
+            Above its 50-day average, above its 200-day average, the 50 above
+            the 200, and where its last month&rsquo;s return ranks against the
+            rest of the index. Averaged rather than ANDed, because the point of
+            a column is to tell a name that has three of the four from a name
+            that has none &mdash; and a reading that could not be taken is left
+            out of the average rather than counted against the name. Sort by it,
+            or by any other component, from the column heading.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
-              The funnel is the answer to &ldquo;why is this empty&rdquo;.{' '}
+              Filters narrow the list. They cannot empty it.{' '}
             </span>
-            One row of cumulative counts above the table: how many were
-            scanned, then how many cleared each rule in turn, then how many are
-            clear of earnings. Each count is the names that cleared that step{' '}
-            <em>and every step before it</em>, so the numbers only ever go down
-            and the arithmetic checks by eye. Click one to see exactly which
-            names reached it. This is the piece that was missing, and its
-            absence is why a zero-result morning was unreadable.
+            This used to be five rules ANDed together with the survivors
+            printed, and twice in a row that was zero names out of five hundred
+            &mdash; an empty page that could not tell you which rule ate the
+            list. Now the eight filters decide which rows are <em>marked</em> as
+            matching, and the table shows the top {SCANNER_TOP_N} by score
+            either way. They open on RS {DEFAULT_FILTERS.rsMin} and the turnover
+            floor with everything else switched off, so what you see first is
+            the ranking rather than one opinion about it. Your settings live in
+            the address bar, so a configuration can be bookmarked or sent to
+            someone, and every change is applied in the browser to the snapshot
+            the morning job stored &mdash; moving a control makes no network
+            request at all.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
-              The market regime is a banner, not a rule.{' '}
+              Every row says why it is there, next to what to be careful about.{' '}
             </span>
-            It was the fifth gate, evaluated per name &mdash; which was a
-            category error with a real cost. It is one market-wide condition,
-            identical for every stock in the index, so on a volatile morning
-            all five hundred names failed at the same step and the page went
-            blank for a reason that had nothing to do with any of them. It is
-            stated once, at the top, in plain English. There is one optional
-            toggle to hide the list when the market is not calm, and it is off
-            by default.
+            The reasons are assembled from the components that actually scored
+            highest, so the sentence and the columns cannot disagree, and when
+            nothing scores strongly the line says exactly that rather than
+            inventing a reason. The watch line beside it &mdash; earnings,
+            extension, a contract graded Caution, negative dealer positioning
+            &mdash; is rendered in the same size, on the same row, never behind
+            a toggle.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
-              The contract is the fifth rule, and it is the honest one.{' '}
+              The market regime is one component of seven.{' '}
             </span>
-            A name can clear everything above and still have a chain nobody
-            should touch. Each graded name is scored on the best call inside
-            your expiry and delta window: Excellent, Tradable, Caution or
-            Avoid, with the days to expiry, delta, open interest and bid/ask
-            spread shown beside it. Cboe answers a limited number of chains per
-            window and the {schedule.gammaEt} gamma job has first call on them,
-            so contracts are pulled for the top {view.contractTopN} by score
-            and nothing else &mdash; which is exactly how many rows the table
-            shows, so every name on screen has had all five of its rules
-            actually tested. Anything below that reads{' '}
-            <span className="text-term-dim">contract not checked</span> in
-            grey. That is unknown, not failed: nobody looked, and a name is
-            never pushed down the list for a reading nobody took.
+            It was a per-name gate once, which was a category error with a real
+            cost: one market-wide condition, identical for all five hundred
+            names, blanked the page on every volatile morning. Being identical
+            for everyone, it moves the whole list and never the order of it. It
+            is also stated once in plain English at the top.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
+              The contract filters, and deliberately does not score.{' '}
+            </span>
+            Cboe answers a limited number of chains per window and the{' '}
+            {schedule.gammaEt} gamma job has first call on them, so contracts
+            are graded for the top {view.contractTopN} by score and nothing
+            else. Making that grade part of the score would have meant the score
+            deciding who got graded and the grade changing the score. It marks a
+            row and cautions on it; it never moves a name up or down. Anything
+            ungraded reads{' '}
+            <span className="text-term-dim">contract not checked</span> in grey
+            &mdash; unknown, not failed.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
               Unknown is never folded into failed.{' '}
             </span>
-            A rule that could not be evaluated &mdash; a chain that did not
-            answer, a name without {view.trendEmaPeriod} daily bars, an option
-            whose spread was not quoted &mdash; is shown grey with the reason
-            given, and its component is dropped from the score rather than
-            counted as zero. Scoring an unknown as zero would rank a name below
-            one graded Avoid, which would be a statement about this
-            site&rsquo;s data pipeline dressed up as a statement about the
-            stock. Missing data masquerading as a bearish reading is the single
-            most misleading thing this page could do.
+            A component that could not be measured &mdash; no chain pulled for
+            that name, fewer than 200 daily bars, no volume history &mdash;
+            shows a dash and is dropped from the blend rather than scored zero.
+            Most of the index has no dealer-positioning reading at all, and
+            scoring those absences as zero would rank the whole market below the
+            few dozen names the morning job had budget for: a statement about
+            this site&rsquo;s request budget dressed up as a statement about
+            stocks.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
-              Earnings inside your buffer remove a name.{' '}
+              The VWAP here is a daily one, not the intraday one.{' '}
             </span>
-            Holding an option through a report is a different trade from the
-            one every rule above tests for. Dates come from Tradier&rsquo;s
-            fundamentals calendar &mdash; the event calendar this site keeps is
-            macro only and carries no company dates. Where no date can be
-            established the name is kept and its watch line says the date is
-            unknown; an unknown date is never read as &ldquo;no earnings
-            soon&rdquo;. The default buffer is 10 days, and the run rate above
-            is always recorded at that default so ninety days of history stay
-            comparable with each other.
+            It is the volume-weighted average price of the last twenty{' '}
+            <em>daily</em> bars, not the session VWAP a trading platform draws
+            from the opening bell. The session figure cannot be had for five
+            hundred names without five hundred intraday requests every morning;
+            this one costs nothing and comes from price history already stored.
+            The column and its tooltip both say which it is.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
               Scoring the whole index costs nothing upstream.{' '}
             </span>
-            Every reading a rule needs &mdash; the {view.trendEmaPeriod}-day
-            and 20-day averages, the volume ratio, the turnover &mdash; is
-            already in the relative-strength digest this site stores and reads
-            on every page view. The old scan pulled three bar series per
-            candidate, which is why it could only ever look at the two dozen
-            names that had already cleared the floor, and why the floor could
-            never be one of these controls.
+            Every reading &mdash; the averages, the VWAP, the volume ratio, the
+            turnover, the one-month percentile &mdash; comes from the
+            relative-strength history this site already stores. The old scan
+            pulled three bar series per candidate, which is why it could only
+            ever look at the two dozen names that had already cleared a floor,
+            and why the floor could never be one of these controls.
           </p>
 
           <p className="mt-2">
@@ -298,27 +297,28 @@ export default async function ScannerPage() {
               A ranking is an ordering, and nothing more.{' '}
             </span>
             A name at the top of the table is the name nothing scored higher
-            than. It is not a suggestion, the page does not say what to do
-            about it, and there is no position size, target or stop anywhere on
-            it. Every row keeps a watch line naming what would undo it, and
-            failing rows are dimmed rather than removed &mdash; a list you
-            cannot see the failures in is a list you have to take on trust.
+            than. It is not a suggestion, the page does not say what to do about
+            it, and there is no position size, target or stop anywhere on it.
+            What this ranking has actually produced afterwards is a separate
+            question, answered with numbers rather than assurances on the{' '}
+            <a
+              href="/trackrecord"
+              className="underline decoration-dotted hover:text-term-text"
+            >
+              scanner track record
+            </a>{' '}
+            page &mdash; every pick logged, winners and losers alike.
           </p>
 
           <p className="mt-2">
             <span className="text-term-dim">
               Nadaraya-Watson is a line on the chart and nothing else.{' '}
             </span>
-            The non-repainting endpoint estimator hugs recent price, while the
-            band width is the average absolute deviation across the whole{' '}
-            {view.nw.lookback}-bar window, so the quantity being tested is
-            structurally much smaller than the one setting the threshold and
-            price clears the band only rarely. It gated nothing and now ranks
-            nothing. Current settings: bandwidth {view.nw.bandwidth}, lookback{' '}
-            {view.nw.lookback}, multiplier {view.nw.mult}. The band is computed
-            on 1H and daily only &mdash; the bar source serves about half the
-            window at the 4-hour interval, and edges measured over the wrong
-            window are worse than no edges.
+            It gates nothing and scores nothing. Current settings: bandwidth{' '}
+            {view.nw.bandwidth}, lookback {view.nw.lookback}, multiplier{' '}
+            {view.nw.mult}. The band is computed on 1H and daily only &mdash;
+            the bar source serves about half the window at the 4-hour interval,
+            and edges measured over the wrong window are worse than no edges.
           </p>
 
           {gamma && scan && gamma.date !== scan.date && (

@@ -7,8 +7,9 @@
  * checked here are the ones that would cost someone money if they broke:
  *
  *  1. `unknown` never becomes `pass`, and never becomes a zero in the score.
- *     A rule nobody could evaluate must not push a name down the list, and
- *     must not let it up.
+ *     A reading nobody could take must not push a name down the list, and must
+ *     not let it up. Most of the index has no dealer-positioning reading on any
+ *     given morning, so this one carries real weight.
  *  2. An unknown earnings date is never treated as "no earnings soon". This is
  *     the one that would actually cost money — a name reporting tomorrow, near
  *     the top of a ranked list, with nothing said about it.
@@ -30,7 +31,7 @@ registerTsImports();
 const { gradeContract, pickContract, contractSummary } = await import(
   '../src/lib/scanner/optionQuality.ts'
 );
-const { buildWatchLine, whyItRanks, readExtension } = await import(
+const { buildWatchLine, whyItMatched, whyItRanks, readExtension } = await import(
   '../src/lib/scanner/evaluate.ts'
 );
 const {
@@ -43,6 +44,8 @@ const {
 
   scoreAndJudge,
   scoreRow,
+  trendScore,
+  SCORE_KEYS,
 } = await import('../src/lib/scanner/score.ts');
 const { paramsFromSettings, settingsFromParams, isDefault } = await import(
   '../src/lib/scanner/filterState.ts'
@@ -52,6 +55,7 @@ const { excludedForEarnings, daysBetween } = await import(
 );
 const {
   RULE_KEYS,
+  SCANNER_TOP_N,
   EARNINGS_EXCLUSION_DAYS,
   EXTENDED_PCT,
   OPTION_WINDOW,
@@ -67,13 +71,36 @@ function ok(label, condition, detail) {
   console.error(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`);
 }
 
+/**
+ * Stable JSON, so a settings object can be compared by value.
+ *
+ * `JSON.stringify` preserves insertion order, and the URL round trip rebuilds
+ * the object from scratch — so an identical configuration serialises to a
+ * different string purely because the keys came back in a different order.
+ * Comparing that would fail on a difference no reader could ever see.
+ */
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonical(value[key])]),
+    );
+  }
+  return value;
+}
+
+const sameSettings = (a, b) =>
+  JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+
 function section(name) {
   console.log(`\n${name}`);
 }
 
 // --- fixtures ----------------------------------------------------------------
 
-/** A name that clears every rule at the shipped defaults. */
+/** A name that clears every filter, with every component measurable. */
 function row(overrides = {}) {
   const { metrics, ...rest } = overrides;
   return {
@@ -83,12 +110,17 @@ function row(overrides = {}) {
     metrics: {
       rsScore: 94,
       rsRank: 12,
+      m1Percentile: 88,
       pctAbove200: 12,
       ema200: 89,
+      pctAbove50: 6,
+      ema50: 94,
       pctAbove20: 1,
       ema20: 99,
       volumeRatio: 1.8,
       avgDollarVolume: 900_000_000,
+      vwap20: 96,
+      pctAboveVwap: 4,
       ...metrics,
     },
     equityTier: 'HIGH',
@@ -96,6 +128,8 @@ function row(overrides = {}) {
     regime: 'positive',
     netGex: 1e9,
     magnets: [],
+    optionsVolume: 40_000,
+    optionsOpenInterest: 120_000,
     earnings: { state: 'known', dateIso: '2026-10-15', daysAway: 45, source: 'test' },
     extension: { pctAbove20Ema: 1, ema20: 99, extended: false },
     optionQuality: null,
@@ -137,25 +171,49 @@ const passing = (overrides = {}) =>
   row({ optionQuality: quality(), ...overrides });
 
 const D = DEFAULT_FILTERS;
+/** Every filter switched on, for the checks that are about one filter. */
+const ALL_ON = {
+  ...D,
+  enabled: Object.fromEntries(RULE_KEYS.map((key) => [key, true])),
+};
 const clean = { earningsDaysAway: 45, earningsUnknown: false };
-const judgeOne = (r, settings = D) => scoreAndJudge([r], settings)[0];
+/** A calm market, so the market component and filter have something to read. */
+const MARKET = { spyRegime: 'positive' };
+const judgeOne = (r, settings = ALL_ON, market = MARKET) =>
+  scoreAndJudge([r], settings, market)[0];
 
-// --- 1. five rules -----------------------------------------------------------
+// --- 1. the filters ----------------------------------------------------------
 
-section('Five rules, scored rather than ANDed');
+section('Eight filters, which narrow the list and never empty it');
 
-ok('there are exactly five', RULE_KEYS.length === 5, RULE_KEYS.join(','));
+ok('there are exactly eight', RULE_KEYS.length === 8, RULE_KEYS.join(','));
 ok('the contract is one of them', RULE_KEYS.includes('contract'));
-for (const gone of ['vwap', 'gamma', 'nw', 'spyGamma']) {
-  ok(`${gone} is not a rule`, !RULE_KEYS.includes(gone), 'the market regime is a banner now');
+for (const added of ['trend', 'vwap', 'gamma', 'spy']) {
+  ok(`${added} is a filter`, RULE_KEYS.includes(added));
 }
+ok(
+  'the old distance-above-200 rule is gone, replaced by the trend score',
+  !RULE_KEYS.includes('ema'),
+);
 
-ok('all five passing passes', judgeOne(passing()).passes);
+section('The shipped defaults are RS and liquidity, and nothing else');
+
+ok('relative strength is on', D.enabled.rs === true);
+ok('the liquidity floor is on', D.enabled.liquidity === true);
+ok('the RS cutoff is 80', D.rsMin === 80, String(D.rsMin));
+ok(
+  'every other filter ships off',
+  RULE_KEYS.filter((key) => D.enabled[key]).sort().join(',') === 'liquidity,rs',
+  RULE_KEYS.filter((key) => D.enabled[key]).join(','),
+);
+
+ok('a clean row matches every filter', judgeOne(passing()).passes);
 
 const failers = {
   rs: { rsScore: D.rsMin - 10 },
-  ema: { pctAbove200: -5 },
+  trend: { pctAbove200: -5, pctAbove50: -4, ema50: 80, ema200: 95, m1Percentile: 8 },
   volume: { volumeRatio: 0.4 },
+  vwap: { pctAboveVwap: -3 },
   liquidity: { avgDollarVolume: 20_000_000 },
 };
 
@@ -165,7 +223,7 @@ for (const [key, metrics] of Object.entries(failers)) {
   ok(`a failed ${key} stops it passing`, !judged.passes);
   ok(
     `a failed ${key} still appears in the list`,
-    scoreAndJudge([passing({ metrics })], D).length === 1,
+    scoreAndJudge([passing({ metrics })], ALL_ON, MARKET).length === 1,
     'a failing name is dimmed, never removed — that is the whole rebuild',
   );
   ok(
@@ -180,13 +238,30 @@ ok(
   judgeOne(passing({ optionQuality: quality({ badge: 'avoid' }) })).verdicts.contract.state ===
     'fail',
 );
+ok(
+  'negative own gamma fails the gamma filter',
+  judgeOne(passing({ regime: 'negative' })).verdicts.gamma.state === 'fail',
+);
+ok(
+  'a volatile market fails the market filter, for every name identically',
+  scoreAndJudge([passing(), passing({ symbol: 'B' })], ALL_ON, {
+    spyRegime: 'negative',
+  }).every((e) => e.verdicts.spy.state === 'fail'),
+);
 
 section('Unknown is never folded into pass, and never into fail');
 
 const unknowns = {
   rs: { rsScore: Number.NaN },
-  ema: { pctAbove200: null },
+  trend: {
+    pctAbove200: null,
+    ema200: null,
+    pctAbove50: null,
+    ema50: null,
+    m1Percentile: null,
+  },
   volume: { volumeRatio: null },
+  vwap: { pctAboveVwap: null },
   liquidity: { avgDollarVolume: 0 },
 };
 
@@ -216,10 +291,20 @@ ok(
   judgeOne(row({ optionQuality: quality({ badge: 'unknown', contract: null }) })).verdicts
     .contract.state === 'unknown',
 );
+ok(
+  'a name with no chain pulled has unknown gamma, not negative',
+  judgeOne(passing({ regime: null })).verdicts.gamma.state === 'unknown',
+  'most of the index is in this state every morning',
+);
+ok(
+  'an unread SPY chain is an unknown market, not a volatile one',
+  scoreAndJudge([passing()], ALL_ON, { spyRegime: null })[0].verdicts.spy.state ===
+    'unknown',
+);
 
 section('Switching a rule off stops it counting but keeps its reading');
 
-const offSettings = { ...D, enabled: { ...D.enabled, volume: false } };
+const offSettings = { ...ALL_ON, enabled: { ...ALL_ON.enabled, volume: false } };
 const weak = passing({ metrics: { volumeRatio: 0.4 } });
 
 ok('with the rule on it does not pass', !judgeOne(weak).passes);
@@ -240,69 +325,154 @@ section('The score: a missing reading is dropped, never scored zero');
 
 ok(
   'a full row scores every component',
-  scoreRow(passing()).missing.length === 0,
-  JSON.stringify(scoreRow(passing()).missing),
+  scoreRow(passing(), MARKET).missing.length === 0,
+  JSON.stringify(scoreRow(passing(), MARKET).missing),
 );
 ok(
-  'an unchecked contract drops the contract component',
-  scoreRow(row()).missing.join(',') === 'contract',
-  JSON.stringify(scoreRow(row()).missing),
+  'a name with no chain pulled drops gamma and option liquidity',
+  scoreRow(row({ regime: null, optionsVolume: null, optionsOpenInterest: null }), MARKET)
+    .missing.sort()
+    .join(',') === 'optionLiquidity,tickerGamma',
+);
+ok(
+  'an unread market drops the market component for everyone',
+  scoreRow(passing(), { spyRegime: null }).missing.join(',') === 'spyGamma',
 );
 
-const unchecked = scoreRow(row()).total;
-const avoided = scoreRow(row({ optionQuality: quality({ badge: 'avoid' }) })).total;
+const measured = scoreRow(passing(), MARKET).total;
+const unmeasured = scoreRow(
+  passing({ regime: null, optionsVolume: null, optionsOpenInterest: null }),
+  MARKET,
+).total;
 ok(
-  'an unchecked contract outranks one graded Avoid',
-  unchecked > avoided,
-  `unchecked ${unchecked.toFixed(2)} vs avoid ${avoided.toFixed(2)}`,
+  'a dropped component renormalises rather than dragging the score to zero',
+  unmeasured > measured - 20,
+  `measured ${measured.toFixed(2)} vs unmeasured ${unmeasured.toFixed(2)}`,
 );
 ok(
-  'and an Excellent one outranks the unchecked',
-  scoreRow(row({ optionQuality: quality({ badge: 'excellent' }) })).total > unchecked,
+  'an unmeasured gamma outranks a measured negative one',
+  scoreRow(passing({ regime: null, optionsVolume: null, optionsOpenInterest: null }), MARKET)
+    .total > scoreRow(passing({ regime: 'negative' }), MARKET).total,
+  'scoring an absence as bad would be a claim about the request budget, not the stock',
+);
+
+ok(
+  'the contract grade is not a scoring component at all',
+  scoreRow(passing({ optionQuality: quality({ badge: 'avoid' }) }), MARKET).total ===
+    scoreRow(passing({ optionQuality: quality({ badge: 'excellent' }) }), MARKET).total,
+  'it filters and cautions; it must not move a name up or down the ranking',
 );
 
 ok(
   'a name with no readings at all scores zero rather than throwing',
   scoreRow(
     row({
+      regime: null,
+      optionsVolume: null,
+      optionsOpenInterest: null,
       metrics: {
         rsScore: Number.NaN,
+        m1Percentile: null,
         pctAbove200: null,
+        ema200: null,
+        pctAbove50: null,
+        ema50: null,
         volumeRatio: null,
+        pctAboveVwap: null,
         avgDollarVolume: 0,
       },
     }),
+    { spyRegime: null },
   ).total === 0,
 );
 
 ok('every score is inside 0-100', (() => {
   const extremes = [
     passing(),
-    row({ metrics: { rsScore: 0, pctAbove200: -80, volumeRatio: 0.01, avgDollarVolume: 1 } }),
-    row({ metrics: { rsScore: 100, pctAbove200: 500, volumeRatio: 40, avgDollarVolume: 9e11 } }),
+    row({ metrics: { rsScore: 0, pctAbove200: -80, pctAbove50: -60, volumeRatio: 0.01, pctAboveVwap: -70, m1Percentile: 0 } }),
+    row({ metrics: { rsScore: 100, pctAbove200: 500, pctAbove50: 300, volumeRatio: 40, pctAboveVwap: 90, m1Percentile: 100 } }),
   ];
   return extremes.every((r) => {
-    const t = scoreRow(r).total;
+    const t = scoreRow(r, MARKET).total;
     return Number.isFinite(t) && t >= 0 && t <= 100;
   });
 })());
 
 ok(
-  'the weights are one object and cover exactly the five components',
-  Object.keys(SCORE_WEIGHTS).sort().join(',') ===
-    ['contract', 'liquidity', 'rs', 'trend', 'volume'].sort().join(','),
+  'the weights cover exactly the seven components',
+  Object.keys(SCORE_WEIGHTS).sort().join(',') === [...SCORE_KEYS].sort().join(','),
   Object.keys(SCORE_WEIGHTS).join(','),
+);
+ok(
+  'relative strength counts double and everything else counts once',
+  SCORE_WEIGHTS.rs === 2 &&
+    SCORE_KEYS.filter((key) => key !== 'rs').every((key) => SCORE_WEIGHTS[key] === 1),
+  JSON.stringify(SCORE_WEIGHTS),
+);
+
+section('The trend sub-score is four readings averaged, not ANDed');
+
+const trendOf = (metrics) => trendScore({ ...passing().metrics, ...metrics });
+
+ok(
+  'all four good is 100',
+  trendOf({ pctAbove50: 5, pctAbove200: 10, ema50: 100, ema200: 90, m1Percentile: 100 })
+    .value === 100,
+);
+ok(
+  'all four bad is 0',
+  trendOf({ pctAbove50: -5, pctAbove200: -10, ema50: 90, ema200: 100, m1Percentile: 0 })
+    .value === 0,
+);
+ok(
+  'three of four beats none of four',
+  trendOf({ pctAbove50: 5, pctAbove200: 10, ema50: 100, ema200: 90, m1Percentile: 0 }).value >
+    trendOf({ pctAbove50: -5, pctAbove200: -10, ema50: 90, ema200: 100, m1Percentile: 0 })
+      .value,
+  'a boolean could not tell these apart, which is why the column exists',
+);
+ok(
+  'a missing reading is left out rather than counted against the name',
+  (() => {
+    const partial = trendOf({
+      pctAbove50: 5,
+      pctAbove200: 10,
+      ema50: 100,
+      ema200: 90,
+      m1Percentile: null,
+    });
+    return partial.value === 100 && partial.measured === 3;
+  })(),
+);
+ok(
+  'no readings at all is null, never zero',
+  (() => {
+    const none = trendOf({
+      pctAbove50: null,
+      pctAbove200: null,
+      ema50: null,
+      ema200: null,
+      m1Percentile: null,
+    });
+    return none.value === null && none.measured === 0;
+  })(),
+);
+ok(
+  'the 50 above the 200 is read from the averages, not from price',
+  trendOf({ ema50: 100, ema200: 90 }).parts.goldenOrder === true &&
+    trendOf({ ema50: 90, ema200: 100 }).parts.goldenOrder === false,
 );
 
 section('The list is ordered by score, and the order is total');
 
 const ordered = scoreAndJudge(
   [
-    row({ symbol: 'LOW', metrics: { rsScore: 62, pctAbove200: 1, volumeRatio: 1 } }),
-    row({ symbol: 'HIGH', metrics: { rsScore: 99, pctAbove200: 30, volumeRatio: 2.4 } }),
-    row({ symbol: 'MID', metrics: { rsScore: 84, pctAbove200: 10, volumeRatio: 1.4 } }),
+    row({ symbol: 'LOW', metrics: { rsScore: 62, m1Percentile: 20, volumeRatio: 1 } }),
+    row({ symbol: 'HIGH', metrics: { rsScore: 99, m1Percentile: 99, volumeRatio: 2.4 } }),
+    row({ symbol: 'MID', metrics: { rsScore: 84, m1Percentile: 60, volumeRatio: 1.4 } }),
   ],
   D,
+  MARKET,
 );
 ok(
   'strongest first',
@@ -317,8 +487,8 @@ ok(
 ok(
   'ties break on symbol, so the order never reshuffles under the reader',
   (() => {
-    const a = scoreAndJudge([row({ symbol: 'ZZZ' }), row({ symbol: 'AAA' })], D);
-    const b = scoreAndJudge([row({ symbol: 'AAA' }), row({ symbol: 'ZZZ' })], D);
+    const a = scoreAndJudge([row({ symbol: 'ZZZ' }), row({ symbol: 'AAA' })], D, MARKET);
+    const b = scoreAndJudge([row({ symbol: 'AAA' }), row({ symbol: 'ZZZ' })], D, MARKET);
     return (
       a.map((e) => e.row.symbol).join(',') === 'AAA,ZZZ' &&
       b.map((e) => e.row.symbol).join(',') === 'AAA,ZZZ'
@@ -425,7 +595,7 @@ ok(
 section('The row account always ends on Watch');
 
 for (const [label, r] of cases) {
-  const lines = whyItRanks(judgeOne(r), D);
+  const lines = whyItRanks(judgeOne(r), ALL_ON);
   ok(`${label} has a Watch line last`, lines[lines.length - 1].label === 'Watch');
   ok(`${label} names the trend`, lines.some((l) => l.label === 'Trend'));
   ok(`${label} names the options`, lines.some((l) => l.label === 'Options'));
@@ -435,6 +605,55 @@ for (const [label, r] of cases) {
     JSON.stringify(lines.map((l) => l.text)),
   );
 }
+
+section('Why it is on the list: built from the numbers, never for the row');
+
+ok(
+  'a strong name names its strengths',
+  (() => {
+    const line = whyItMatched(scoreRow(passing(), MARKET), passing());
+    return /relative strength/i.test(line) && /200-day/i.test(line);
+  })(),
+  whyItMatched(scoreRow(passing(), MARKET), passing()),
+);
+ok(
+  'and it never phrases the row as a trade',
+  (() => {
+    const rows = [
+      passing(),
+      passing({ regime: 'negative' }),
+      row({ metrics: { rsScore: 30, m1Percentile: 5, pctAbove50: -9, pctAbove200: -12, ema50: 80, ema200: 95, volumeRatio: 0.4, pctAboveVwap: -6 } }),
+    ];
+    return rows.every((r) => {
+      const line = whyItMatched(scoreRow(r, MARKET), r).toLowerCase();
+      return !/\b(buy|sell|entry|enter|target|stop|position|long|short)\b/.test(line);
+    });
+  })(),
+  'the one thing this line must never become',
+);
+ok(
+  'a name with nothing strong says so rather than inventing a reason',
+  (() => {
+    const weakRow = row({
+      regime: 'negative',
+      optionsVolume: 900,
+      optionsOpenInterest: 900,
+      metrics: {
+        rsScore: 25,
+        m1Percentile: 5,
+        pctAbove50: -9,
+        pctAbove200: -12,
+        ema50: 80,
+        ema200: 95,
+        volumeRatio: 0.55,
+        pctAboveVwap: -6,
+      },
+    });
+    return /nothing here scores strongly/i.test(
+      whyItMatched(scoreRow(weakRow, { spyRegime: 'negative' }), weakRow),
+    );
+  })(),
+);
 
 // --- 5. extension is a flag, not a rejection --------------------------------
 
@@ -604,8 +823,13 @@ section('The funnel is cumulative, monotonic, and matches the list');
 const population = [
   passing({ symbol: 'ALL' }),
   passing({ symbol: 'WEAKRS', metrics: { rsScore: 60 } }),
-  passing({ symbol: 'UNDER200', metrics: { pctAbove200: -8 } }),
+  passing({
+    symbol: 'NOTREND',
+    metrics: { pctAbove200: -8, pctAbove50: -6, ema50: 80, ema200: 95, m1Percentile: 5 },
+  }),
   passing({ symbol: 'NOVOL', metrics: { volumeRatio: 0.5 } }),
+  passing({ symbol: 'UNDERVWAP', metrics: { pctAboveVwap: -2 } }),
+  passing({ symbol: 'NEGGEX', regime: 'negative' }),
   passing({ symbol: 'THIN', metrics: { avgDollarVolume: 15_000_000 } }),
   row({ symbol: 'UNGRADED' }),
   passing({
@@ -614,12 +838,12 @@ const population = [
   }),
 ];
 
-const judgedPop = scoreAndJudge(population, D);
-const funnel = buildFunnel(judgedPop, D);
+const judgedPop = scoreAndJudge(population, ALL_ON, MARKET);
+const funnel = buildFunnel(judgedPop, ALL_ON);
 
 ok('the first stage is everything scanned', funnel[0].count === population.length);
 ok(
-  'there is a stage per enabled rule plus earnings',
+  'there is a stage per enabled filter plus earnings',
   funnel.length === RULE_KEYS.length + 2,
   String(funnel.length),
 );
@@ -668,9 +892,31 @@ ok(
 );
 
 ok(
-  'a disabled rule is not a stage',
+  'a disabled filter is not a stage',
   buildFunnel(judgedPop, offSettings).some((s) => s.key === 'volume') === false,
   'a step nothing fell out of is not a step',
+);
+ok(
+  'at the shipped defaults only two filters are stages',
+  buildFunnel(judgedPop, D).length === 4,
+  buildFunnel(judgedPop, D)
+    .map((s) => s.key)
+    .join(','),
+);
+ok(
+  'a funnel that reaches zero still leaves the whole ranking behind it',
+  (() => {
+    const strict = { ...ALL_ON, rsMin: 99 };
+    const nobodyMatches = buildFunnel(
+      scoreAndJudge(population, strict, MARKET),
+      strict,
+    );
+    return (
+      nobodyMatches[nobodyMatches.length - 1].count === 0 &&
+      judgedPop.length === population.length
+    );
+  })(),
+  'the count going to zero must not take the table with it',
 );
 
 section('The earnings buffer is the readers, and unknown never clears');
@@ -705,28 +951,30 @@ ok('the defaults serialise to nothing', paramsFromSettings(D) === '', paramsFrom
 ok('and are recognised as default', isDefault(D));
 ok(
   'an empty query string restores the defaults',
-  JSON.stringify(settingsFromParams(new URLSearchParams(''))) === JSON.stringify(D),
+  sameSettings(settingsFromParams(new URLSearchParams('')), D),
 );
 
 const custom = {
   ...D,
   rsMin: 71,
+  trendMin: 64,
   volumeMult: 1.65,
   minDollarVolume: 40_000_000,
-  trendPct: -6,
   dteMin: 14,
   dteMax: 90,
   deltaMin: 0.3,
   deltaMax: 0.85,
   earningsBufferDays: 21,
-  enabled: { ...D.enabled, liquidity: false, contract: false },
-  requireCalmMarket: true,
+  // Both directions at once: one filter switched off that ships on, and two
+  // switched on that ship off. A link that could only carry one direction
+  // would silently lose half of every shared configuration.
+  enabled: { ...D.enabled, liquidity: false, vwap: true, gamma: true },
 };
 
 const roundTripped = settingsFromParams(new URLSearchParams(paramsFromSettings(custom)));
 ok(
   'every control survives the round trip',
-  JSON.stringify(roundTripped) === JSON.stringify(custom),
+  sameSettings(roundTripped, custom),
   `${JSON.stringify(roundTripped)} vs ${JSON.stringify(custom)}`,
 );
 ok('a changed configuration is not reported as default', !isDefault(custom));
@@ -757,8 +1005,16 @@ ok(
   })(),
 );
 ok(
-  'an unknown rule name in the off-list is ignored',
+  'an unknown filter name in the off-list is ignored',
   settingsFromParams(new URLSearchParams('off=nonsense')).enabled.rs === true,
+);
+ok(
+  'a filter switched on that ships off survives the link',
+  settingsFromParams(new URLSearchParams('on=vwap')).enabled.vwap === true,
+);
+ok(
+  'and one switched off that ships on survives too',
+  settingsFromParams(new URLSearchParams('off=rs')).enabled.rs === false,
 );
 ok(
   'every clamped setting stays inside its slider bounds',
@@ -768,7 +1024,7 @@ ok(
       rsMin: -50,
       volumeMult: 900,
       minDollarVolume: -1,
-      trendPct: 9999,
+      trendMin: 9999,
       earningsBufferDays: -4,
       deltaMin: -1,
       deltaMax: 40,
@@ -778,7 +1034,7 @@ ok(
       wild.rsMin >= b.rsMin.min &&
       wild.volumeMult <= b.volumeMult.max &&
       wild.minDollarVolume >= b.minDollarVolume.min &&
-      wild.trendPct <= b.trendPct.max &&
+      wild.trendMin <= b.trendMin.max &&
       wild.earningsBufferDays >= b.earningsBufferDays.min &&
       wild.deltaMin >= b.delta.min &&
       wild.deltaMax <= b.delta.max
@@ -790,8 +1046,10 @@ ok(
 
 section('The page always has rows, however many pass');
 
+ok('the page renders a fixed twenty rows', SCANNER_TOP_N === 20, String(SCANNER_TOP_N));
+
 ok(
-  'a population where nothing passes still ranks every name',
+  'a population where nothing matches still ranks every name',
   (() => {
     const nobody = scoreAndJudge(
       [
@@ -800,6 +1058,7 @@ ok(
         passing({ symbol: 'C', metrics: { rsScore: 40 } }),
       ],
       D,
+      MARKET,
     );
     return (
       nobody.length === 3 &&
@@ -812,7 +1071,7 @@ ok(
 
 ok(
   'and every one of them says what stopped it',
-  scoreAndJudge([passing({ metrics: { rsScore: 20 } })], D).every(
+  scoreAndJudge([passing({ metrics: { rsScore: 20 } })], D, MARKET).every(
     (e) => e.failingLabel.length > 15,
   ),
 );

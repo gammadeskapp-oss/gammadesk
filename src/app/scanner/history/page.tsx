@@ -145,7 +145,7 @@ export default async function ScannerHistoryPage() {
                   </p>
                 ) : day.names.length === 0 ? (
                   <p className="px-3.5 py-4 text-xs leading-relaxed text-term-dim">
-                    No names cleared all five rules this morning. The market
+                    No names matched every default filter this morning. The market
                     gate was open, so this is the rules doing their work rather
                     than the market shutting the scan.
                   </p>

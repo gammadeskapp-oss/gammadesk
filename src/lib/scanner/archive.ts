@@ -140,7 +140,9 @@ export const ARCHIVE_KEEP_DAYS = 90;
  * incomparable numbers.
  */
 export async function archiveScan(result: ScanResult): Promise<void> {
-  const judged = scoreAndJudge(result.rows, DEFAULT_FILTERS);
+  const judged = scoreAndJudge(result.rows, DEFAULT_FILTERS, {
+    spyRegime: result.spyRegime,
+  });
   const passed = judged.filter(
     (entry) => entry.passes && !entry.earningsExcluded,
   );
