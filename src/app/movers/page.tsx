@@ -3,12 +3,14 @@ import { Footer } from '@/components/Footer';
 import { MoversBoard } from '@/components/MoversBoard';
 import { PageBar } from '@/components/PageBar';
 import { StaleDataBanner } from '@/components/StaleDataBanner';
-import { snapshotStaleness } from '@/lib/events';
+import { currentMarketStatus, snapshotStaleness } from '@/lib/events';
 import { EARNINGS_WARN_DAYS } from '@/lib/movers/rules';
 import {
   MIN_RELATIVE_VOLUME,
   MOVERS_EXPLANATION,
   MOVERS_EXPLANATION_LIVE,
+  MOVERS_EXPLANATION_LIVE_CLOSED,
+  MOVERS_EXPLANATION_LIVE_PREOPEN,
   REFRESH_SECONDS,
   getMovers,
 } from '@/lib/movers';
@@ -68,13 +70,53 @@ export default async function MoversPage() {
 
   const staleness = snapshotStaleness(movers.capturedAt);
 
+  /*
+   * ## Why the live branch needs three labels, not one
+   *
+   * `movers.live` says which feed priced these rows. It says nothing about
+   * where the clock is, and every word of the live wording assumed a session
+   * was running -- "moving today", "shares traded so far today", "this session
+   * was 4% elapsed". At 01:53 that described a day which had not opened.
+   *
+   * Nothing below reads or changes the reading itself. It splits the label the
+   * page already had on `live` by the market phase, which the page can ask for
+   * on its own.
+   *
+   *   in-session   the original live wording, unchanged and still correct
+   *   finished     the session closed; the figures are whole-day on both sides
+   *   not-started  pre-open, a weekend or a holiday: no session behind them
+   *
+   * `not-started` deliberately does not borrow the Polygon path's "moved last
+   * session" wording. That line promises a completed session with a whole day
+   * on each side of the volume ratio; before the open the numerator is an
+   * empty day in progress, and `sessionDate` is the day that has not started
+   * rather than the one that closed. Relabelling it would replace a visibly
+   * wrong claim with a plausible one, which is the worse of the two.
+   */
+  const market = currentMarketStatus();
+  const livePhase = !movers.live
+    ? null
+    : market.open
+      ? 'in-session'
+      : market.phase === 'after-close'
+        ? 'finished'
+        : 'not-started';
+
   return (
     <>
       <StaleDataBanner staleness={staleness} />
 
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
         <PageBar
-          title={movers.live ? 'Moving today' : 'Moved last session'}
+          title={
+            livePhase === null
+              ? 'Moved last session'
+              : livePhase === 'in-session'
+                ? 'Moving today'
+                : livePhase === 'finished'
+                  ? 'Moved today'
+                  : 'No session yet'
+          }
           description={PAGE_DESCRIPTIONS['/movers']}
           /*
             Which source produced this, and which session it describes. The
@@ -84,9 +126,15 @@ export default async function MoversPage() {
             to be able to see which day they are looking at.
           */
           meta={
-            movers.live
-              ? `Live · Tradier · ${sessionLabel(movers.sessionDate)} · refreshed ${movers.capturedEt} ET`
-              : `Last completed session · Polygon · ${sessionLabel(movers.sessionDate)} close`
+            livePhase === null
+              ? `Last completed session · Polygon · ${sessionLabel(movers.sessionDate)} close`
+              : `${
+                  livePhase === 'in-session'
+                    ? 'Live'
+                    : livePhase === 'finished'
+                      ? 'Live feed, session closed'
+                      : 'Live feed, no session open'
+                } · Tradier · ${sessionLabel(movers.sessionDate)} · read ${movers.capturedEt} ET`
           }
           asOfLabel={formatAsOf(new Date(movers.capturedAt))}
         />
@@ -97,7 +145,13 @@ export default async function MoversPage() {
         */}
         <div className="panel border-l-2 border-l-flip/60 px-3.5 py-3 text-xs leading-relaxed">
           <p className="font-bold text-flip">
-            {movers.live ? MOVERS_EXPLANATION_LIVE : MOVERS_EXPLANATION}
+            {livePhase === null
+              ? MOVERS_EXPLANATION
+              : livePhase === 'in-session'
+                ? MOVERS_EXPLANATION_LIVE
+                : livePhase === 'finished'
+                  ? MOVERS_EXPLANATION_LIVE_CLOSED
+                  : MOVERS_EXPLANATION_LIVE_PREOPEN}
           </p>
           <p className="mt-2 text-term-dim">
             One gate is applied and only one: the name has to be trading above{' '}
@@ -156,17 +210,30 @@ export default async function MoversPage() {
         ) : (
           <div className="panel px-4 py-10 text-center text-xs">
             <p className="font-bold text-term-text">
-              {movers.live
+              {livePhase === 'in-session'
                 ? 'Nothing is moving on volume.'
-                : 'Nothing moved on volume.'}
+                : livePhase === 'not-started'
+                  ? 'The session has not started.'
+                  : 'Nothing moved on volume.'}
             </p>
             <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-dim">
-              {movers.gainers} of {movers.measured} names read were up on{' '}
-              {sessionLabel(movers.sessionDate)}, and none of them cleared{' '}
-              {MIN_RELATIVE_VOLUME} times its own average volume
-              {movers.live && movers.sessionProgress < 0.5
-                ? ' — which is common this early, because the volume figure is a running total measured against a whole day.'
-                : '.'}
+              {livePhase === 'not-started' ? (
+                <>
+                  There is no session volume to measure against yet, so the one
+                  gate this page applies cannot be applied and no name can pass
+                  it. {market.nextUpdateLine} The published site never uses this
+                  feed — it shows the last completed session instead.
+                </>
+              ) : (
+                <>
+                  {movers.gainers} of {movers.measured} names read were up on{' '}
+                  {sessionLabel(movers.sessionDate)}, and none of them cleared{' '}
+                  {MIN_RELATIVE_VOLUME} times its own average volume
+                  {livePhase === 'in-session' && movers.sessionProgress < 0.5
+                    ? ' — which is common this early, because the volume figure is a running total measured against a whole day.'
+                    : '.'}
+                </>
+              )}
             </p>
           </div>
         )}
@@ -192,11 +259,22 @@ export default async function MoversPage() {
 
           <p className="mt-2">
             <span className="text-term-dim">
-              {movers.live
+              {livePhase === 'in-session'
                 ? 'Relative volume is a running total against a whole day. '
-                : 'Both sides of the volume ratio are complete days. '}
+                : livePhase === 'not-started'
+                  ? 'There is no volume in the numerator yet. '
+                  : 'Both sides of the volume ratio are complete days. '}
             </span>
-            {movers.live ? (
+            {livePhase === 'not-started' ? (
+              <>
+                The numerator is the shares traded so far in the session named
+                above, and that session has not opened. Every reading is
+                therefore zero or close to it, which is why the list is empty
+                rather than short. Nothing is scaled up to compensate — a
+                figure invented from an empty day would be the one number on
+                this page that came from nowhere.
+              </>
+            ) : livePhase === 'in-session' ? (
               <>
                 The numerator is the shares traded so far today; the
                 denominator is the average of twenty complete sessions. It is
@@ -207,6 +285,15 @@ export default async function MoversPage() {
                 the figure understates early and is exact after the close. This
                 session was {Math.round(movers.sessionProgress * 100)}% elapsed
                 when these were read.
+              </>
+            ) : livePhase === 'finished' ? (
+              <>
+                The numerator is every share traded in the session named above,
+                which has now closed; the denominator is the average of twenty
+                complete sessions. Both sides are whole days, so this reading
+                needs no allowance made for the time of day it was taken —
+                the caveat that applies to this feed during a session does not
+                apply once that session has ended.
               </>
             ) : (
               <>

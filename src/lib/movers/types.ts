@@ -65,6 +65,30 @@ export const MOVERS_EXPLANATION_LIVE =
   'Moving today — these met no quality bar. They are moving, and here is what to check.';
 
 /**
+ * The live reading after the close, and the live reading before the open.
+ *
+ * `live` says which feed produced the numbers. It does not say where the
+ * clock is, and the line above assumes a session is running: at 01:00 it
+ * announced names as "moving today" on a day that had not opened. Three
+ * states, not two, because the reading means three different things.
+ *
+ * Neither of these borrows the shipped `MOVERS_EXPLANATION`. That line
+ * promises a completed session with whole days on both sides of the volume
+ * ratio, which is what the Polygon path delivers and what the Tradier path
+ * delivers only in the `CLOSED` case — before the open the volume numerator
+ * is an empty day in progress, and calling that "last session" would swap one
+ * false claim for a more convincing one.
+ *
+ * Held to the same rules as the two above, and checked by `verify:movers`
+ * alongside them.
+ */
+export const MOVERS_EXPLANATION_LIVE_CLOSED =
+  'Moved today — these met no quality bar. They moved, and here is what to check.';
+
+export const MOVERS_EXPLANATION_LIVE_PREOPEN =
+  'No session yet — these met no quality bar, and there is no session volume behind them yet. Here is what to check.';
+
+/**
  * Why a row carries a warning.
  *
  * Every one of these is *shown*, never applied. A movers list is where people

@@ -30,6 +30,8 @@ const {
   MAX_MOVERS,
   MOVERS_EXPLANATION,
   MOVERS_EXPLANATION_LIVE,
+  MOVERS_EXPLANATION_LIVE_CLOSED,
+  MOVERS_EXPLANATION_LIVE_PREOPEN,
 } =
   await import('../src/lib/movers/types.ts');
 const { EXTENDED_PCT, EARNINGS_EXCLUSION_DAYS } = await import('../src/lib/scanner/types.ts');
@@ -331,6 +333,58 @@ ok(
     /today/i.test(MOVERS_EXPLANATION_LIVE),
   `${MOVERS_EXPLANATION} / ${MOVERS_EXPLANATION_LIVE}`,
 );
+/*
+ * The live feed has three states, not two, and the two added ones are held to
+ * every rule the first two are. `live` says which feed priced the rows and
+ * nothing about where the clock is: before this existed, the line above
+ * announced names as "moving today" at 01:00 on a day that had not opened.
+ *
+ * These render only on a developer's machine, which is precisely why they are
+ * checked here — a line nobody reviews on the way past is the one that drifts.
+ */
+for (const [name, line] of [
+  ['after the close', MOVERS_EXPLANATION_LIVE_CLOSED],
+  ['before the open', MOVERS_EXPLANATION_LIVE_PREOPEN],
+]) {
+  ok(
+    `the live line ${name} says no quality bar was met`,
+    /met no quality bar/.test(line),
+    line,
+  );
+  ok(
+    `and the live line ${name} never says buy or sell`,
+    !/\b(buy|sell|long|short|target|stop)\b/i.test(line),
+    line,
+  );
+}
+
+ok(
+  'the pre-open line never claims a completed session',
+  !/last session/i.test(MOVERS_EXPLANATION_LIVE_PREOPEN),
+  MOVERS_EXPLANATION_LIVE_PREOPEN,
+);
+
+/*
+ * The point of the pre-open line. Before the open the volume numerator is an
+ * empty day in progress, so borrowing the shipped "moved last session" wording
+ * would replace a visibly wrong claim with a plausible one.
+ */
+ok(
+  'and it says outright that there is no session volume behind the rows',
+  /no session volume/i.test(MOVERS_EXPLANATION_LIVE_PREOPEN),
+  MOVERS_EXPLANATION_LIVE_PREOPEN,
+);
+
+ok(
+  'all four lines are distinct, so no two states can read the same',
+  new Set([
+    MOVERS_EXPLANATION,
+    MOVERS_EXPLANATION_LIVE,
+    MOVERS_EXPLANATION_LIVE_CLOSED,
+    MOVERS_EXPLANATION_LIVE_PREOPEN,
+  ]).size === 4,
+);
+
 ok('the list is capped at 15', MAX_MOVERS === 15, String(MAX_MOVERS));
 
 // --- result --------------------------------------------------------------------
