@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { loadLabAnalogues } from '@/app/lab/actions';
 import { formatUsd } from '@/lib/format';
 import {
   FLIP_SPAN_PCT,
@@ -49,9 +50,11 @@ import {
  *
  * A name at the top of this list is the name nothing else scored higher than
  * at weights the reader chose thirty seconds ago. Two of the six components
- * are scored on a direction this page picked rather than one the data implies,
- * and both say so wherever they appear. There is no verdict column, no
- * position sizing, and no phrasing anywhere that treats a row as an action.
+ * are scored on a direction this page picked rather than one the data implies;
+ * both say so wherever they appear and both open at weight zero, so the
+ * default ranking does not depend on a guess nobody has tested. There is no
+ * verdict column, no position sizing, and no phrasing anywhere that treats a
+ * row as an action.
  */
 
 const HEAD_CLASS =
@@ -227,7 +230,7 @@ function WeightControls({
           onClick={onReset}
           className="border border-term-line px-2 py-0.5 text-2xs tracking-[0.08em] text-term-faint transition-colors hover:border-pos/50 hover:text-pos"
         >
-          Reset to 1 each
+          Reset to defaults
         </button>
       </div>
 
@@ -264,10 +267,13 @@ function WeightControls({
 
       <p className="mt-2.5 text-2xs leading-relaxed text-term-faint">
         A weight of zero takes the component out of the blend rather than
-        multiplying it by nothing, and the row detail says so. Weights are not
-        saved: reloading gives every component one vote again, which is the
-        state any screenshot of this page should be assumed to have been taken
-        in unless the panel above says otherwise.
+        multiplying it by nothing, and the row detail says so. Flip and magnet
+        distance start there on purpose: both are scored nearer-is-higher and
+        nobody has established that this is the right way round, so they are
+        switched on one at a time rather than left running unexamined. Weights
+        are not saved — reloading returns to these defaults, which is the state
+        any screenshot of this page should be assumed to have been taken in
+        unless the panel above says otherwise.
       </p>
     </section>
   );
@@ -509,22 +515,18 @@ export function LabBoard({ view }: { view: LabView }) {
     setLoading(true);
     setLoadError(null);
     try {
-      const response = await fetch('/api/lab/analogue', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ symbols: wanted }),
-      });
-      const body = (await response.json()) as {
-        results?: Record<string, LabAnalogue>;
-        error?: string;
-      };
-      if (!response.ok || !body.results) {
-        setLoadError(body.error ?? 'The analogue request failed.');
-        return;
-      }
-      setAnalogues((current) => ({ ...current, ...body.results }));
+      /*
+       * A server action, not a fetch of `/api/lab/analogue`. That endpoint
+       * carries the cron auth every manual endpoint here carries, and the only
+       * way this button could send the token is if the server had put
+       * CRON_SECRET into the page. The action has no URL and no token.
+       */
+      const results = await loadLabAnalogues(wanted);
+      setAnalogues((current) => ({ ...current, ...results }));
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'The request failed.');
+      setLoadError(
+        error instanceof Error ? error.message : 'The analogue request failed.',
+      );
     } finally {
       setLoading(false);
     }

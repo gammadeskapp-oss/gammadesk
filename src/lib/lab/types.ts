@@ -50,18 +50,20 @@ export const LAB_LONG_LABEL: Record<LabKey, string> = {
  * What each component measures, and — where it is not obvious — which
  * direction this page happens to have pointed it in.
  *
- * The direction is stated out loud on three of the six because it is a choice
- * rather than a fact, and it is exactly the sort of choice that disappears
- * into a composite and then gets mistaken for a finding. Setting the weight to
- * zero is how to take the choice back out.
+ * The direction is stated out loud wherever it is a choice rather than a fact,
+ * because it is exactly the sort of choice that disappears into a composite
+ * and then gets mistaken for a finding. The two where the choice is least
+ * defensible open at weight zero and say so here, so the disclosure and the
+ * default agree; setting any other weight to zero is how to take a choice back
+ * out by hand.
  */
 export const LAB_EXPLANATION: Record<LabKey, string> = {
   gammaRegime:
     "This name's own dealer positioning. Positive scores 100, negative 25 — the same two values the scanner uses, and for the same reason: which side dealers are on in a single stock is an inference, not a published fact, so it should not be able to knock a name down as hard as a measured number can.",
   flipDistance:
-    'How far the close sits from the gamma flip level, as a percent of price. Scored so that NEARER is higher: at the flip the positioning regime is the least settled, which is what makes it worth a look. That is a direction this page chose, not something the data says.',
+    'How far the close sits from the gamma flip level, as a percent of price. Scored so that NEARER is higher: at the flip the positioning regime is the least settled, which is what makes it worth a look. That is a direction this page chose, not something the data says — which is why it opens at weight zero. Switch it on deliberately, on its own, and watch what moves.',
   magnetDistance:
-    'How far the close sits from the nearest positive-gamma strike above it and the nearest below. Scored on the closer of the two, NEARER is higher. Same caveat as the flip: proximity is interesting, it is not good.',
+    'How far the close sits from the nearest positive-gamma strike above it and the nearest below. Scored on the closer of the two, NEARER is higher. Same caveat as the flip, and the same default: it opens at weight zero, because the sign is a guess and an untested guess left switched on quietly conditions every reading of the ranking.',
   rs: 'The composite relative-strength score from /strength — where the name ranks against the whole index over one, three and six months. Used exactly as that page publishes it, so the two cannot disagree.',
   flow:
     'The most unusual contract on the name in the last stored flow scan, measured as volume against open interest. Direction-blind on purpose: a heavily traded put and a heavily traded call both score here, because this component measures that something happened and not what.',
@@ -72,17 +74,31 @@ export const LAB_EXPLANATION: Record<LabKey, string> = {
 export type LabWeights = Record<LabKey, number>;
 
 /**
- * Opening weights: every component worth one vote.
+ * Opening weights: one vote each, except the two whose direction is a guess.
  *
- * Flat rather than considered, and that is the point of the page. The scanner
- * ships a weighting it can argue for; this one ships none, so that whatever
- * the ranking shows is a property of the components rather than of an opinion
- * baked in before anybody looked.
+ * Flat rather than considered among the four that are in, and that is the
+ * point of the page. The scanner ships a weighting it can argue for; this one
+ * ships none, so that whatever the ranking shows is a property of the
+ * components rather than of an opinion baked in before anybody looked.
+ *
+ * ## Flip and magnet distance open at zero
+ *
+ * Both are scored nearer-is-higher, and nobody has established that this is
+ * the right way round — proximity to a level is interesting, it is not good,
+ * and the opposite sign is just as arguable. A component whose direction is
+ * unknown, switched on by default, does not make the ranking more informative;
+ * it makes every reading of the ranking conditional on a coin flip nobody
+ * remembers making.
+ *
+ * So they start out of the blend and get switched on deliberately, one at a
+ * time, which is the only way to see what either of them does. The scoring and
+ * both span constants stay exactly as they are in `score.ts` — this is a
+ * default, not a removal, and moving the slider is the whole experiment.
  */
 export const DEFAULT_LAB_WEIGHTS: LabWeights = {
   gammaRegime: 1,
-  flipDistance: 1,
-  magnetDistance: 1,
+  flipDistance: 0,
+  magnetDistance: 0,
   rs: 1,
   flow: 1,
   analogue: 1,
