@@ -65,6 +65,16 @@ export default async function HistoryPage() {
               ? undefined
               : `${history.sampleSize} of the last ${WINDOW} sessions carry recorded levels`
           }
+          /*
+            The newest session on the chart. An archive is as current as its
+            last entry, and on a Saturday that is Friday — which is correct and
+            worth saying rather than leaving the reader to infer from an axis.
+          */
+          asOfLabel={
+            history.empty
+              ? undefined
+              : `${history.days[history.days.length - 1]?.date} close`
+          }
         />
 
         {history.empty ? (

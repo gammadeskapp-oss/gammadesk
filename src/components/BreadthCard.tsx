@@ -41,7 +41,24 @@ const TONE = {
   },
 } as const;
 
-export function BreadthCard({ reading }: { reading: BreadthReading }) {
+export function BreadthCard({
+  reading,
+  closedNote,
+}: {
+  reading: BreadthReading;
+  /**
+   * One sentence about the market clock, written on the server.
+   *
+   * Breadth is a live count and genuinely has no value outside a session — the
+   * series is today's samples, so overnight there is nothing to fall back on
+   * and nothing to stamp. The empty card was therefore honest and still read
+   * as broken, because it said the reading is taken while the market is open
+   * without saying that the market is shut and when it opens again. Passed in
+   * rather than read here: this is a client component, and a clock read during
+   * hydration produces a different string from the one the server rendered.
+   */
+  closedNote?: string;
+}) {
   const [explain, setExplain] = useState(false);
   const { computed, spread, series } = reading;
 
@@ -68,6 +85,7 @@ export function BreadthCard({ reading }: { reading: BreadthReading }) {
           <p className="mt-0.5 text-2xs leading-relaxed text-term-faint">
             No reading yet today. It is taken every minute while the market is
             open.
+            {closedNote ? ` ${closedNote}` : ''}
           </p>
         </>
       ) : (

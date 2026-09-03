@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import type { Metadata, Viewport } from 'next';
 import { ServiceWorker } from '@/components/ServiceWorker';
+import { SessionNotice } from '@/components/SessionNotice';
 import { Sidebar } from '@/components/Sidebar';
 import './globals.css';
 
@@ -75,7 +76,18 @@ export default function RootLayout({
       <body className="terminal-grid min-h-screen bg-term-bg font-mono text-term-text antialiased">
         <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
           <Sidebar />
-          <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+          <div className="flex min-w-0 flex-1 flex-col">
+            {/*
+              Above the page rather than inside it, because the answer is the
+              same on all of them and a per-page copy is a per-page chance to
+              forget. Suspended so the market-clock read, which defers to
+              request time, cannot hold up the page behind it.
+            */}
+            <Suspense fallback={null}>
+              <SessionNotice />
+            </Suspense>
+            {children}
+          </div>
         </div>
         <ServiceWorker />
       </body>

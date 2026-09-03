@@ -74,11 +74,12 @@ export default async function PreviousScannerPage() {
           description={LEGACY_DESCRIPTION}
           meta={
             scan
-              ? `Run ${formatAsOf(new Date(scan.scannedAt))}`
+              ? `${scan.date} session`
               : latest
                 ? `Last run ${latest.date}`
                 : 'Not yet run'
           }
+          asOfLabel={scan ? formatAsOf(new Date(scan.scannedAt)) : undefined}
         />
 
         {/*

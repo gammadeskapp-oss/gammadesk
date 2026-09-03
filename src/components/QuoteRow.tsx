@@ -1,3 +1,4 @@
+import { AsOfStamp } from './AsOfStamp';
 import type { MarketContextQuotes } from '@/lib/marketContext/quotes';
 
 /**
@@ -16,7 +17,21 @@ function toneFor(symbol: string, changePct: number): string {
   return good ? 'text-bull' : 'text-bear';
 }
 
-export function QuoteRow({ data }: { data: MarketContextQuotes }) {
+export function QuoteRow({
+  data,
+  asOf,
+}: {
+  data: MarketContextQuotes;
+  /**
+   * What these four prices are, in words, written on the server.
+   *
+   * Not the fetch time. Overnight the fetch happened seconds ago and the
+   * prices in it are Friday's closes; stamping the fetch would put "16:32"
+   * under a set of numbers from the previous week. The caller knows which
+   * session the prices belong to and says so.
+   */
+  asOf?: string;
+}) {
   return (
     <div className="panel px-3.5 py-2.5">
       <div className="label-xs">Market</div>
@@ -39,6 +54,8 @@ export function QuoteRow({ data }: { data: MarketContextQuotes }) {
           </div>
         ))}
       </dl>
+
+      <AsOfStamp label={asOf} subject="This quote row" />
 
       {data.missing.length > 0 && (
         /*

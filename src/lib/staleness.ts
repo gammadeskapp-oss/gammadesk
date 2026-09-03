@@ -94,12 +94,19 @@ export function sessionFor(date: string, rules: SessionRules): Session {
   };
 }
 
-function addCalendarDays(date: string, days: number): string {
+/**
+ * Add calendar days to a `YYYY-MM-DD`, staying in that format.
+ *
+ * Exported for `marketPhase.ts`, which walks the calendar forward to find the
+ * next session the way this file walks it backward to find the last one.
+ */
+export function addCalendarDays(date: string, days: number): string {
   const [y, m, d] = date.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
-function isWeekday(date: string): boolean {
+/** True for Monday-Friday. Says nothing about holidays — ask the rules. */
+export function isWeekday(date: string): boolean {
   const [y, m, d] = date.split('-').map(Number);
   const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
   return weekday >= 1 && weekday <= 5;

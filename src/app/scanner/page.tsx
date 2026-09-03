@@ -53,11 +53,19 @@ export default async function ScannerPage() {
           }
           meta={
             scan
-              ? `Run ${formatAsOf(new Date(scan.scannedAt))}`
+              ? `${scan.date} session`
               : latest
                 ? `Last run ${latest.date}`
                 : 'Not yet run'
           }
+          /*
+            The run stamp belongs in the labelled slot rather than the loose
+            meta text beside it. It is the same string either way; what changes
+            is that it now sits under the words "Data as of", which is what a
+            first-time reader is looking for when the ranking has not moved
+            since they last looked.
+          */
+          asOfLabel={scan ? formatAsOf(new Date(scan.scannedAt)) : undefined}
         />
 
         {/*

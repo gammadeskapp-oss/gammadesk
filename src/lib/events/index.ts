@@ -13,6 +13,7 @@ import {
   previousSessionDate,
   type Staleness,
 } from '../staleness';
+import { marketStatus, type MarketStatus } from '../marketPhase';
 import { marketToday } from '../time';
 
 /**
@@ -29,6 +30,7 @@ import { marketToday } from '../time';
 const calendar = raw as MarketCalendar;
 
 export type { EventRow, Importance, MarketDay, ScheduledEvent } from './rules';
+export type { MarketPhase, MarketStatus } from '../marketPhase';
 export { EVENT_RISK_WARNING } from './rules';
 
 /** The session lookups, built once. */
@@ -79,4 +81,15 @@ export function dailySnapshotStaleness(
  */
 export function priorSessionDate(date: string): string | null {
   return previousSessionDate(date, rules);
+}
+
+/**
+ * Where the market clock is right now, holidays included.
+ *
+ * The calendar-aware wrapper pages should call. The bare helper defaults to
+ * treating every weekday as a session, which on Thanksgiving would tell a
+ * reader the market opens in an hour.
+ */
+export function currentMarketStatus(now: Date = new Date()): MarketStatus {
+  return marketStatus(now, rules);
 }

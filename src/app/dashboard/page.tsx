@@ -15,7 +15,8 @@ import { peekStoredGroups } from '@/lib/groups';
 import { rankTickers } from '@/lib/groups/ranking';
 import { formatContracts, formatPrice, formatRatio, formatUsd } from '@/lib/format';
 import { getPositioning } from '@/lib/positioning';
-import { snapshotStaleness } from '@/lib/events';
+import { currentMarketStatus, snapshotStaleness } from '@/lib/events';
+import { AsOfStamp } from '@/components/AsOfStamp';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { formatAsOf } from '@/lib/time';
 import { TickerLink } from '@/components/TickerLink';
@@ -45,6 +46,8 @@ function Card({
   tone = 'neutral',
   span,
   linksInside = false,
+  stamp,
+  stampPrefix,
 }: {
   href: string;
   title: string;
@@ -66,6 +69,16 @@ function Card({
    * per-ticker links inside keep working.
    */
   linksInside?: boolean;
+  /**
+   * When the figure in this card was measured.
+   *
+   * Required in spirit rather than in the type: a card whose body is a
+   * "not computed yet" placeholder has nothing to stamp, and forcing a value
+   * there would mean inventing one. Every card showing a number passes it.
+   */
+  stamp?: string | null;
+  /** Leading word for the stamp, when `as of` is the wrong verb. */
+  stampPrefix?: string;
 }) {
   const edge = {
     neutral: 'border-l-term-line',
@@ -98,11 +111,20 @@ function Card({
     </div>
   );
 
+  /*
+   * Only when there is something to stamp. A card in its "has not run yet"
+   * state says so in its own words, and a timestamp under that sentence would
+   * be a date attached to no reading.
+   */
+  const provenance =
+    stamp === undefined ? null : <AsOfStamp label={stamp} prefix={stampPrefix} />;
+
   if (linksInside) {
     return (
       <section className={shell}>
         {header}
         <div className="mt-2">{children}</div>
+        {provenance}
       </section>
     );
   }
@@ -111,6 +133,7 @@ function Card({
     <Link href={href} className={`${shell} hover:bg-term-raised/60`}>
       {header}
       <div className="mt-2">{children}</div>
+      {provenance}
     </Link>
   );
 }
@@ -147,12 +170,21 @@ function Missing({ what, where }: { what: string; where: string }) {
  * Shown in place of any positioning-derived figure when the chain could not be
  * fetched. Deliberately distinct from `Missing`, which means "not computed
  * yet": this one means the upstream is down, and nothing is substituted for it.
+ *
+ * The wording changes with the clock. Overnight there is no "live data" to be
+ * missing — the last session's close is what should have been here, and saying
+ * "live data unavailable" at 22:00 invites a reader to conclude the site only
+ * works during the day. What actually failed is the same either way.
  */
-function Unavailable() {
+function Unavailable({ open }: { open: boolean }) {
   return (
     <>
       <div className="text-lg font-bold text-term-faint">—</div>
-      <Sub>Live data unavailable — couldn&apos;t reach the quote service.</Sub>
+      <Sub>
+        {open
+          ? "Live data unavailable — couldn't reach the quote service."
+          : "Last session's close is unavailable — couldn't reach the quote service."}
+      </Sub>
     </>
   );
 }
@@ -202,6 +234,19 @@ export default async function DashboardPage() {
     ? snapshotStaleness(positioning.meta.quoteDateIso)
     : null;
 
+  /*
+   * Read once and passed down. Each card phrases its own empty state, and they
+   * must all agree about what the clock is doing — two cards disagreeing about
+   * whether the market is open is worse than neither mentioning it.
+   */
+  const market = currentMarketStatus();
+
+  /* The stamp for the group-derived cards: the close they describe, not the
+   * moment the job happened to run. */
+  const groupsStamp = groups
+    ? `${groups.asOfDate} close · computed ${formatAsOf(new Date(groups.computedAt))}`
+    : null;
+
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
@@ -219,8 +264,8 @@ export default async function DashboardPage() {
             {positioning
               // The quote date, for the same reason as `Dashboard.tsx`: the
               // render stamp reads "now" even when the snapshot is a day old.
-              ? `${config.symbol} ${formatPrice(positioning.spot)} · ${positioning.meta.quoteDateLabel}`
-              : `${config.symbol} · live data unavailable`}
+              ? `${config.symbol} ${formatPrice(positioning.spot)} · as of ${positioning.meta.quoteDateLabel}`
+              : `${config.symbol} · quote service unreachable`}
           </p>
         </div>
 
@@ -244,6 +289,7 @@ export default async function DashboardPage() {
             href="/forecast"
             title={`${config.symbol} forecast odds`}
             tone={forecast && (forecast.odds[1]?.higherPct ?? 50) >= 50 ? 'bull' : 'bear'}
+            stamp={forecast ? forecast.quoteDateLabel : undefined}
           >
             {forecast ? (
               <>
@@ -276,6 +322,7 @@ export default async function DashboardPage() {
             href="/forecast"
             title="Downturn probability"
             tone={risk === 'DEFENSIVE' ? 'bear' : risk === 'CAUTIOUS' ? 'flip' : 'bull'}
+            stamp={forecast && risk ? forecast.quoteDateLabel : undefined}
           >
             {forecast && risk ? (
               <>
@@ -311,6 +358,7 @@ export default async function DashboardPage() {
             href="/"
             title="Gamma regime"
             tone={!summary ? 'neutral' : summary.regime === 'positive' ? 'pos' : 'neg'}
+            stamp={summary ? positioning!.meta.quoteDateLabel : undefined}
           >
             {summary ? (
               <>
@@ -327,7 +375,7 @@ export default async function DashboardPage() {
                 </Sub>
               </>
             ) : (
-              <Unavailable />
+              <Unavailable open={market.open} />
             )}
           </Card>
 
@@ -336,6 +384,7 @@ export default async function DashboardPage() {
             href="/sectors?view=groups"
             title="Model consensus"
             tone={bullishTickers >= bearishTickers ? 'bull' : 'bear'}
+            stamp={ranked.length > 0 ? groupsStamp : undefined}
           >
             {ranked.length > 0 ? (
               <>
@@ -375,7 +424,18 @@ export default async function DashboardPage() {
             panel on /decision. It is neither — it is how much open interest
             and volume this one chain carries.
           */}
-          <Card href="/flow" title={`${config.symbol} chain depth`} tone="neutral">
+          <Card
+            href="/flow"
+            title={`${config.symbol} chain depth`}
+            tone="neutral"
+            stamp={
+              summary
+                ? `${positioning!.meta.quoteDateLabel}${
+                    spyFlow && flow ? ` · volume from the ${flow.sessionDate} session` : ''
+                  }`
+                : undefined
+            }
+          >
             {summary ? (
               <>
                 <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
@@ -400,12 +460,18 @@ export default async function DashboardPage() {
                 </Sub>
               </>
             ) : (
-              <Unavailable />
+              <Unavailable open={market.open} />
             )}
           </Card>
 
           {/* ---- leaders ---- */}
-          <Card href="/strength" title="Leaders" tone="bull" linksInside>
+          <Card
+            href="/strength"
+            title="Leaders"
+            tone="bull"
+            linksInside
+            stamp={leaders.length > 0 ? groupsStamp : undefined}
+          >
             {leaders.length > 0 ? (
               <>
                 <ul className="space-y-1">
@@ -427,7 +493,13 @@ export default async function DashboardPage() {
           </Card>
 
           {/* ---- laggards ---- */}
-          <Card href="/strength" title="Laggards" tone="bear" linksInside>
+          <Card
+            href="/strength"
+            title="Laggards"
+            tone="bear"
+            linksInside
+            stamp={laggards.length > 0 ? groupsStamp : undefined}
+          >
             {laggards.length > 0 ? (
               <>
                 <ul className="space-y-1">
@@ -449,7 +521,12 @@ export default async function DashboardPage() {
           </Card>
 
           {/* ---- magnets ---- */}
-          <Card href="/" title="Magnet strikes" tone="flip">
+          <Card
+            href="/"
+            title="Magnet strikes"
+            tone="flip"
+            stamp={summary && positioning ? positioning.meta.quoteDateLabel : undefined}
+          >
             {summary && positioning ? (
               <>
                 <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
@@ -471,12 +548,17 @@ export default async function DashboardPage() {
                 </Sub>
               </>
             ) : (
-              <Unavailable />
+              <Unavailable open={market.open} />
             )}
           </Card>
 
           {/* ---- digest ---- */}
-          <Card href="/daily" title="Today in one line" tone="neutral">
+          <Card
+            href="/daily"
+            title="Today in one line"
+            tone="neutral"
+            stamp={summary ? positioning!.meta.quoteDateLabel : undefined}
+          >
             {summary ? (
               <>
                 <p className="text-xs leading-relaxed text-term-dim">
@@ -487,7 +569,7 @@ export default async function DashboardPage() {
                 <Sub>the full summary in plain words, and how it gets scored</Sub>
               </>
             ) : (
-              <Unavailable />
+              <Unavailable open={market.open} />
             )}
           </Card>
         </div>
@@ -499,7 +581,9 @@ export default async function DashboardPage() {
             computed — nothing is fetched for this view, and the group and flow
             numbers are read from storage rather than recalculated. A card
             showing a dash means that job has not run yet, not that something
-            broke.
+            broke, and outside market hours a figure that has stopped moving is
+            last session&rsquo;s close rather than a stuck feed. Every card
+            carries the date of the reading it shows.
           </p>
           <p className="mt-2">
             <span className="text-term-dim">The caveats travel with the numbers. </span>
@@ -509,11 +593,8 @@ export default async function DashboardPage() {
             assumption about who is on the other side of each option trade. Each
             card links to the page that explains its own limits.
           </p>
-          {groups && (
-            <p className="mt-2">
-              Group data computed {formatAsOf(new Date(groups.computedAt))} ·
-              close {groups.asOfDate}
-            </p>
+          {!market.open && (
+            <p className="mt-2 text-term-dim">{market.showingLine}</p>
           )}
         </section>
       </main>
