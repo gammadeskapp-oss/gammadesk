@@ -41,13 +41,16 @@ import { ema } from '../ticker/indicators';
 export interface MovingAverages {
   ema20: number | null;
   /**
-   * The 50-day average, which only ever comes from the bar history.
+   * The 50-day average.
    *
-   * The digest carries 20 and 200 and nothing else, and it is deliberately not
-   * being extended to carry a third: adding a field means recomputing every
-   * shard before any name has one, and the trend sub-score would read
-   * "unknown" for the whole index until the nightly job had walked all four.
-   * Computing it here costs the bar read that is happening anyway.
+   * The digest now carries this alongside 20 and 200 — it was added for the
+   * swing candidate engine, which needs the full stack — so it is preferred
+   * from there where a refreshed shard has it, exactly like the other two. It
+   * is still computed here from the bar history as the fallback, because the
+   * field is unversioned and a shard stored before it was added has no 50-day
+   * average until the nightly job next walks it. That fallback costs the bar
+   * read that is happening anyway, so the whole index has a 50-day average from
+   * the first run rather than filling in a shard a night.
    */
   ema50: number | null;
   ema200: number | null;
@@ -144,7 +147,10 @@ export async function readMovingAverages(): Promise<{
   /** Symbols per shard, all of which need their bars read — see below. */
   const needBars: Array<Set<string>> = [];
   /** What the digest already knew, preferred over a recomputation. */
-  const digestAverages = new Map<string, { ema20: number | null; ema200: number | null }>();
+  const digestAverages = new Map<
+    string,
+    { ema20: number | null; ema50: number | null; ema200: number | null }
+  >();
 
   digests.forEach((doc, shard) => {
     const need = new Set<string>();
@@ -164,6 +170,7 @@ export async function readMovingAverages(): Promise<{
       if ((entry.ema200 ?? null) !== null) fromDigest += 1;
       digestAverages.set(entry.symbol, {
         ema20: entry.ema20 ?? null,
+        ema50: entry.ema50 ?? null,
         ema200: entry.ema200 ?? null,
       });
     }
@@ -187,7 +194,7 @@ export async function readMovingAverages(): Promise<{
           const known = digestAverages.get(symbol);
           bySymbol.set(symbol, {
             ema20: known?.ema20 ?? null,
-            ema50: null,
+            ema50: known?.ema50 ?? null,
             ema200: known?.ema200 ?? null,
             vwap20: null,
           });
@@ -207,7 +214,7 @@ export async function readMovingAverages(): Promise<{
 
         const known = digestAverages.get(symbol);
         const ema20 = known?.ema20 ?? (closes.length >= SHORT ? last(ema(closes, SHORT)) : null);
-        const ema50 = closes.length >= MID ? last(ema(closes, MID)) : null;
+        const ema50 = known?.ema50 ?? (closes.length >= MID ? last(ema(closes, MID)) : null);
         const ema200 =
           known?.ema200 ?? (closes.length >= LONG ? last(ema(closes, LONG)) : null);
 

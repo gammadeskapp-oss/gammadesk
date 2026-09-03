@@ -3,7 +3,9 @@ import { notFound } from 'next/navigation';
 import { Footer } from '@/components/Footer';
 import { LabBoard } from '@/components/LabBoard';
 import { PageBar } from '@/components/PageBar';
+import { SwingBoard } from '@/components/SwingBoard';
 import { getLabView } from '@/lib/lab';
+import { getSwingView } from '@/lib/lab/swing';
 import { labEnabled } from '@/lib/lab/flag';
 import { LAB_ANALOGUE_HORIZON } from '@/lib/lab/types';
 import { formatAsOf } from '@/lib/time';
@@ -37,7 +39,7 @@ export default async function LabPage() {
   // Before any work: a disabled page must not read stores or do arithmetic.
   if (!labEnabled()) notFound();
 
-  const view = await getLabView();
+  const [view, swing] = await Promise.all([getLabView(), getSwingView()]);
 
   return (
     <>
@@ -64,6 +66,76 @@ export default async function LabPage() {
             — each say what their own numbers mean, and none of them says this.
           </p>
         </div>
+
+        {/*
+          The swing candidate engine. Above the ranking testbed because it is a
+          different kind of thing: not a reordering of the whole index, but a
+          set of names where a fixed list of independent checks all agree at
+          once. It reuses the existing engines and rebuilds none of them, and
+          it recomputes its trigger and gamma room against the live price on
+          every view.
+        */}
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="label-xs text-term-text">Swing candidates</h2>
+            <span className="text-2xs text-term-faint">
+              {swing.scanDate
+                ? `${swing.bullish.length + swing.bearish.length} aligned · ${swing.scanDate} scan${
+                    swing.live.available
+                      ? ` · live ${swing.live.capturedEt}${swing.live.marketOpen ? '' : ' (closed)'}`
+                      : ' · stored closes'
+                  }`
+                : 'Nothing stored'}
+            </span>
+          </div>
+
+          <div className="panel px-3.5 py-2.5 text-2xs leading-relaxed text-term-faint">
+            <p className="text-term-dim">
+              An alignment read, not a prediction. Every card is a name where
+              SPY&rsquo;s regime, its sector strength, its 20/50/200 trend, its
+              relative strength, a live trigger (20-EMA reclaim, breakout or
+              tight consolidation) and its volume all point the same way at
+              once. The ticks say how many agree; the number is
+              never odds of anything working. There is no fixed count — every
+              name that qualifies is shown, and none that does not. Trigger and
+              gamma room are measured against the current Tradier price;
+              everything else is a stored reading on its own refresh cadence.
+            </p>
+          </div>
+
+          {swing.notes.length > 0 && (
+            <ul className="panel space-y-1 px-3.5 py-2.5 text-2xs leading-relaxed text-term-faint">
+              {swing.notes.map((note) => (
+                <li key={note}>— {note}</li>
+              ))}
+            </ul>
+          )}
+
+          {swing.scanDate ? (
+            <SwingBoard view={swing} />
+          ) : (
+            <div className="panel px-4 py-8 text-center text-xs">
+              <p className="font-bold text-term-text">Nothing to evaluate.</p>
+              <p className="mx-auto mt-2 max-w-2xl leading-relaxed text-term-dim">
+                This engine reads the scanner&rsquo;s stored document and never
+                computes one. No scan is stored, so there are no names to check.
+              </p>
+            </div>
+          )}
+
+          {swing.caveats.length > 0 && (
+            <details className="panel px-3.5 py-2.5 text-2xs leading-relaxed text-term-faint">
+              <summary className="cursor-pointer label-xs">
+                Decisions and data gaps
+              </summary>
+              <ul className="mt-1.5 space-y-1">
+                {swing.caveats.map((c) => (
+                  <li key={c}>— {c}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
 
         <PageBar
           title="Lab"

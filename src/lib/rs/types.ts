@@ -153,6 +153,19 @@ export interface DigestEntry {
    * movers list reports the reading as unknown until that shard next runs.
    */
   ema20?: number | null;
+  /**
+   * The 50-day average, on the same series as `ema20` and `ema200`.
+   *
+   * Added alongside them for the swing candidate engine, which reads all three
+   * to test that price sits above the full 20/50/200 stack. Same `ema()`
+   * primitive, and the same unversioned-optional-field treatment: bumping
+   * `RS_SCHEMA` would reject the stored *bar* documents and throw away years of
+   * price history to add a column, so a shard that predates this simply has no
+   * 50-day average and the reader that needs it either falls back to the bar
+   * history (see `scanner/averages.ts`) or reports the reading as blank until
+   * that shard next refreshes.
+   */
+  ema50?: number | null;
   ema200?: number | null;
 
   /**

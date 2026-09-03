@@ -88,6 +88,7 @@ const MIN_BARS = WINDOWS.m1 + TREND_LOOKBACK + 1;
  * (200) on purpose. See the note on `DigestEntry.ema20`.
  */
 const EMA_SHORT = 20;
+const EMA_MID = 50;
 const EMA_LONG = 200;
 
 // --- stores -------------------------------------------------------------------
@@ -360,6 +361,7 @@ function digestFor(
   };
 
   const ema20 = n >= EMA_SHORT ? latestFinite(ema(series, EMA_SHORT)) : null;
+  const ema50 = n >= EMA_MID ? latestFinite(ema(series, EMA_MID)) : null;
   const ema200 = n >= EMA_LONG ? latestFinite(ema(series, EMA_LONG)) : null;
 
   // Share volume over the same 20 sessions the dollar figure uses, so the two
@@ -393,6 +395,7 @@ function digestFor(
         ? rsiLast
         : null,
     ema20,
+    ema50,
     ema200,
     avgVolume20,
   };
