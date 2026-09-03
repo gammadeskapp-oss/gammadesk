@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { getLiveOverlay, noOverlay } from '../live';
+import type { LiveOverlay } from '../live/types';
 import { legacyConfig as config } from './config';
 import { peekScannerGamma } from './gamma';
 import { readLatestScan, readTodaysScan, runScanner } from './run';
@@ -49,6 +51,28 @@ export interface ScannerView {
   nw: { bandwidth: number; lookback: number; mult: number; minBars: number };
   trendEmaPeriod: number;
   vwapAnchor: Record<ScanTimeframe, VwapAnchor>;
+  /**
+   * Live prices, applied over the stored scan at read time and never into it.
+   *
+   * ## Read-time only, and that is a hard rule here
+   *
+   * This page stores its scan — computed the first time it is asked for each
+   * day, then read all day. A live price written into that document would be
+   * persisted, served to whoever opened the page next, and would outlive the
+   * request that fetched it. That is the redistribution the token rule exists
+   * to prevent, arriving by a slower route. So the overlay is assembled per
+   * request, rendered, and thrown away; `run.ts` never sees it.
+   *
+   * ## It changes no verdict on this page
+   *
+   * Every gate here — VWAP, the trend EMA, the Nadaraya-Watson band — is
+   * computed from bar series at scan time. A quote cannot recompute any of
+   * them, and quietly substituting one into a gate would produce a pass or
+   * fail that no stored number supports. The live price is shown beside the
+   * scan's close and does nothing else: it answers "where is it now", which
+   * the stored close cannot, and leaves "what did the scan decide" alone.
+   */
+  live: LiveOverlay;
 }
 
 /**
@@ -84,10 +108,15 @@ export async function getScannerView(): Promise<ScannerView> {
 
   const tuning = config.scanner;
 
+  const live = scan
+    ? await getLiveOverlay(scan.rows.map((row) => row.symbol))
+    : noOverlay('There is no scan, so there are no symbols to quote.');
+
   return {
     scan,
     latest,
     gamma,
+    live,
     schedule: { gammaEt: tuning.gammaTimeEt, scanEt: tuning.scanTimeEt },
     rsMin: tuning.rsMin,
     nw: {

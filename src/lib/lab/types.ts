@@ -1,3 +1,5 @@
+import type { LiveOverlay, PriceSource } from '../live/types';
+
 /**
  * Shapes for /lab, the private research page.
  *
@@ -71,6 +73,47 @@ export const LAB_EXPLANATION: Record<LabKey, string> = {
     'Of the past sessions that met the same condition this name meets today, the share that finished higher 21 sessions later. Not fetched until asked for — it costs a full price history per name — so it is absent on every row until you load it.',
 };
 
+/**
+ * Which clock each component is on once a live overlay is applied.
+ *
+ * `stored` — nothing about the component moves. It was computed from a stored
+ * document (the option chain the gamma job pulled, the relative-strength
+ * digest, the flow scan, a daily bar history) and a live quote does not touch
+ * it. Most of this page is here.
+ *
+ * `mixed` — the component is a distance, so the *price* half of it goes live
+ * and the *level* half stays exactly as stored. That is the reading worth
+ * having and it is also the one worth being careful about: the number moves
+ * tick by tick while the thing it is measured against was fixed this morning.
+ *
+ * Nothing is `live` outright, and that is not an omission. Every reading on
+ * this page is either a property of an option chain, a ranking over months of
+ * bars, or a count over decades of them. A quote cannot make any of those
+ * current — it can only change where price sits relative to them.
+ */
+export const LAB_CLOCK: Record<LabKey, 'stored' | 'mixed'> = {
+  gammaRegime: 'stored',
+  flipDistance: 'mixed',
+  magnetDistance: 'mixed',
+  rs: 'stored',
+  flow: 'stored',
+  analogue: 'stored',
+};
+
+/** What the clock label means for one component, in a sentence. */
+export const LAB_CLOCK_NOTE: Record<LabKey, string> = {
+  gammaRegime:
+    'Unchanged by a live price. Dealer positioning is built from open interest, which publishes once a day after the close, so the reading is as old as the gamma refresh whatever the quote says.',
+  flipDistance:
+    'Live price, stored level. The flip level was computed from the morning chain and does not move; the distance to it moves with every tick. Two clocks in one number.',
+  magnetDistance:
+    'Live price, stored strikes. The magnets are the large positive-gamma strikes from the morning chain; only the distance to them is current.',
+  rs: 'Unchanged by a live price. It ranks months of closes against the index, and today is one bar of that — the digest updates nightly.',
+  flow: 'Unchanged by a live price. The flow scan runs once after the close and describes that session.',
+  analogue:
+    'Unchanged by a live price. The condition is detected on the latest completed daily bar, and the hit rate counts sessions that finished decades ago.',
+};
+
 export type LabWeights = Record<LabKey, number>;
 
 /**
@@ -123,8 +166,29 @@ export interface LabMagnet {
  */
 export interface LabRow {
   symbol: string;
+  /**
+   * The price every distance on this row is measured from.
+   *
+   * The live quote when there is one, the stored daily close otherwise.
+   * `priceSource` says which, on every row, because a distance measured from a
+   * live price against a level computed this morning is on two clocks and the
+   * page has to be able to say so.
+   */
   price: number | null;
   priceAsOf: string;
+  /** Which clock `price` is on. See `PriceSource`. */
+  priceSource: PriceSource;
+  /**
+   * The stored daily close, kept even when a live price is in use.
+   *
+   * Carried so the row can show both. A live overlay that overwrote the stored
+   * number would leave the reader unable to see how far the name has moved
+   * since the reading everything else on the row was computed from — which is
+   * the one thing the overlay is useful for.
+   */
+  storedPrice: number | null;
+  /** Percent from the stored close to the live price. Null without an overlay. */
+  livePctFromStored: number | null;
 
   /** Dealer positioning, or null when no chain was pulled for this name. */
   regime: 'positive' | 'negative' | null;
@@ -213,6 +277,13 @@ export interface LabView {
   gammaDate: string | null;
   /** Session the flow scan describes. */
   flowDate: string | null;
+  /**
+   * The live-price overlay, or the reason there is none.
+   *
+   * Never populated in production: the token it needs is not set there, and
+   * this page does not render there either. See `lib/live/index.ts`.
+   */
+  live: LiveOverlay;
   /** How many rows carry each component, counted on the server. */
   coverage: Record<Exclude<LabKey, 'analogue'>, number>;
   /** Everything that stopped a component being universal, in plain English. */

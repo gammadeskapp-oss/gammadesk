@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { loadLabAnalogues } from '@/app/lab/actions';
+import { ClockStrip } from '@/components/ClockStrip';
 import { formatUsd } from '@/lib/format';
 import {
   FLIP_SPAN_PCT,
@@ -14,6 +15,8 @@ import {
 import {
   DEFAULT_LAB_WEIGHTS,
   LAB_ANALOGUE_BATCH,
+  LAB_CLOCK,
+  LAB_CLOCK_NOTE,
   LAB_EXPLANATION,
   LAB_KEYS,
   LAB_LABEL,
@@ -25,6 +28,7 @@ import {
   type LabView,
   type LabWeights,
 } from '@/lib/lab/types';
+import type { LiveOverlay } from '@/lib/live/types';
 
 /**
  * The whole of /lab.
@@ -38,6 +42,16 @@ import {
  * deliberate: the question this page exists to answer is whether a blend
  * surfaces names the individual pages do not, and a blend that filters cannot
  * be compared against anything.
+ *
+ * ## Live prices change the price and nothing else
+ *
+ * When a local `TRADIER_TOKEN` is set the server swaps each row's stored close
+ * for a quote read seconds ago. Only the two distance columns feel it, and
+ * they feel it on one side only: the price moves, the flip level and the
+ * magnet strikes were fixed by this morning's chain. Every column is marked
+ * with the clock it is on and the mixture is stated above the table, because a
+ * live number and a stored number rendered in the same row with no label is
+ * the reader quietly being handed two measurements as though they were one.
  *
  * ## Everything the reader can move stays in the browser
  *
@@ -154,7 +168,13 @@ function longValue(key: LabKey, row: LabRow): string {
         ? missingReason(key, row)
         : `the flip level is ${row.flipLevel?.toFixed(2)}, ${Math.abs(row.flipPct).toFixed(1)}% ${
             row.flipPct >= 0 ? 'above' : 'below'
-          } the ${row.price?.toFixed(2)} close. Scored on nearness over a ${FLIP_SPAN_PCT}% span`;
+          } the ${row.price?.toFixed(2)} ${
+            row.priceSource === 'live' ? 'live price' : 'close'
+          }. Scored on nearness over a ${FLIP_SPAN_PCT}% span${
+            row.priceSource === 'live'
+              ? '. The price is current and the flip level is not — it was fixed by the morning chain'
+              : ''
+          }`;
     case 'magnetDistance': {
       const nearest = nearestMagnetPct(row);
       if (nearest === null) return missingReason(key, row);
@@ -173,7 +193,11 @@ function longValue(key: LabKey, row: LabRow): string {
       } else {
         parts.push('no stored magnet below the close');
       }
-      return `${parts.join('; ')}. Scored on the closer of the two (${nearest.toFixed(1)}%) over a ${MAGNET_SPAN_PCT}% span`;
+      return `${parts.join('; ')}. Scored on the closer of the two (${nearest.toFixed(1)}%) over a ${MAGNET_SPAN_PCT}% span${
+        row.priceSource === 'live'
+          ? '. Measured from the live price against strikes fixed by the morning chain'
+          : ''
+      }`;
     }
     case 'rs':
       return row.rsScore === null
@@ -208,6 +232,14 @@ function longValue(key: LabKey, row: LabRow): string {
       }`;
     }
   }
+}
+
+// --- saying which clock a number is on ---------------------------------------
+
+/** The one-word clock marker under a column heading. */
+function clockMark(key: LabKey, live: LiveOverlay): string | null {
+  if (!live.available) return null;
+  return LAB_CLOCK[key] === 'mixed' ? 'live px / stored level' : 'stored';
 }
 
 // --- the weight controls -----------------------------------------------------
@@ -383,6 +415,11 @@ function Row({
                         <span className="block text-term-faint">
                           {longValue(key, row)}
                         </span>
+                        {row.priceSource === 'live' && LAB_CLOCK[key] === 'mixed' && (
+                          <span className="block text-flip/80">
+                            {LAB_CLOCK_NOTE[key]}
+                          </span>
+                        )}
                       </dd>
                     </div>
                   );
@@ -428,9 +465,38 @@ function Row({
                 )}
               </p>
 
+              {/*
+                Both prices, always, whenever there are two. The overlay is
+                only useful if the reader can see how far the name has moved
+                since the reading everything else on the row was built from —
+                and that is precisely the gap a single blended number hides.
+              */}
               <p className="text-2xs text-term-faint">
-                Close {row.price === null ? '—' : row.price.toFixed(2)} as of{' '}
-                {row.priceAsOf}.
+                {row.priceSource === 'live' ? (
+                  <>
+                    <span className="text-pos">
+                      Live {row.price === null ? '—' : row.price.toFixed(2)}
+                    </span>
+                    {' · '}
+                    stored close{' '}
+                    {row.storedPrice === null ? '—' : row.storedPrice.toFixed(2)} as
+                    of {row.priceAsOf}
+                    {row.livePctFromStored !== null && (
+                      <>
+                        {' '}
+                        ({row.livePctFromStored >= 0 ? '+' : ''}
+                        {row.livePctFromStored.toFixed(2)}% since)
+                      </>
+                    )}
+                    . Every reading above except the two distances was computed
+                    from the stored side.
+                  </>
+                ) : (
+                  <>
+                    Close {row.price === null ? '—' : row.price.toFixed(2)} as of{' '}
+                    {row.priceAsOf}.
+                  </>
+                )}
               </p>
             </div>
           </td>
@@ -535,7 +601,7 @@ export function LabBoard({ view }: { view: LabView }) {
   const pending = visible.filter((entry) => !analogues[entry.row.symbol]).length;
   const loaded = Object.keys(analogues).length;
 
-  const sortHead = (key: SortKey, label: string, title: string) => (
+  const sortHead = (key: SortKey, label: string, title: string, mark?: string | null) => (
     <th scope="col" className={HEAD_CLASS}>
       <button
         type="button"
@@ -548,11 +614,26 @@ export function LabBoard({ view }: { view: LabView }) {
         {label}
         {sort.key === key && (sort.dir === 'desc' ? ' ▾' : ' ▴')}
       </button>
+      {/*
+        Under the heading rather than in a tooltip. Which clock a column is on
+        changes what its number means, and a reader comparing two columns has
+        to be able to see the difference without hovering either of them.
+      */}
+      {mark && (
+        <span className="mt-0.5 block font-normal normal-case tracking-normal text-term-faint">
+          {mark}
+        </span>
+      )}
     </th>
   );
 
   return (
     <div className="space-y-3">
+      <ClockStrip
+        live={view.live}
+        mixedNote="Only the price is live. Every level, ranking and count below is the stored reading it always was, so both distance columns hold a current price against a level fixed earlier in the day — two clocks in one number."
+      />
+
       <WeightControls
         weights={weights}
         onChange={(key, value) =>
@@ -626,7 +707,8 @@ export function LabBoard({ view }: { view: LabView }) {
                 sortHead(
                   key,
                   LAB_LABEL[key],
-                  `${LAB_LONG_LABEL[key]} — ${LAB_EXPLANATION[key]} Click to sort by it; unmeasured names sort to the bottom either way.`,
+                  `${LAB_LONG_LABEL[key]} — ${LAB_EXPLANATION[key]} ${LAB_CLOCK_NOTE[key]} Click to sort by it; unmeasured names sort to the bottom either way.`,
+                  clockMark(key, view.live),
                 ),
               )}
               <th scope="col" className={HEAD_CLASS}>
