@@ -28,7 +28,7 @@ function dealerSign(type: 'call' | 'put'): 1 | -1 {
 }
 
 export function emptyMetrics(): Metrics {
-  return { gex: 0, vex: 0, cex: 0, oi: 0, callOi: 0, putOi: 0 };
+  return { gex: 0, vex: 0, cex: 0, oi: 0, callGex: 0, putGex: 0, callOi: 0, putOi: 0 };
 }
 
 function accumulate(target: Metrics, source: Metrics): void {
@@ -36,6 +36,8 @@ function accumulate(target: Metrics, source: Metrics): void {
   target.vex += source.vex;
   target.cex += source.cex;
   target.oi += source.oi;
+  target.callGex += source.callGex;
+  target.putGex += source.putGex;
   target.callOi += source.callOi;
   target.putOi += source.putOi;
 }
@@ -81,6 +83,10 @@ export function contractMetrics(
     vex,
     cex,
     oi: sign * openInterest,
+    // Same dollars as `gex`, kept on the side the contract came from. One of
+    // the two is always zero, so summing them back gives `gex` exactly.
+    callGex: type === 'call' ? gex : 0,
+    putGex: type === 'put' ? gex : 0,
     callOi: type === 'call' ? openInterest : 0,
     putOi: type === 'put' ? openInterest : 0,
   };

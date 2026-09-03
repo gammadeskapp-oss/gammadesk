@@ -1,6 +1,5 @@
 import { dealerConventionCaveat } from './dealerConvention';
 import { MIN_OI, MIN_RATIO, MIN_VOLUME } from './flow/types';
-import { NEIGHBOURHOOD, STRONG_ENOUGH } from './simple/walls';
 import type { DataMeta, IvSource, PositioningData } from './types';
 
 /**
@@ -206,43 +205,3 @@ export function flowMethodology(computedAtLabel: string | null): Methodology {
   };
 }
 
-/**
- * The facts behind the strike-by-strike gamma profile.
- *
- * Built on top of `positioningMethodology` rather than beside it: the bars are
- * the same numbers the table and the levels come from, and a drawer that
- * described them independently would be free to drift. Only what the chart
- * itself adds — what one bar is, how the two walls are picked, and the fact
- * that the strike window is a display choice — is written here.
- */
-export function gammaProfileMethodology(
-  data: Pick<PositioningData, 'symbol' | 'spot' | 'expirations' | 'expirationMeta'> & {
-    meta: DataMeta;
-  },
-): Methodology {
-  const base = positioningMethodology(data);
-
-  return {
-    ...base,
-    facts: [
-      {
-        label: 'What one bar is',
-        value: 'Net dealer gamma at that strike, across every expiration shown',
-        note: 'The same per-strike total as the GEX column of the exposure table. Bars to one side are positive, to the other negative; the length is the size, not a score.',
-      },
-      {
-        label: 'How the walls are picked',
-        value: `Nearest strike within ${NEIGHBOURHOOD} of spot carrying at least ${Math.round(
-          STRONG_ENOUGH * 100,
-        )}% of that neighbourhood's largest exposure`,
-        note: 'The same rule the rest of the site names its levels with, so the chart and the text above it can never point at different strikes.',
-      },
-      {
-        label: 'The strike window',
-        value: 'A display choice, not a filter on the maths',
-        note: 'Widening or narrowing it changes which bars are drawn. The flip level, the walls and the totals are computed over the whole snapshot either way.',
-      },
-      ...base.facts,
-    ],
-  };
-}

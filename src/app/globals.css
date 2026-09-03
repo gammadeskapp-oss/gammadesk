@@ -36,6 +36,13 @@
   --c-cool: 76 141 255; /* #4c8dff */
 
   /*
+   * The gamma flip line on the strike profile. A third hue on purpose: the
+   * chart already spends blue on positive gamma and amber on negative, and a
+   * level drawn in either of those reads as a value rather than a boundary.
+   */
+  --c-level: 167 139 250; /* #a78bfa */
+
+  /*
    * Direction. Deliberately untouched by theming — traders read these by
    * reflex and a palette change must never repaint them.
    */

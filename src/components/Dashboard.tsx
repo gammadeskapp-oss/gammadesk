@@ -18,6 +18,7 @@ import { StaleDataBanner, mutedIf } from './StaleDataBanner';
 import { SummaryStrip } from './SummaryStrip';
 import { TabBar } from './TabBar';
 import { WhatChanged } from './WhatChanged';
+import type { GammaProfileData } from '@/lib/gammaProfile';
 import type { Methodology } from '@/lib/methodology';
 import type { Staleness } from '@/lib/staleness';
 import type { MetricKey, PositioningData } from '@/lib/types';
@@ -41,12 +42,11 @@ interface DashboardProps {
    */
   methodology: Methodology;
   /**
-   * The drawer under the gamma profile. Separate from `methodology` because it
-   * states three things that are true of the chart and not of the table — what
-   * one bar is, how the walls are picked, and that the strike window is a
-   * display choice — on top of the same shared facts.
+   * The strike-by-strike profile the chart draws, precomputed on the server so
+   * the flip level and the magnets it labels are the same prices the verdict
+   * above it states rather than a second derivation of them.
    */
-  profileMethodology: Methodology;
+  profile: GammaProfileData;
   /*
    * Rendered on the server and passed through as a node.
    *
@@ -106,7 +106,7 @@ export function Dashboard({
   data,
   staleness,
   methodology,
-  profileMethodology,
+  profile,
   contextRow,
   researchLine,
   whatChanged,
@@ -255,7 +255,7 @@ export function Dashboard({
         reader holding — and it needs no jargon to look at.
       */}
       <div className={mutedIf(staleness.stale)}>
-        <GammaProfile data={data} methodology={profileMethodology} />
+        <GammaProfile profile={profile} />
       </div>
 
       <MethodologyDrawer methodology={methodology} anchor="levels" />

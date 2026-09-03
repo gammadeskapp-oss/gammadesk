@@ -7,12 +7,13 @@ import { PositioningSearch } from '@/components/PositioningSearch';
 import { ResearchCards } from '@/components/ResearchCards';
 import { ChainError } from '@/lib/chainSource';
 import { config } from '@/lib/config';
+import { buildGammaProfile } from '@/lib/gammaProfile';
 import { getPositioningView, normaliseSymbol } from '@/lib/positioning';
 import { getBreadth } from '@/lib/breadth';
 import type { BreadthReading } from '@/lib/breadth/types';
 import { getMarketContextQuotes } from '@/lib/marketContext/quotes';
 import type { MarketContextQuotes } from '@/lib/marketContext/quotes';
-import { gammaProfileMethodology, positioningMethodology } from '@/lib/methodology';
+import { positioningMethodology } from '@/lib/methodology';
 import { researchLine } from '@/lib/simple/research';
 import { moodOf } from '@/lib/simple/translate';
 import {
@@ -136,11 +137,12 @@ export default async function HomePage({ searchParams }: PageProps) {
           */
           methodology={positioningMethodology(data)}
           /*
-            The gamma profile's own drawer. Built from the same snapshot and
-            layered on the same facts — see `gammaProfileMethodology` — so the
-            chart cannot describe a different book than the table beside it.
+            The strike profile, shaped on the server and memoised against this
+            snapshot — see lib/gammaProfile.ts. The chart is handed the flip
+            level and both magnets as prices rather than deriving its own, so
+            it cannot draw a line the text above it does not name.
           */
-          profileMethodology={gammaProfileMethodology(data)}
+          profile={buildGammaProfile(data)}
           /*
             The one line under the verdict. Built here rather than in the
             client component because it needs the breadth reading, which is
