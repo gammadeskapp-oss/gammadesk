@@ -602,7 +602,9 @@ export function LabBoard({ view }: { view: LabView }) {
   const loaded = Object.keys(analogues).length;
 
   const sortHead = (key: SortKey, label: string, title: string, mark?: string | null) => (
-    <th scope="col" className={HEAD_CLASS}>
+    // `key` is unique per column, so it doubles as the React key for the
+    // mapped headings below and is harmless on the two rendered directly.
+    <th key={key} scope="col" className={HEAD_CLASS}>
       <button
         type="button"
         onClick={() => toggleSort(key)}
