@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { getFlowSnapshot } from '../flow';
+import { peekStoredFlow } from '../flow';
 import { peekScannerGamma, readLatestScan, readTodaysScan } from '../scanner';
 import type { ScanResult, StoredGamma } from '../scanner/types';
 import type { FlowSnapshot } from '../flow/types';
@@ -22,6 +22,14 @@ export { getLabAnalogue } from './analogue';
  * That is a hard constraint rather than a nicety. A research page whose own
  * page views spent the chain budget would degrade the pages that are actually
  * scheduled, and it would do it invisibly.
+ *
+ * It is also why the flow reading comes from `peekStoredFlow` and not from
+ * `getFlowSnapshot`. The latter is the flow page's reader and it recomputes
+ * when the stored copy has aged out — eighty chains, several megabytes apiece,
+ * behind a page load. `peekStoredFlow` returns whatever is stored and null
+ * when nothing is, which is exactly the honest answer here: an absent flow
+ * reading is dropped from the blend and said out loud, and no page view of a
+ * private testbed should be able to start a scan.
  *
  * The one exception is the analogue component, which cannot come from a store
  * because nothing stores it — see `analogue.ts`. It is fetched on demand, in
@@ -209,7 +217,7 @@ export async function getLabView(): Promise<LabView> {
     readTodaysScan(),
     readLatestScan(),
     peekScannerGamma(),
-    getFlowSnapshot().catch(() => null),
+    peekStoredFlow().catch(() => null),
   ]);
 
   const scan = today ?? latest;
