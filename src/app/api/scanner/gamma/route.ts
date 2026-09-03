@@ -106,7 +106,9 @@ export async function GET(request: Request) {
           });
     }
 
-    const outcome = await refreshScannerGamma(wanted.map((r) => r.symbol));
+    const outcome = await refreshScannerGamma(
+      wanted.map((r) => ({ symbol: r.symbol, close: r.close })),
+    );
 
     const spy = outcome.stored.symbols.SPY;
     const summary =

@@ -134,9 +134,23 @@ export interface FetchedChain {
 export async function fetchChainFor(
   symbol: string,
   source: ResolvedChainSource,
+  /**
+   * A previous close the caller already holds.
+   *
+   * Not an optimisation. Polygon's price endpoint is a *stocks* call and an
+   * options plan does not cover it, so without this every symbol queues behind
+   * a five-a-minute limiter — measured at sixty seconds a symbol. The scanner
+   * has this price for all 503 names in the relative-strength digest already.
+   * Cboe carries its own spot and ignores it.
+   */
+  spotHint?: number,
 ): Promise<FetchedChain> {
   const fetchers: Record<ChainProvider, (s: string) => Promise<ChainSnapshot>> = {
-    polygon: fetchPolygonChain,
+    polygon: (s) =>
+      fetchPolygonChain(s, {
+        spot: spotHint,
+        maxPages: config.scanner.polygonPagesPerChain,
+      }),
     cboe: fetchCboeSnapshot,
   };
 

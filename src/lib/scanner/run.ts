@@ -197,7 +197,7 @@ export async function runScanner(): Promise<ScanResult> {
     );
   } else if (gamma.failures.length > 0) {
     notes.push(
-      `${gamma.failures.length} chains could not be read at ${tuning.gammaTimeEt} ET: ${gamma.failures
+      `${gamma.failures.length} chain${gamma.failures.length === 1 ? '' : 's'} could not be read at ${tuning.gammaTimeEt} ET: ${gamma.failures
         .map((f) => f.symbol)
         .join(', ')}. Those names carry no dealer-positioning context and no option-liquidity reading, so both components are left out of their blend rather than scored zero.`,
     );

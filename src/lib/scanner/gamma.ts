@@ -3,7 +3,7 @@ import 'server-only';
 import { config } from '../config';
 import { buildPositioning } from '../exposure';
 import { createJsonStore } from '../jsonStore';
-import { runScan, SCAN_CONCURRENCY } from '../scanUniverse';
+import { runPool, runScan, SCAN_CONCURRENCY } from '../scanUniverse';
 import { marketToday } from '../time';
 import {
   fetchChainFor,
@@ -93,8 +93,9 @@ function magnetsFrom(rows: Array<{ strike: number; total: { gex: number } }>): M
 async function readSymbol(
   symbol: string,
   source: ResolvedChainSource,
+  spotHint?: number,
 ): Promise<{ entry: GammaEntry; provider: string; fellBackFrom: string | null }> {
-  const { snapshot, provider, fellBackFrom } = await fetchChainFor(symbol, source);
+  const { snapshot, provider, fellBackFrom } = await fetchChainFor(symbol, source, spotHint);
   const now = new Date();
 
   const positioning = buildPositioning(snapshot.contracts, {
@@ -164,9 +165,23 @@ export interface GammaRefreshOutcome {
  * "we never got the chain", and the two are different filter states.
  */
 export async function refreshScannerGamma(
-  candidates: string[],
+  /**
+   * The names to refresh, each with the previous close the caller already
+   * holds.
+   *
+   * The close is not decoration. Polygon's price endpoint is a stocks call
+   * that an options plan does not cover, so a run without it queues sixty
+   * seconds per symbol behind a five-a-minute limiter — which is the
+   * difference between covering the index and covering two dozen names. The
+   * scanner has this figure for every ranked name already.
+   */
+  candidates: Array<{ symbol: string; close: number | null }>,
 ): Promise<GammaRefreshOutcome> {
-  const wanted = ['SPY', ...candidates.filter((s) => s !== 'SPY')];
+  const closes = new Map(candidates.map((c) => [c.symbol, c.close]));
+  const wanted = [
+    'SPY',
+    ...candidates.map((c) => c.symbol).filter((s) => s !== 'SPY'),
+  ];
 
   /*
    * The source is resolved once, before a single chain is spent, and it is the
@@ -185,29 +200,43 @@ export async function refreshScannerGamma(
   /** Symbols the primary could not serve and the fallback could. */
   const fellBack: string[] = [];
 
-  const outcome = await runScan(
-    wanted,
-    async (symbol) => {
-      try {
-        const read = await readSymbol(symbol, source);
-        symbols[symbol] = read.entry;
-        if (read.fellBackFrom) fellBack.push(symbol);
-      } catch (error) {
-        failures.push({
-          symbol,
-          reason: error instanceof Error ? error.message : String(error),
+  const read = async (symbol: string) => {
+    try {
+      const result = await readSymbol(symbol, source, closes.get(symbol) ?? undefined);
+      symbols[symbol] = result.entry;
+      if (result.fellBackFrom) fellBack.push(symbol);
+    } catch (error) {
+      failures.push({
+        symbol,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  /*
+   * Two schedulers, because the two providers are constrained by different
+   * things. Cboe is a quota — waves with a pause between them, which is what
+   * `runScan` is for. Polygon is latency with no quota, and a wave scheduler
+   * there runs at the speed of the slowest chain in each wave; a continuous
+   * pool with a per-symbol deadline covers the index instead of a third of it.
+   */
+  const outcome: { skipped: string[]; timedOut?: string[] } =
+    source.primary === 'polygon'
+      ? await runPool(wanted, read, {
+          concurrency: config.scanner.polygonConcurrency,
+          maxRequests: source.budget,
+          perSymbolMs: config.scanner.polygonSymbolTimeoutMs,
+          // The route allows five minutes; stop well before it so the document
+          // is still written rather than the run being killed mid-flight.
+          budgetMs: 240_000,
+        })
+      : await runScan(wanted, read, {
+          concurrency: SCAN_CONCURRENCY,
+          maxRequests: source.budget,
+          budgetMs: 240_000,
         });
-      }
-    },
-    {
-      concurrency:
-        source.primary === 'polygon' ? config.scanner.polygonConcurrency : SCAN_CONCURRENCY,
-      maxRequests: source.budget,
-      // The route allows five minutes; stop well before it so the document is
-      // still written rather than the run being killed mid-flight.
-      budgetMs: 240_000,
-    },
-  );
+
+  const timedOut = outcome.timedOut ?? [];
 
   const byProvider = { polygon: 0, cboe: 0 };
   for (const entry of Object.values(symbols)) {
@@ -222,14 +251,14 @@ export async function refreshScannerGamma(
     failures,
     skipped: outcome.skipped,
     requested: wanted.length,
-    source: describeSource(source, byProvider, fellBack.length),
+    source: describeSource(source, byProvider, fellBack.length, timedOut.length),
     byProvider,
   };
 
   console.log(
     `[scanner/gamma] refreshed=${Object.keys(symbols).length}/${wanted.length} ` +
       `polygon=${byProvider.polygon} cboe=${byProvider.cboe} fellBack=${fellBack.length} ` +
-      `failed=${failures.length} skipped=${outcome.skipped.length}`,
+      `failed=${failures.length} timedOut=${timedOut.length} skipped=${outcome.skipped.length}`,
   );
 
   try {
@@ -265,6 +294,7 @@ function describeSource(
   source: ResolvedChainSource,
   byProvider: { polygon: number; cboe: number },
   fellBack: number,
+  timedOut: number,
 ): string {
   const parts: string[] = [];
 
@@ -283,6 +313,12 @@ function describeSource(
   if (fellBack > 0) {
     parts.push(
       `${fellBack} fell back from ${source.primary} after it could not serve them`,
+    );
+  }
+
+  if (timedOut > 0) {
+    parts.push(
+      `${timedOut} were abandoned at the per-symbol deadline and carry no reading`,
     );
   }
 

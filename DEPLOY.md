@@ -243,7 +243,9 @@ and the shortlisting is gone.
 | `GAMMADESK_POLYGON_RPM` | `0` | Requests per minute. `0` means the plan is unlimited and the limiter is skipped. Set `5` for the free plan. |
 | `GAMMADESK_POLYGON_MAX_PAGES` | `12` | Snapshot pages per chain. Four was the free plan's whole minute of quota. |
 | `GAMMADESK_SCAN_POLYGON_BUDGET` | `600` | Chains one run may request on the Polygon path. A wall-clock backstop, not a quota. |
-| `GAMMADESK_SCAN_POLYGON_CONCURRENCY` | `12` | Chains in flight at once on the Polygon path. |
+| `GAMMADESK_SCAN_POLYGON_CONCURRENCY` | `24` | Chains in flight at once on the Polygon path. |
+| `GAMMADESK_SCAN_POLYGON_PAGES` | `3` | Snapshot pages per chain during a sweep. Later pages are trimmed away unread. |
+| `GAMMADESK_SCAN_POLYGON_SYMBOL_TIMEOUT_MS` | `10000` | A chain slower than this is abandoned and reported as unmeasured. |
 
 **Nothing fails over silently.** `auto` asks the key what it is entitled to
 before spending anything, and the decision is printed in the job's log line
@@ -251,6 +253,19 @@ before spending anything, and the decision is printed in the job's log line
 endpoint, and shown on /scanner. Falling back to Cboe means going from five
 hundred chains to sixty, and a reader comparing two mornings has to be able to
 see that it happened.
+
+**An options plan does not buy stocks entitlement.** The spot price used to
+come from `/v2/aggs/.../prev`, which is a *stocks* call still capped at five a
+minute — so a five-hundred-symbol sweep spent five requests and then queued
+sixty seconds per symbol. Measured: 5 chains from Polygon, 67 from Cboe, 432
+failures. The scanner now passes the previous close it already holds in the
+relative-strength digest, and that endpoint is never touched during a sweep.
+
+Measured end to end on the real universe, 2026-09-02: **461 of 503 chains in
+24 seconds**, no Cboe fallback, 42 abandoned at the per-symbol deadline and
+reported as unmeasured. The remaining knobs above are what that run was tuned
+with; a wave scheduler ran the same job at 168 chains in 242 seconds, which is
+why the Polygon path uses a continuous worker pool (`runPool`) instead.
 
 Check the entitlement without spending a run:
 

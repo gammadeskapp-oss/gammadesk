@@ -347,6 +347,33 @@ export const config = {
       ),
 
       /**
+       * Snapshot pages fetched per chain during a whole-universe sweep.
+       *
+       * Deliberately far below the dashboard's limit. Results arrive in
+       * ascending expiration order and everything past the displayed
+       * expirations is trimmed away, so the later pages cost a round trip each
+       * and contribute nothing — which is what held a five-hundred-symbol
+       * refresh to a hundred and thirty chains inside its time budget.
+       */
+      polygonPagesPerChain: Math.max(
+        1,
+        num(process.env.GAMMADESK_SCAN_POLYGON_PAGES, 3),
+      ),
+
+      /**
+       * Longest one chain may take before the sweep abandons it.
+       *
+       * A single hung request otherwise holds a worker for the whole run. One
+       * symbol contributes one component of seven to one row, so dropping a
+       * slow one costs less than the names it would crowd out — and it is
+       * reported as unmeasured rather than as a bad reading.
+       */
+      polygonSymbolTimeoutMs: Math.max(
+        1_000,
+        num(process.env.GAMMADESK_SCAN_POLYGON_SYMBOL_TIMEOUT_MS, 10_000),
+      ),
+
+      /**
        * Chains in flight at once against Polygon.
        *
        * Higher than the Cboe path's six because there is no per-minute quota
@@ -355,7 +382,7 @@ export const config = {
        */
       polygonConcurrency: Math.max(
         1,
-        num(process.env.GAMMADESK_SCAN_POLYGON_CONCURRENCY, 12),
+        num(process.env.GAMMADESK_SCAN_POLYGON_CONCURRENCY, 24),
       ),
 
       /** Trend EMA the price must sit above for filter 7. */

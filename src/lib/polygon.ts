@@ -78,6 +78,21 @@ interface SnapshotResponse {
  * Every outbound call funnels through here so the rate limiter, the request
  * counter and the error translation stay in one place.
  */
+/**
+ * Whether a path is an options-plan endpoint.
+ *
+ * The distinction is a billing one and it is load-bearing. An Options Starter
+ * plan makes `/v3/snapshot/options/...` unlimited; it does not touch the
+ * **stocks** entitlement, so `/v2/aggs/...` is still whatever the stocks plan
+ * allows — five requests a minute on the free tier. Throttling both the same
+ * way either cripples the options path or floods the stocks one, and flooding
+ * the stocks one is what limited a whole-universe gamma refresh to five
+ * symbols before everything else fell back to Cboe.
+ */
+function isOptionsEndpoint(url: string): boolean {
+  return url.startsWith('/v3/snapshot/options/') || url.startsWith('/v3/reference/options/');
+}
+
 async function polygonFetch<T>(url: string, counter: { count: number }): Promise<T> {
   const key = config.apiKey;
   if (!key) {
@@ -92,11 +107,13 @@ async function polygonFetch<T>(url: string, counter: { count: number }): Promise
   target.searchParams.set('apiKey', key);
 
   /*
-   * Zero means the plan is not per-minute rationed and the limiter is skipped
-   * — see `config.polygonOptions`. On the free plan this is set to 5 and the
-   * sliding window does what it always did.
+   * Options calls use the options plan's cap — zero meaning "unlimited, do not
+   * throttle". Everything else is a stocks call and keeps the free plan's five
+   * a minute, because that entitlement did not change.
    */
-  const rpm = config.polygonOptions.rpm;
+  const rpm = isOptionsEndpoint(url)
+    ? config.polygonOptions.rpm
+    : POLYGON_LIMITS.requestsPerMinute;
   if (rpm > 0) await polygonLimiter(rpm).acquire();
   counter.count += 1;
 
@@ -163,6 +180,7 @@ async function fetchChain(
   symbol: string,
   spot: number,
   counter: { count: number },
+  pageLimit?: number,
 ): Promise<{ results: SnapshotResult[]; truncated: boolean }> {
   const today = marketToday();
   const window = Math.max(30, spot * 0.06);
@@ -187,7 +205,17 @@ async function fetchChain(
    * four pages was one whole minute of quota, and on a paid plan there is no
    * per-minute quota to spend. See `config.polygonOptions.maxPages`.
    */
-  const maxPages = Math.max(POLYGON_LIMITS.maxSnapshotPages, config.polygonOptions.maxPages);
+  /*
+   * A caller sweeping hundreds of symbols passes its own, much smaller, page
+   * limit. Latency is the binding constraint there rather than quota: each
+   * page is a round trip, results come back in ascending expiration order, and
+   * `trimToWindow` discards everything past the displayed expirations anyway —
+   * so pages beyond the first few are paid for and then thrown away. Measured
+   * on the whole index at twelve pages: 132 chains in 241 seconds. See
+   * `config.scanner.polygonPagesPerChain`.
+   */
+  const maxPages =
+    pageLimit ?? Math.max(POLYGON_LIMITS.maxSnapshotPages, config.polygonOptions.maxPages);
 
   for (let page = 0; page < maxPages && url; page += 1) {
     const data: SnapshotResponse = await polygonFetch<SnapshotResponse>(url, counter);
@@ -250,13 +278,46 @@ export async function fetchPolygonSnapshot(): Promise<ChainSnapshot> {
  * of the site about the same chain on the same day. Open interest and IV are
  * what this needs, and both are on the snapshot.
  */
-export async function fetchPolygonChain(symbol: string): Promise<ChainSnapshot> {
+export async function fetchPolygonChain(
+  symbol: string,
+  options: { spot?: number; maxPages?: number } = {},
+): Promise<ChainSnapshot> {
   const counter = { count: 0 };
   const notes: string[] = [];
   const now = new Date();
 
-  const { price: prevClose, asOf } = await fetchSpot(symbol, counter);
-  const { results, truncated } = await fetchChain(symbol, prevClose, counter);
+  /*
+   * ## The spot price comes from the options snapshot, not from /v2/aggs
+   *
+   * This is the difference between a gamma refresh that covers five hundred
+   * names and one that covers five. The previous-close endpoint is a *stocks*
+   * call, and an options plan does not buy stocks entitlement — so on a
+   * five-a-minute stocks tier, a five-hundred-symbol run spent its first five
+   * requests and then took 429 on every remaining symbol, falling back to
+   * Cboe until that quota went too. Measured: 5 chains from Polygon, 67 from
+   * Cboe, 432 outright failures.
+   *
+   * Every options snapshot result echoes `underlying_asset.price`, so one
+   * cheap unlimited options request establishes spot and the stocks endpoint
+   * is never touched. It is kept as the fallback for the case where the
+   * snapshot does not echo a usable price.
+   */
+  const { price: prevClose, asOf, source: spotSource } = await fetchChainSpot(
+    symbol,
+    counter,
+    options.spot,
+  );
+  if (spotSource === 'aggs') {
+    notes.push(
+      'The underlying price came from the previous-close endpoint. That is a stocks-plan request, rate limited separately from the options plan — a caller refreshing many symbols should pass a price it already holds.',
+    );
+  }
+  const { results, truncated } = await fetchChain(
+    symbol,
+    prevClose,
+    counter,
+    options.maxPages,
+  );
 
   const echoed = results.find(
     (r) => typeof r.underlying_asset?.price === 'number' && r.underlying_asset.price > 0,
@@ -343,6 +404,58 @@ export async function fetchPolygonChain(symbol: string): Promise<ChainSnapshot> 
     activity: { volume: chainVolume, openInterest: chainOpenInterest },
     notes,
   };
+}
+
+/**
+ * Spot for a symbol, in order of what it costs.
+ *
+ * ## A caller-supplied price is not a shortcut; it is the whole fix
+ *
+ * The measurement that produced this ordering: an options plan does not buy
+ * stocks entitlement, so `/v2/aggs/.../prev` is still five requests a minute.
+ * A five-hundred-symbol gamma refresh therefore spent its first five requests
+ * and then queued sixty seconds per symbol behind the limiter — SPY and NVDA
+ * took 61 and 59 seconds each, against 0.4 seconds for the symbols that did
+ * not have to wait.
+ *
+ * The scanner already holds a previous close for every name in the
+ * relative-strength digest — the same quantity the stocks endpoint returns,
+ * fetched once for the whole index and stored. So it passes that in, and the
+ * throttled call is never made.
+ *
+ * The snapshot's own `underlying_asset.price` is tried next. It is documented
+ * and it is genuinely absent on this plan (the object carries a ticker and
+ * nothing else), which is exactly why the caller-supplied price matters — but
+ * it is cheap to check and costs one unlimited options request on the tiers
+ * that do serve it.
+ */
+async function fetchChainSpot(
+  symbol: string,
+  counter: { count: number },
+  hint?: number,
+): Promise<{ price: number; asOf: Date; source: 'caller' | 'snapshot' | 'aggs' }> {
+  if (typeof hint === 'number' && Number.isFinite(hint) && hint > 0) {
+    return { price: hint, asOf: new Date(), source: 'caller' };
+  }
+
+  try {
+    const data = await polygonFetch<SnapshotResponse>(
+      `/v3/snapshot/options/${encodeURIComponent(symbol)}?limit=1`,
+      counter,
+    );
+    const price = data.results?.find(
+      (r) => typeof r.underlying_asset?.price === 'number' && r.underlying_asset.price > 0,
+    )?.underlying_asset?.price;
+
+    if (typeof price === 'number' && price > 0) {
+      return { price, asOf: new Date(), source: 'snapshot' };
+    }
+  } catch {
+    // Fall through to the stocks endpoint, which is reported by the caller.
+  }
+
+  const { price, asOf } = await fetchSpot(symbol, counter);
+  return { price, asOf, source: 'aggs' };
 }
 
 // --- entitlement -------------------------------------------------------------
