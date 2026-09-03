@@ -1,20 +1,29 @@
 import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
 import { Footer } from '@/components/Footer';
 import { LabBoard } from '@/components/LabBoard';
 import { PageBar } from '@/components/PageBar';
 import { getLabView } from '@/lib/lab';
+import { labEnabled } from '@/lib/lab/flag';
 import { LAB_ANALOGUE_HORIZON } from '@/lib/lab/types';
 import { formatAsOf } from '@/lib/time';
 
 /**
- * Unlisted, and deliberately not private.
+ * Unlisted, and switched off unless somebody switched it on.
  *
- * Same treatment as `/previousscanner`: `noindex, nofollow` overrides the
- * site-wide `index, follow` from the root layout, and nothing in the
- * navigation links here. That keeps it out of search results and out of the
- * way — it does not keep anyone out. Anybody who types the URL can read it. If
- * it needs to be genuinely restricted, the way to do that is a passcode from
- * an environment variable, checked here before anything renders.
+ * `noindex, nofollow` overrides the site-wide `index, follow` from the root
+ * layout and nothing in the navigation links here, the same treatment
+ * `/previousscanner` gets. Unlike that page, this one also refuses to exist
+ * without `GAMMADESK_LAB=1`: an unvalidated ranking of five hundred tickers is
+ * not something to leave reachable by anyone who guesses a URL on a deploy
+ * that happened to contain it.
+ *
+ * The gate is a 404 rather than a 403, because a 403 confirms the route is
+ * there — see `lib/lab/flag.ts`. It is a switch and not authentication; the
+ * endpoint that spends upstream requests carries the cron auth separately. If
+ * this ever needs to be readable in production by one person, the way to do
+ * that is a passcode from an environment variable, checked here before
+ * anything renders.
  */
 export const metadata: Metadata = {
   title: 'Lab',
@@ -25,6 +34,9 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default async function LabPage() {
+  // Before any work: a disabled page must not read stores or do arithmetic.
+  if (!labEnabled()) notFound();
+
   const view = await getLabView();
 
   return (
@@ -158,18 +170,6 @@ export default async function LabPage() {
 
           <p className="mt-2">
             <span className="text-term-dim">
-              Two of the six are scored in a direction this page chose.{' '}
-            </span>
-            Distance to the flip and distance to the nearest magnet are both
-            scored so that <em>nearer is higher</em>. That is a guess about what
-            is worth looking at, not something the data implies — proximity to a
-            level is interesting, it is not good. Both say so wherever they
-            appear, and setting either weight to zero takes the guess back out,
-            which is the fastest way to find out whether it was doing any work.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
               Relative strength is used exactly as /strength publishes it.{' '}
             </span>
             Rescaling a score a reader can go and look up would make the two
@@ -193,13 +193,30 @@ export default async function LabPage() {
 
           <p className="mt-2">
             <span className="text-term-dim">
+              Two of the six are scored in a direction this page chose, and both
+              open switched off.{' '}
+            </span>
+            Distance to the flip and distance to the nearest magnet are both
+            scored so that <em>nearer is higher</em>. That is a guess about what
+            is worth looking at, not something the data implies — proximity to a
+            level is interesting, it is not good, and the opposite sign is just
+            as arguable. So both start at weight zero. Their scoring and both
+            span constants are unchanged and the sliders reach them normally,
+            but a component whose direction nobody has established, left on by
+            default, makes every reading of the ranking conditional on a coin
+            flip nobody remembers making. Switch them on one at a time and the
+            effect of each is visible; switch them on together at the start and
+            it never is.
+          </p>
+
+          <p className="mt-2">
+            <span className="text-term-dim">
               Weights are not saved, and that is deliberate.{' '}
             </span>
-            The page opens with every component worth one vote. A saved
-            weighting would mean coming back to a ranking assembled by a version
-            of yourself who is no longer in the room, under a heading that does
-            not mention it. Reloading resets to flat; the panel always shows
-            what is currently applied.
+            A saved weighting would mean coming back to a ranking assembled by a
+            version of yourself who is no longer in the room, under a heading
+            that does not mention it. Reloading returns to the defaults above;
+            the panel always shows what is currently applied.
           </p>
 
           <p className="mt-2">
