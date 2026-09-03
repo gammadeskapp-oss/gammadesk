@@ -60,10 +60,19 @@ export default async function HistoryPage() {
         <PageBar
           title="Level History"
           description={PAGE_DESCRIPTIONS['/history']}
+          /*
+           * `collectingSince` is the first session that ever carried a level,
+           * and this is the only place it is shown — the archive's age is a
+           * different fact from its density, and a reader judging a hit rate
+           * off `sampleSize` deserves both.
+           */
           meta={
             history.empty
               ? undefined
-              : `${history.sampleSize} of the last ${WINDOW} sessions carry recorded levels`
+              : `${history.sampleSize} of the last ${WINDOW} sessions carry recorded levels` +
+                (history.collectingSince
+                  ? ` · recording since ${sessionLabel(history.collectingSince)}`
+                  : '')
           }
           /*
             The newest session on the chart. An archive is as current as its
@@ -79,12 +88,25 @@ export default async function HistoryPage() {
 
         {history.empty ? (
           /*
-            No history at all. Saying when collection started beats an empty
-            chart, which reads as a broken page rather than as a young one.
+            No history at all. An empty chart reads as a broken page rather
+            than as a young one, so the state is named in words instead.
+
+            It used to be named with a date — "Collecting since <today>" —
+            built from `new Date().toISOString()`, which was wrong twice over.
+            It was the UTC date, so after 20:00 ET it printed tomorrow; and it
+            was a date nothing had been recorded on, presented as the day
+            collection began. `collectingSince` is the real value and it is
+            null here by construction: this branch is `allDates.length === 0`
+            and that is the field's own source. So the honest heading names no
+            date at all. The conditional stays because the correct fallback for
+            a null is not a fabricated date, and that has to be true wherever
+            the field is read.
           */
           <div className="panel px-4 py-8 text-center">
             <p className="text-sm font-bold text-term-text">
-              Collecting since {sessionLabel(new Date().toISOString().slice(0, 10))}
+              {history.collectingSince
+                ? `Collecting since ${sessionLabel(history.collectingSince)}`
+                : 'Nothing recorded yet'}
             </p>
             <p className="mx-auto mt-2 max-w-lg text-xs leading-relaxed text-term-dim">
               Levels are recorded each weekday morning and settled after the
