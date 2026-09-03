@@ -1,6 +1,8 @@
 import 'server-only';
 
 import { peekStoredFlow } from '../flow';
+import { getLiveOverlay, noOverlay } from '../live';
+import type { LiveOverlay } from '../live/types';
 import { peekScannerGamma, readLatestScan, readTodaysScan } from '../scanner';
 import type { ScanResult, StoredGamma } from '../scanner/types';
 import type { FlowSnapshot } from '../flow/types';
@@ -128,6 +130,7 @@ function buildRows(
   scan: ScanResult,
   gamma: StoredGamma | null,
   flow: FlowSnapshot | null,
+  live: LiveOverlay,
 ): LabRow[] {
   /*
    * Gamma from a different session is treated as absent, exactly as the
@@ -147,7 +150,23 @@ function buildRows(
   return scan.rows.map((row): LabRow => {
     const flowReading = flowBySymbol.get(row.symbol) ?? null;
     const entry = gammaUsable ? gamma.symbols[row.symbol] : undefined;
-    const price = row.price;
+
+    /*
+     * The live quote replaces the price and nothing else.
+     *
+     * Every distance below is then measured from a price read seconds ago
+     * against a level computed this morning, which is exactly the reading the
+     * overlay is for and exactly the one that needs labelling. The stored
+     * close is kept alongside rather than overwritten, so the row can show how
+     * far the name has moved since the reading the rest of it was built from.
+     *
+     * Nothing else on the row is touched. A quote cannot refresh an option
+     * chain, a months-long ranking, or a count over decades of bars.
+     */
+    const storedPrice = row.price;
+    const quote = live.available ? live.quotes[row.symbol] : undefined;
+    const price = quote ? quote.last : storedPrice;
+    const priceSource: LabRow['priceSource'] = quote ? 'live' : 'stored';
 
     const chainNote = gammaStale
       ? `no usable chain — ${gammaStale}`
@@ -171,6 +190,12 @@ function buildRows(
       symbol: row.symbol,
       price,
       priceAsOf: row.priceAsOf,
+      priceSource,
+      storedPrice,
+      livePctFromStored:
+        quote && storedPrice !== null && storedPrice > 0
+          ? ((quote.last - storedPrice) / storedPrice) * 100
+          : null,
 
       regime: row.regime,
       netGex: row.netGex,
@@ -222,6 +247,15 @@ export async function getLabView(): Promise<LabView> {
 
   const scan = today ?? latest;
 
+  /*
+   * The live sweep is asked for after the scan, because the scan is what says
+   * which symbols exist. It never throws and it is absent in production, where
+   * the token is not set and this page does not render anyway.
+   */
+  const live = scan
+    ? await getLiveOverlay(scan.rows.map((row) => row.symbol))
+    : noOverlay('There is no scan, so there are no symbols to quote.');
+
   if (!scan) {
     return {
       rows: [],
@@ -229,6 +263,7 @@ export async function getLabView(): Promise<LabView> {
       scannedAt: null,
       gammaDate: gamma?.date ?? null,
       flowDate: flow?.sessionDate ?? null,
+      live,
       coverage: {
         gammaRegime: 0,
         flipDistance: 0,
@@ -242,7 +277,7 @@ export async function getLabView(): Promise<LabView> {
     };
   }
 
-  const rows = buildRows(scan, gamma, flow);
+  const rows = buildRows(scan, gamma, flow, live);
 
   const coverage = {
     gammaRegime: rows.filter((r) => r.regime !== null).length,
@@ -284,6 +319,17 @@ export async function getLabView(): Promise<LabView> {
     );
   }
 
+  if (live.available) {
+    const covered = rows.filter((row) => row.priceSource === 'live').length;
+    notes.push(
+      `Live prices are in use for ${covered} of ${rows.length} names, read at ${live.capturedEt}${
+        live.marketOpen ? '' : ' with the market closed, so these are last prints rather than moving quotes'
+      }. Only the price is live: every level, ranking and count on this page is the stored reading it always was, so both distance columns measure a current price against a level fixed earlier. Nothing live is written anywhere.`,
+    );
+  } else if (live.reason) {
+    notes.push(`Prices are stored daily closes. ${live.reason}`);
+  }
+
   notes.push(
     'The analogue hit rate is not stored anywhere and costs a full price history per name, so it is absent until you load it. Loading it changes the ranking of the names it loaded for and nothing else.',
   );
@@ -294,6 +340,7 @@ export async function getLabView(): Promise<LabView> {
     scannedAt: scan.scannedAt,
     gammaDate: gamma?.date ?? null,
     flowDate: flow?.sessionDate ?? null,
+    live,
     coverage,
     notes,
   };

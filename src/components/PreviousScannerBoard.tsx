@@ -4,8 +4,10 @@ import { useMemo, useState } from 'react';
 import { InfoTip } from '@/components/InfoTip';
 import { PreviousScannerChart } from '@/components/PreviousScannerChart';
 import { TickerLink } from '@/components/TickerLink';
+import { ClockStrip } from '@/components/ClockStrip';
 import { formatPrice, formatUsd } from '@/lib/format';
 import { partition, type RowOutcome } from '@/lib/previousscanner/evaluate';
+import type { LiveOverlay, LiveQuote } from '@/lib/live/types';
 import type { NwSettings } from '@/lib/previousscanner/nadarayaWatson';
 import {
   FILTER_LABEL,
@@ -254,6 +256,7 @@ function ResultRow({
   vwapAnchor,
   trendEmaPeriod,
   missing,
+  quote,
 }: {
   row: ScanRow;
   outcome: RowOutcome;
@@ -263,6 +266,8 @@ function ResultRow({
   trendEmaPeriod: number;
   /** Set on near-miss rows: the one filter that let it down. */
   missing?: string;
+  /** Live quote for this name, when there is one. Never in production. */
+  quote?: LiveQuote;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -275,6 +280,24 @@ function ResultRow({
         <td className={`${cell} text-right tabular-nums text-term-text`}>
           {row.price === null ? '—' : formatPrice(row.price)}
           <div className="text-2xs text-term-faint">{row.priceAsOf}</div>
+          {/*
+            The live price sits under the scan's close rather than replacing
+            it. Every gate on this row was decided against the close, so
+            swapping the number the reader sees would leave the verdicts
+            beside it explained by a price that never produced them.
+          */}
+          {quote && (
+            <div className="text-2xs font-normal text-pos" title="Live quote. No gate on this row was computed from it.">
+              {formatPrice(quote.last)} now
+              {row.price !== null && row.price > 0 && (
+                <span className="text-term-faint">
+                  {' '}
+                  ({quote.last >= row.price ? '+' : ''}
+                  {(((quote.last - row.price) / row.price) * 100).toFixed(2)}%)
+                </span>
+              )}
+            </div>
+          )}
         </td>
         <td className={`${cell} text-right tabular-nums font-bold text-term-text`}>
           {row.rsScore.toFixed(0)}
@@ -361,6 +384,7 @@ function ResultTable({
   trendEmaPeriod,
   caption,
   showMissing = false,
+  quotes,
 }: {
   entries: Array<{ row: ScanRow; outcome: RowOutcome }>;
   mode: StrictnessMode;
@@ -369,6 +393,8 @@ function ResultTable({
   trendEmaPeriod: number;
   caption: string;
   showMissing?: boolean;
+  /** Live quotes by symbol. Empty without a local token, which is always in production. */
+  quotes: Record<string, LiveQuote>;
 }) {
   return (
     <div className="scroll-term overflow-x-auto">
@@ -399,6 +425,7 @@ function ResultTable({
               vwapAnchor={vwapAnchor}
               trendEmaPeriod={trendEmaPeriod}
               missing={showMissing ? outcome.failingLabel : undefined}
+              quote={quotes[row.symbol]}
             />
           ))}
         </tbody>
@@ -414,6 +441,7 @@ export function PreviousScannerBoard({
   trendEmaPeriod,
   gammaTimeEt,
   scannedAtEt,
+  live,
 }: {
   scan: ScanResult;
   nwSettings: NwSettings;
@@ -430,6 +458,14 @@ export function PreviousScannerBoard({
    * when these numbers were true.
    */
   scannedAtEt: string;
+  /**
+   * Live prices, for display beside the scan's closes and nothing else.
+   *
+   * No gate on this page is recomputed from them: every one was decided
+   * against bar series at scan time, and a verdict explained by a price that
+   * did not produce it would be worse than no live price at all.
+   */
+  live: LiveOverlay;
 }) {
   const [mode, setMode] = useState<StrictnessMode>('all');
 
@@ -444,6 +480,23 @@ export function PreviousScannerBoard({
 
   return (
     <div className="space-y-4">
+      {/*
+        Only when there is actually an overlay — unlike /lab, which renders the
+        strip in both states.
+        
+        This page is unlisted but it is not gated: it renders in production,
+        where the token is never set. A strip announcing "prices are stored
+        closes" would be a visible change to a page production already serves,
+        for a feature production cannot have. With no overlay this component
+        tree is exactly what it was before, down to the markup.
+      */}
+      {live.available && (
+        <ClockStrip
+          live={live}
+          mixedNote="Only the price is live, and it decides nothing here. Every gate on this page — VWAP, the trend average, the Nadaraya-Watson band — was computed from bar series when the scan ran, and the live figure is shown beside the scan's close rather than in place of it."
+        />
+      )}
+
       <div className="panel flex flex-wrap items-center justify-between gap-3 px-3.5 py-3">
         <div className="min-w-0">
           <p className="text-xs text-term-text">
@@ -529,6 +582,7 @@ export function PreviousScannerBoard({
       ) : (
         <section className="panel">
           <ResultTable
+            quotes={live.quotes}
             entries={passed}
             mode={mode}
             nwSettings={nwSettings}
@@ -559,6 +613,7 @@ export function PreviousScannerBoard({
           </p>
         ) : (
           <ResultTable
+            quotes={live.quotes}
             entries={nearMisses}
             mode={mode}
             nwSettings={nwSettings}
@@ -599,6 +654,7 @@ export function PreviousScannerBoard({
           </p>
         ) : (
           <ResultTable
+            quotes={live.quotes}
             entries={all}
             mode={mode}
             nwSettings={nwSettings}

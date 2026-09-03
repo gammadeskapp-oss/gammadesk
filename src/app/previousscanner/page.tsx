@@ -114,6 +114,7 @@ export default async function PreviousScannerPage() {
             trendEmaPeriod={view.trendEmaPeriod}
             gammaTimeEt={schedule.gammaEt}
             scannedAtEt={formatEtClock(new Date(scan.scannedAt))}
+            live={view.live}
           />
         ) : (
           /*
