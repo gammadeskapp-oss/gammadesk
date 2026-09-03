@@ -30,7 +30,7 @@ import { getForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
 import { getPositioningView } from '@/lib/positioning';
-import { snapshotStaleness } from '@/lib/events';
+import { currentMarketStatus, snapshotStaleness } from '@/lib/events';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { MethodologyDrawer } from '@/components/MethodologyDrawer';
 import { positioningMethodology, type Methodology } from '@/lib/methodology';
@@ -188,6 +188,13 @@ function Decision({
   const { context: c, walls, conviction, verdict, liquidity } = data;
 
   /*
+   * Resolved here rather than inside the breadth card, which is a client
+   * component: a clock read during hydration disagrees with the server's and
+   * costs the subtree. See the same note in `ContextRow`.
+   */
+  const market = currentMarketStatus();
+
+  /*
    * The regime tile, decided in one place.
    *
    * Two sources feed it: the option chain says where spot sits relative to the
@@ -334,7 +341,12 @@ function Decision({
             ticker, and this is the reading that says whether the rest of the
             market is doing the same thing.
           */}
-          {breadth && <BreadthCard reading={breadth} />}
+          {breadth && (
+            <BreadthCard
+              reading={breadth}
+              closedNote={market.open ? undefined : market.nextUpdateLine}
+            />
+          )}
         </div>
       </Section>
 

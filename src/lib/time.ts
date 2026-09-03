@@ -133,3 +133,21 @@ export function formatAsOf(date: Date): string {
   });
   return `${formatter.format(date)} ET`;
 }
+
+/**
+ * Just the wall clock, e.g. `09:30 ET`.
+ *
+ * `formatAsOf` above carries the date too, which is what a provenance stamp
+ * needs. A sentence that has already named the day — "updates again Monday 31
+ * Aug at 09:30 ET" — would repeat itself using that one, so this is the
+ * shorter sibling rather than a second way to write the same string.
+ */
+export function formatClockEt(date: Date): string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: MARKET_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return `${formatter.format(date)} ET`;
+}

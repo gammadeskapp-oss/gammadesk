@@ -12,6 +12,7 @@ import { formatContracts, formatPrice } from '@/lib/format';
 import type { TooltipKey } from '@/lib/tooltips';
 import { TickerLink } from '@/components/TickerLink';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
+import { currentMarketStatus } from '@/lib/events';
 import { marketToday } from '@/lib/time';
 
 export const metadata: Metadata = {
@@ -75,7 +76,25 @@ export default async function FlowPage({ searchParams }: PageProps) {
    * flow they were looking at.
    */
   const sessionDate = snapshot?.sessionDate ?? null;
-  const stale = sessionDate !== null && sessionDate < marketToday();
+
+  /*
+   * Behind means "a newer session has finished and this scan missed it", not
+   * "not today". Compared against today's date instead, every Saturday and
+   * every morning before the job ran painted Friday's perfectly good scan
+   * amber — training the reader to ignore the one colour that is supposed to
+   * mean something.
+   */
+  const market = currentMarketStatus();
+  const behind = sessionDate !== null && sessionDate < market.lastSession.date;
+
+  /*
+   * Separate from `behind`, and both are needed. This one is true through most
+   * of every day, weekends included, and drives the explanation below: the
+   * reader is looking at a completed session rather than a live tape, and that
+   * is worth a sentence whether or not anything is wrong. `behind` only adds
+   * the amber.
+   */
+  const priorSession = sessionDate !== null && sessionDate !== marketToday();
 
 
   return (
@@ -95,7 +114,7 @@ export default async function FlowPage({ searchParams }: PageProps) {
             <p className="text-2xs text-term-faint">
               {sessionDate && (
                 <>
-                  <span className={stale ? 'text-flip' : 'text-term-dim'}>
+                  <span className={behind ? 'text-flip' : 'text-term-dim'}>
                     {sessionDate} session
                   </span>
                   {' · '}
@@ -115,7 +134,7 @@ export default async function FlowPage({ searchParams }: PageProps) {
                   : ''}{' '}
                 symbols
               </span>{' '}
-              · {snapshot.asOfLabel}
+              · as of {snapshot.asOfLabel}
             </p>
           )}
         </div>
@@ -169,9 +188,13 @@ export default async function FlowPage({ searchParams }: PageProps) {
           </dl>
         </section>
 
-        {stale && (
-          <div className="panel border-l-2 border-l-flip/60 px-3.5 py-3 text-xs leading-relaxed">
-            <p className="text-flip">
+        {priorSession && (
+          <div
+            className={`panel border-l-2 px-3.5 py-3 text-xs leading-relaxed ${
+              behind ? 'border-l-flip/60' : 'border-l-term-line'
+            }`}
+          >
+            <p className={behind ? 'text-flip' : 'text-term-dim'}>
               <span className="font-bold">
                 This is the {sessionDate} session, not today&rsquo;s.{' '}
               </span>
@@ -181,6 +204,7 @@ export default async function FlowPage({ searchParams }: PageProps) {
             <p className="mt-1.5 text-term-dim">
               Nothing below has changed since that close. It is the last
               completed session, not a live tape.
+              {!market.open && ` ${market.nextUpdateLine}`}
             </p>
           </div>
         )}

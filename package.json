@@ -24,6 +24,7 @@
     "verify:regime": "node scripts/verify-regime.mjs",
     "verify:retests": "node scripts/verify-retests.mjs",
     "verify:staleness": "node scripts/verify-staleness.mjs",
+    "verify:market-phase": "node scripts/verify-market-phase.mjs",
     "verify:context": "node scripts/verify-context.mjs",
     "verify:events": "node scripts/verify-events.mjs",
     "verify:research": "node scripts/verify-research.mjs",
@@ -37,7 +38,7 @@
     "verify:what-changed": "node scripts/verify-what-changed.mjs",
     "verify:session-history": "node scripts/verify-session-history.mjs",
     "verify:analogues": "node scripts/verify-analogues.mjs",
-    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:regime && npm run verify:retests && npm run verify:staleness && npm run verify:context && npm run verify:events && npm run verify:research && npm run verify:scanner && npm run verify:scanner-record && npm run verify:movers && npm run verify:errors && npm run verify:history && npm run verify:track-record && npm run verify:positioning-record && npm run verify:what-changed && npm run verify:session-history && npm run verify:analogues"
+    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:regime && npm run verify:retests && npm run verify:staleness && npm run verify:market-phase && npm run verify:context && npm run verify:events && npm run verify:research && npm run verify:scanner && npm run verify:scanner-record && npm run verify:movers && npm run verify:errors && npm run verify:history && npm run verify:track-record && npm run verify:positioning-record && npm run verify:what-changed && npm run verify:session-history && npm run verify:analogues"
   },
   "dependencies": {
     "@vercel/blob": "^2.7.0",

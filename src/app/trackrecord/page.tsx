@@ -34,6 +34,13 @@ export default async function TrackRecordPage() {
               ? `${summary.logged} picks since ${summary.from}`
               : 'Nothing logged yet'
           }
+          /*
+            The last session the record covers, not the render clock. A page
+            built from settled closes is as fresh as its newest close and no
+            fresher, and stamping "now" on it would claim otherwise every
+            evening and all weekend.
+          */
+          asOfLabel={summary.to ? `${summary.to} close` : undefined}
         />
 
         {/*
