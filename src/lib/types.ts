@@ -38,6 +38,16 @@ export interface Metrics {
   cex: number;
   /** Net open interest, calls minus puts, in contracts. */
   oi: number;
+  /**
+   * Gamma exposure from calls alone, and from puts alone.
+   *
+   * `gex` is their sum and remains the number every existing view reads. These
+   * two exist because the gamma profile shows the call and put sides
+   * separately, and splitting a net figure after the fact is impossible — the
+   * information is gone by the time the contracts have been added up.
+   */
+  callGex: number;
+  putGex: number;
   /** Call-side open interest, in contracts. */
   callOi: number;
   /** Put-side open interest, in contracts. */

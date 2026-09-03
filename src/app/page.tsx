@@ -7,6 +7,7 @@ import { PositioningSearch } from '@/components/PositioningSearch';
 import { ResearchCards } from '@/components/ResearchCards';
 import { ChainError } from '@/lib/chainSource';
 import { config } from '@/lib/config';
+import { buildGammaProfile } from '@/lib/gammaProfile';
 import { getPositioningView, normaliseSymbol } from '@/lib/positioning';
 import { getBreadth } from '@/lib/breadth';
 import type { BreadthReading } from '@/lib/breadth/types';
@@ -135,6 +136,13 @@ export default async function HomePage({ searchParams }: PageProps) {
             this view rather than a general case — see lib/methodology.ts.
           */
           methodology={positioningMethodology(data)}
+          /*
+            The strike profile, shaped on the server and memoised against this
+            snapshot — see lib/gammaProfile.ts. The chart is handed the flip
+            level and both magnets as prices rather than deriving its own, so
+            it cannot draw a line the text above it does not name.
+          */
+          profile={buildGammaProfile(data)}
           /*
             The one line under the verdict. Built here rather than in the
             client component because it needs the breadth reading, which is

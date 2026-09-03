@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { DataQuality } from './DataQuality';
 import { DealerConventionNote } from './DealerConventionNote';
 import { ExplainPanel } from './ExplainPanel';
+import { GammaProfile } from './GammaProfile';
 import { PageBar } from './PageBar';
 import { PositioningSearch } from './PositioningSearch';
 import { PositioningTable } from './PositioningTable';
@@ -17,6 +18,7 @@ import { StaleDataBanner, mutedIf } from './StaleDataBanner';
 import { SummaryStrip } from './SummaryStrip';
 import { TabBar } from './TabBar';
 import { WhatChanged } from './WhatChanged';
+import type { GammaProfileData } from '@/lib/gammaProfile';
 import type { Methodology } from '@/lib/methodology';
 import type { Staleness } from '@/lib/staleness';
 import type { MetricKey, PositioningData } from '@/lib/types';
@@ -39,6 +41,12 @@ interface DashboardProps {
    * the numbers above it.
    */
   methodology: Methodology;
+  /**
+   * The strike-by-strike profile the chart draws, precomputed on the server so
+   * the flip level and the magnets it labels are the same prices the verdict
+   * above it states rather than a second derivation of them.
+   */
+  profile: GammaProfileData;
   /*
    * Rendered on the server and passed through as a node.
    *
@@ -98,6 +106,7 @@ export function Dashboard({
   data,
   staleness,
   methodology,
+  profile,
   contextRow,
   researchLine,
   whatChanged,
@@ -239,6 +248,16 @@ export function Dashboard({
         and the explanation of where they came from is the one thing that should
         stay fully legible.
       */}
+      {/*
+        The picture of the same book, under both reads rather than inside the
+        advanced one. It is the spatial answer to "where is price relative to
+        the levels", which is exactly the question the simple read leaves a
+        reader holding — and it needs no jargon to look at.
+      */}
+      <div className={mutedIf(staleness.stale)}>
+        <GammaProfile profile={profile} />
+      </div>
+
       <MethodologyDrawer methodology={methodology} anchor="levels" />
 
       {/*

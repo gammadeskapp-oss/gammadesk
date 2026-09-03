@@ -26,6 +26,8 @@ const config: Config = {
         neg: 'rgb(var(--c-cool) / <alpha-value>)',
         /** Flip level, and caveat/warning text. Same amber as the brand. */
         flip: 'rgb(var(--c-brand) / <alpha-value>)',
+        /** The gamma flip line on the strike profile — neither gamma colour. */
+        level: 'rgb(var(--c-level) / <alpha-value>)',
         /**
          * Directional votes use their own green/red family, deliberately kept
          * apart from the cyan/magenta used for dealer exposure. The two mean
