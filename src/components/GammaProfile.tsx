@@ -27,20 +27,36 @@ import type { GammaProfileData, GammaProfilePoint } from '@/lib/gammaProfile';
  *
  * ## Colour
  *
- * Blue is positive gamma, amber is negative, violet is the flip line. Red and
- * green are deliberately absent: a beginner reads them as sell and buy, and
- * the two gamma states are calm versus jumpy — not bad versus good. Note this
- * is the reverse of the exposure table's shading, which is amber-positive; see
- * the decision log in the PR.
+ * Amber is positive gamma, blue is negative, violet is the flip line. The two
+ * gamma colours are the ones the exposure table and `ExplainPanel` already
+ * use, so a reader who has learnt the shading in one place does not have to
+ * unlearn it two inches lower.
+ *
+ * Red and green are deliberately absent: a beginner reads them as sell and
+ * buy, and the two gamma states are calm versus jumpy — not bad versus good.
  */
 
-const POSITIVE = 'text-neg'; // blue token (`--c-cool`)
-const NEGATIVE = 'text-pos'; // amber token (`--c-brand`)
+const POSITIVE = 'text-pos'; // amber token (`--c-brand`)
+const NEGATIVE = 'text-neg'; // blue token (`--c-cool`)
 
-/** Strikes each side of spot. `25` is the default — a ~50 strike window. */
-const WIDTHS = [10, 25, 50] as const;
-const DEFAULT_WIDTH: Width = 25;
-type Width = (typeof WIDTHS)[number] | 'all';
+/**
+ * Strikes each side of spot, offered as buttons.
+ *
+ * Built from what the snapshot actually contains rather than from a fixed
+ * list. The server trims the chain to `GAMMADESK_STRIKES_EACH_SIDE` (30 by
+ * default), so a hard-coded "50" and an "All" were the same sixty rows as each
+ * other and the reader could press either and see nothing change. The widest
+ * button is therefore the real count of strikes on the wider side, and it is
+ * labelled with that number instead of the word "All" — which would have
+ * promised the whole listed chain, not the part of it that was fetched.
+ *
+ * Widening past this means raising the env var, which changes every page built
+ * from the same snapshot; it is not something a chart control can do.
+ */
+const PREFERRED_WIDTHS = [10, 25] as const;
+/** Strikes each side by default — a ~50 strike window, or all there are. */
+const PREFERRED_DEFAULT = 25;
+type Width = number;
 
 type View = 'bars' | 'cumulative';
 type Series = 'net' | 'calls' | 'puts';
@@ -78,7 +94,21 @@ const HALF_WIDTH = CENTRE - PLOT_LEFT;
 export function GammaProfile({ profile }: { profile: GammaProfileData }) {
   const [view, setView] = useState<View>('bars');
   const [series, setSeries] = useState<Series>('net');
-  const [width, setWidth] = useState<Width>(DEFAULT_WIDTH);
+  /*
+   * The widest side, so the last button really does show every strike that
+   * arrived. The two sides can differ by one when spot sits between strikes.
+   */
+  const widest = Math.max(
+    profile.points.filter((p) => p.strike <= profile.spot).length,
+    profile.points.filter((p) => p.strike > profile.spot).length,
+  );
+  const widths: Width[] = [
+    ...PREFERRED_WIDTHS.filter((w) => w < widest),
+    widest,
+  ];
+  const defaultWidth = Math.min(PREFERRED_DEFAULT, widest);
+
+  const [width, setWidth] = useState<Width>(defaultWidth);
   const [hovered, setHovered] = useState<number | null>(null);
   const [pinned, setPinned] = useState<number | null>(null);
 
@@ -93,13 +123,10 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
    * ladder — the source array is ascending.
    */
   const rows = useMemo(() => {
-    const ascending =
-      width === 'all'
-        ? points
-        : [
-            ...points.filter((p) => p.strike <= spot).slice(-width),
-            ...points.filter((p) => p.strike > spot).slice(0, width),
-          ];
+    const ascending = [
+      ...points.filter((p) => p.strike <= spot).slice(-width),
+      ...points.filter((p) => p.strike > spot).slice(0, width),
+    ];
     return ascending.slice().reverse();
   }, [points, spot, width]);
 
@@ -154,10 +181,10 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
 
   const active = hovered ?? pinned;
   const activeRow = active === null ? null : (rows[active] ?? null);
-  const isDefaultView = width === DEFAULT_WIDTH && pinned === null;
+  const isDefaultView = width === defaultWidth && pinned === null;
 
   const resetToSpot = () => {
-    setWidth(DEFAULT_WIDTH);
+    setWidth(defaultWidth);
     setPinned(null);
     setHovered(null);
   };
@@ -278,7 +305,7 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
 
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="label-xs">Strikes each side</span>
-        {[...WIDTHS, 'all' as const].map((w) => (
+        {widths.map((w) => (
           <button
             key={w}
             type="button"
@@ -292,7 +319,7 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
             aria-pressed={width === w}
             className={`${toggle(width === w)} tabular-nums`}
           >
-            {w === 'all' ? 'All' : w}
+            {w}
           </button>
         ))}
         <button
@@ -304,6 +331,20 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
           Reset to price
         </button>
       </div>
+
+      {/*
+        Said next to the control that produces the second crossing, not buried
+        in the callout below: a reader who has just switched views is looking
+        at two points that both look like "the level" and has no way to know
+        they are different measurements.
+      */}
+      {view === 'cumulative' && (
+        <p className="max-w-[80ch] text-2xs leading-relaxed text-term-faint">
+          This crossing is not the same as the gamma flip. The flip is re-priced at
+          hypothetical spot prices; this line just adds up the strikes on screen, so it moves
+          when you change the window.
+        </p>
+      )}
 
       <div className="panel px-2 py-2">
         <svg
@@ -518,17 +559,17 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
         </h4>
         <ul className="mt-2.5 space-y-2">
           <li className="flex gap-2.5">
-            <span aria-hidden className="mt-[0.4rem] h-2.5 w-2.5 shrink-0 bg-neg" />
+            <span aria-hidden className="mt-[0.4rem] h-2.5 w-2.5 shrink-0 bg-pos" />
             <span>
-              <span className="text-term-text">Blue, to the right: positive gamma.</span>{' '}
+              <span className="text-term-text">Amber, to the right: positive gamma.</span>{' '}
               Dealers hedging it sell as price rises and buy as it falls, which tends to slow
               moves around that strike.
             </span>
           </li>
           <li className="flex gap-2.5">
-            <span aria-hidden className="mt-[0.4rem] h-2.5 w-2.5 shrink-0 bg-pos" />
+            <span aria-hidden className="mt-[0.4rem] h-2.5 w-2.5 shrink-0 bg-neg" />
             <span>
-              <span className="text-term-text">Amber, to the left: negative gamma.</span>{' '}
+              <span className="text-term-text">Blue, to the left: negative gamma.</span>{' '}
               Hedging runs the other way — buying as price rises, selling as it falls — which
               tends to speed moves up.
             </span>
