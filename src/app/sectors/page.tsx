@@ -10,6 +10,7 @@ import { getGroupsSnapshot } from '@/lib/groups';
 import type { GroupsSnapshot } from '@/lib/groups/types';
 import { InfoTip } from '@/components/InfoTip';
 import { PageBar } from '@/components/PageBar';
+import { RefreshStatus } from '@/components/RefreshStatus';
 import { Sparkline } from '@/components/Sparkline';
 import {
   getSectorsSnapshot,
@@ -376,6 +377,10 @@ export default async function SectorsPage({ searchParams }: PageProps) {
                 : undefined
           }
         />
+
+        <div className="flex justify-end">
+          <RefreshStatus readOnly />
+        </div>
 
         <ViewToggle view={view} />
 

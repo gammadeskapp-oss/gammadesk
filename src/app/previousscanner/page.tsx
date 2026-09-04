@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
+import { RefreshStatus } from '@/components/RefreshStatus';
 import { PreviousScannerBoard } from '@/components/PreviousScannerBoard';
 import { legacyScannerEnabled } from '@/lib/pageFlag';
 import { getScannerView, storeStatus } from '@/lib/previousscanner';
@@ -101,6 +102,10 @@ export default async function PreviousScannerPage() {
           }
           asOfLabel={scan ? formatAsOf(new Date(scan.scannedAt)) : undefined}
         />
+
+        <div className="flex justify-end">
+          <RefreshStatus readOnly />
+        </div>
 
         {/*
           Above the list, because it changes how every row on it reads. The

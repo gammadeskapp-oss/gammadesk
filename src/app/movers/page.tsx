@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
+import { AutoRefresh } from '@/components/AutoRefresh';
 import { Footer } from '@/components/Footer';
 import { MoversBoard } from '@/components/MoversBoard';
 import { PageBar } from '@/components/PageBar';
+import { DELAYED_FEED_REFRESH_MS } from '@/hooks/useAutoRefresh';
 import { StaleDataBanner } from '@/components/StaleDataBanner';
 import { currentMarketStatus, snapshotStaleness } from '@/lib/events';
 import { EARNINGS_WARN_DAYS } from '@/lib/movers/rules';
@@ -138,6 +140,10 @@ export default async function MoversPage() {
           }
           asOfLabel={formatAsOf(new Date(movers.capturedAt))}
         />
+
+        <div className="flex justify-end">
+          <AutoRefresh intervalMs={DELAYED_FEED_REFRESH_MS} />
+        </div>
 
         {/*
           The required explanation line, verbatim from `movers/types.ts` so the

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { AutoRefresh } from '@/components/AutoRefresh';
 import { BreadthCard } from '@/components/BreadthCard';
 import { ChartForecastSwitch } from '@/components/ChartForecastSwitch';
 import { DecisionSearch } from '@/components/DecisionSearch';
@@ -35,6 +36,7 @@ import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { MethodologyDrawer } from '@/components/MethodologyDrawer';
 import { positioningMethodology, type Methodology } from '@/lib/methodology';
 import { getRetests, type RetestFeed as RetestFeedData } from '@/lib/retest';
+import { DELAYED_FEED_REFRESH_MS } from '@/hooks/useAutoRefresh';
 import { normaliseSymbol } from '@/lib/ticker/bars';
 import type { PositioningData } from '@/lib/types';
 import type { TooltipKey } from '@/lib/tooltips';
@@ -653,6 +655,15 @@ export default async function DecisionPage({ searchParams }: PageProps) {
           /* The book's stamp, not the render clock — see DecisionContext. */
           asOfLabel={data?.context.quoteDateLabel}
         />
+
+        {/*
+          This is the page you sit on while deciding, so the delayed positioning
+          and levels going stale under you is the actual problem a timer solves
+          here — more than on the pages you glance at and leave.
+        */}
+        <div className="flex justify-end">
+          <AutoRefresh intervalMs={DELAYED_FEED_REFRESH_MS} />
+        </div>
 
         <DecisionSearch initial={data?.context.symbol ?? query} />
 

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { FlowFilters } from '@/components/FlowFilters';
 import { MethodologyDrawer } from '@/components/MethodologyDrawer';
+import { RefreshStatus } from '@/components/RefreshStatus';
 import { flowMethodology } from '@/lib/methodology';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
@@ -137,6 +138,10 @@ export default async function FlowPage({ searchParams }: PageProps) {
               · as of {snapshot.asOfLabel}
             </p>
           )}
+        </div>
+
+        <div className="flex justify-end">
+          <RefreshStatus readOnly />
         </div>
 
         {/* Above the data, not under it, because it changes how every row
