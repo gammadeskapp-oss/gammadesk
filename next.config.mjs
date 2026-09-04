@@ -2,6 +2,18 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  /*
+   * The macro translator reads data/econ-consensus.json from disk at runtime
+   * (see lib/macro/consensus.ts) rather than importing it, so an edited number
+   * is picked up without a rebuild. A file read by fs at runtime is not part of
+   * the module graph, so the trace would tree-shake it out of the serverless
+   * bundle and the read would 404 in production. Listing it here keeps it in the
+   * bundle. Global key because the home route, which renders the card, is one of
+   * several that could grow to read it.
+   */
+  outputFileTracingIncludes: {
+    '/*': ['data/econ-consensus.json'],
+  },
   async redirects() {
     return [
       {

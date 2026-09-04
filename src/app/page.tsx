@@ -1,5 +1,6 @@
 import { ContextRow } from '@/components/ContextRow';
 import { EventRiskRow } from '@/components/EventRiskRow';
+import { MacroTranslatorCard } from '@/components/MacroTranslatorCard';
 import { Dashboard } from '@/components/Dashboard';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
@@ -10,6 +11,9 @@ import { config } from '@/lib/config';
 import { buildGammaProfile } from '@/lib/gammaProfile';
 import { getPositioningView, normaliseSymbol } from '@/lib/positioning';
 import { getBreadth } from '@/lib/breadth';
+import { macroTranslatorEnabled } from '@/lib/pageFlag';
+import { getMacroSelection, type MacroSelection } from '@/lib/macro/consensus';
+import { getOvernight, type OvernightData } from '@/lib/macro/overnight';
 import type { BreadthReading } from '@/lib/breadth/types';
 import { getMarketContextQuotes } from '@/lib/marketContext/quotes';
 import type { MarketContextQuotes } from '@/lib/marketContext/quotes';
@@ -71,9 +75,25 @@ export default async function HomePage({ searchParams }: PageProps) {
   const events = eventRow();
   const highToday = highImportanceToday();
 
-  const [breadth, quotes, log, archive] = await Promise.all([
+  /*
+   * The overnight & macro translator, off by default behind its own flag so it
+   * can ship dark. The consensus selection is a pure read of a checked-in file;
+   * the overnight quotes are one Yahoo request behind a two-minute cache, only
+   * fetched when the flag is on so a dark feature spends nothing. Like the rest
+   * of the context section it is allowed to fail on its own — a dead global
+   * feed must not cost the reader the positioning they came for.
+   */
+  const macroOn = macroTranslatorEnabled();
+
+  const [breadth, quotes, overnight, macroSelection, log, archive] = await Promise.all([
     getBreadth().catch((): BreadthReading | null => null),
     getMarketContextQuotes().catch((): MarketContextQuotes | null => null),
+    macroOn
+      ? getOvernight().catch((): OvernightData | null => null)
+      : Promise.resolve<OvernightData | null>(null),
+    macroOn
+      ? getMacroSelection().catch((): MacroSelection | null => null)
+      : Promise.resolve<MacroSelection | null>(null),
     /*
       Two stored reads for the what-changed lines. Both are allowed to fail on
       their own and both degrade to an empty list, which renders nothing —
@@ -183,6 +203,14 @@ export default async function HomePage({ searchParams }: PageProps) {
             <>
               <ContextRow breadth={breadth} quotes={quotes} />
               <EventRiskRow events={events} highToday={highToday} />
+              {macroOn && (
+                <MacroTranslatorCard
+                  mostRecent={macroSelection?.mostRecent ?? null}
+                  next={macroSelection?.next ?? null}
+                  gaps={macroSelection?.gaps ?? []}
+                  overnight={overnight}
+                />
+              )}
             </>
           }
         />
@@ -202,6 +230,14 @@ export default async function HomePage({ searchParams }: PageProps) {
           */}
           <ContextRow breadth={breadth} quotes={quotes} />
           <EventRiskRow events={events} highToday={highToday} />
+          {macroOn && (
+            <MacroTranslatorCard
+              mostRecent={macroSelection?.mostRecent ?? null}
+              next={macroSelection?.next ?? null}
+              gaps={macroSelection?.gaps ?? []}
+              overnight={overnight}
+            />
+          )}
 
           {error && (
             <div className="panel border-l-2 border-l-bear/60 px-4 py-4">
