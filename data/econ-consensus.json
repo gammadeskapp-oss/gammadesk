@@ -1,0 +1,74 @@
+[
+  {
+    "event": "CPI YoY",
+    "releaseAt": "2026-09-11T12:30:00Z",
+    "consensus": null,
+    "previous": 3.4,
+    "unit": "%",
+    "direction": "higher_is_tightening",
+    "note": "FILL consensus night of Sep 10. Previous = July print, update to Aug if a newer one lands first."
+  },
+  {
+    "event": "Core CPI YoY",
+    "releaseAt": "2026-09-11T12:30:00Z",
+    "consensus": null,
+    "previous": null,
+    "unit": "%",
+    "direction": "higher_is_tightening",
+    "note": "FILL both. Core matters more to the Fed than headline."
+  },
+  {
+    "event": "PPI YoY",
+    "releaseAt": null,
+    "consensus": null,
+    "previous": null,
+    "unit": "%",
+    "direction": "higher_is_tightening",
+    "note": "FILL date from BLS schedule, then consensus."
+  },
+  {
+    "event": "Retail Sales MoM",
+    "releaseAt": null,
+    "consensus": null,
+    "previous": null,
+    "unit": "%",
+    "direction": "higher_is_tightening",
+    "note": "FILL date from Census schedule. Strong sales = hot economy = less room to cut."
+  },
+  {
+    "event": "Core PCE YoY",
+    "releaseAt": null,
+    "consensus": null,
+    "previous": null,
+    "unit": "%",
+    "direction": "higher_is_tightening",
+    "note": "FILL date from BEA schedule. This is the Fed's preferred inflation gauge."
+  },
+  {
+    "event": "Nonfarm Payrolls",
+    "releaseAt": "2026-10-02T12:30:00Z",
+    "consensus": null,
+    "previous": null,
+    "unit": "k",
+    "direction": "higher_is_tightening",
+    "note": "First Friday. Verify date. Previous = Sep 4 print, fill once you have it."
+  },
+  {
+    "event": "Unemployment Rate",
+    "releaseAt": "2026-10-02T12:30:00Z",
+    "consensus": null,
+    "previous": null,
+    "unit": "%",
+    "direction": "higher_is_easing",
+    "note": "Higher unemployment = more likely the Fed cuts = easing."
+  },
+  {
+    "event": "Initial Jobless Claims",
+    "releaseAt": null,
+    "consensus": null,
+    "previous": null,
+    "unit": "k",
+    "direction": "higher_is_easing",
+    "note": "Weekly, every Thursday 8:30am ET (12:30 UTC). Low market impact — optional."
+  }
+]

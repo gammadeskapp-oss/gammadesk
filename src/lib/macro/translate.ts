@@ -50,7 +50,8 @@ export interface EconEvent {
   /** ISO instant the number is released. */
   releaseAt: string;
   consensus: number;
-  previous: number;
+  /** The prior print, or null when it has not been filled in yet. */
+  previous: number | null;
   /** The released figure, or null before the release. */
   actual: number | null;
   /** Suffix rendered after each figure, e.g. `%`, `K`, or empty. */
@@ -152,7 +153,11 @@ const SIDE_WORDS: Record<Surprise['side'], string> = {
  */
 export function translateRelease(event: EconEvent): string {
   if (event.actual === null) {
-    return `${event.event} is due, with ${fig(event.consensus, event.unit)} expected against ${fig(event.previous, event.unit)} prior. No reading until it prints.`;
+    const priorClause =
+      event.previous === null
+        ? ''
+        : ` against ${fig(event.previous, event.unit)} prior`;
+    return `${event.event} is due, with ${fig(event.consensus, event.unit)} expected${priorClause}. No reading until it prints.`;
   }
 
   const { reading, side } = surpriseReading(event);

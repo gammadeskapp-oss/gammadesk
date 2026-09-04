@@ -22,20 +22,44 @@
 
 import 'server-only';
 
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { cached } from '../cache';
 import type { EconEvent, SurpriseDirection } from './translate';
-import rawConsensus from '../../data/econ-consensus.json';
 
 /**
  * Where the translator's consensus numbers come from.
  *
  * ## The hand-maintained file is the source of truth
  *
- * `data/econ-consensus.json` is authored by hand and wins every conflict. It is
- * a small, checked-in list of the high-impact US releases, each carrying the
- * expected figure, the prior print, and — crucially — which way a higher number
- * pushes conditions. That last field is the whole feature: it cannot be scraped
- * reliably and it is what turns a raw surprise into "tightening" or "easing".
+ * `data/econ-consensus.json` (at the project root) is authored by hand and wins
+ * every conflict. It is a small, checked-in list of the high-impact US releases,
+ * each carrying the expected figure, the prior print, and — crucially — which
+ * way a higher number pushes conditions. That last field is the whole feature:
+ * it cannot be scraped reliably and it is what turns a raw surprise into
+ * "tightening" or "easing".
+ *
+ * ## Read at runtime, not baked into the bundle
+ *
+ * The file is read from disk on demand (behind a short cache), not imported as a
+ * module. A static `import … from '…json'` inlines the JSON at build time, so a
+ * new number would not appear until the next rebuild. Reading it at runtime
+ * means an edit is picked up on the next request — within `RELOAD_SECONDS` — with
+ * no rebuild. The one place that does not help is a read-only production host
+ * (Vercel), where the deployed filesystem is baked from the repo at build: there
+ * a committed edit still needs a redeploy. `next.config.mjs` lists this file in
+ * `outputFileTracingIncludes` so it is actually shipped into the server bundle
+ * rather than tree-shaken away.
+ *
+ * ## Placeholders are skipped, not errors
+ *
+ * Rows are added ahead of time with `consensus` and `releaseAt` left null, to be
+ * filled in as each release approaches. Such a row is silently skipped, not
+ * warned about — it is a deliberate placeholder, not bad data. A row that is
+ * malformed in a way that is *not* a placeholder (an unknown `direction`, a
+ * non-numeric consensus that is present but wrong) is still dropped with a
+ * warning. The per-row `note` fields are maintenance reminders and are stripped
+ * on parse; nothing downstream ever sees them.
  *
  * ## FMP is a cross-check, not a display source
  *
@@ -61,42 +85,58 @@ import rawConsensus from '../../data/econ-consensus.json';
  */
 
 interface RawEvent {
-  event: string;
-  releaseAt: string;
-  consensus: number;
-  previous: number;
-  actual?: number | null;
-  unit: string;
-  direction: string;
-  inLineTolerance?: number;
+  event?: unknown;
+  releaseAt?: unknown;
+  consensus?: unknown;
+  previous?: unknown;
+  actual?: unknown;
+  unit?: unknown;
+  direction?: unknown;
+  inLineTolerance?: unknown;
+  /** A maintenance reminder in the file. Read by a human, never by the app. */
+  note?: unknown;
 }
 
-function isDirection(value: string): value is SurpriseDirection {
+function isDirection(value: unknown): value is SurpriseDirection {
   return value === 'higher_is_tightening' || value === 'higher_is_easing';
 }
 
 /**
  * Parse and validate the checked-in file.
  *
- * A malformed row is dropped with a warning rather than allowed to render as a
- * confident line built on a bad number — the same posture the rest of the site
- * takes toward data it cannot trust. An unknown `direction` in particular is
- * fatal for that row: without it there is no way to say which way the print
- * leans, and guessing would be the one thing this feature must never do.
+ * Three outcomes per row. A **placeholder** — `consensus` or `releaseAt` still
+ * null — is skipped silently: it is a slot the author will fill as the release
+ * approaches, not bad data. A **malformed** row (unknown `direction`, a present
+ * but non-numeric consensus, an unparseable date) is dropped with a warning, the
+ * same posture the rest of the site takes toward data it cannot trust — an
+ * unknown direction especially, because without it there is no way to say which
+ * way the print leans and guessing is the one thing this feature must never do.
+ * Everything else is kept, with its `note` stripped off.
  */
 export function parseConsensusFile(raw: unknown): EconEvent[] {
   if (!Array.isArray(raw)) return [];
   const out: EconEvent[] = [];
 
   for (const row of raw as RawEvent[]) {
+    if (!row || typeof row.event !== 'string' || !isDirection(row.direction)) {
+      console.warn(`[macro] dropping malformed consensus row: ${JSON.stringify(row)}`);
+      continue;
+    }
+
+    // Placeholders waiting to be filled in — not yet usable, not an error.
     if (
-      !row ||
-      typeof row.event !== 'string' ||
-      typeof row.releaseAt !== 'string' ||
+      row.consensus === null ||
+      row.consensus === undefined ||
+      row.releaseAt === null ||
+      row.releaseAt === undefined
+    ) {
+      continue;
+    }
+
+    if (
       typeof row.consensus !== 'number' ||
-      typeof row.previous !== 'number' ||
+      typeof row.releaseAt !== 'string' ||
       typeof row.unit !== 'string' ||
-      !isDirection(row.direction) ||
       Number.isNaN(Date.parse(row.releaseAt))
     ) {
       console.warn(`[macro] dropping malformed consensus row: ${JSON.stringify(row)}`);
@@ -107,7 +147,7 @@ export function parseConsensusFile(raw: unknown): EconEvent[] {
       event: row.event,
       releaseAt: row.releaseAt,
       consensus: row.consensus,
-      previous: row.previous,
+      previous: typeof row.previous === 'number' ? row.previous : null,
       actual: typeof row.actual === 'number' ? row.actual : null,
       unit: row.unit,
       direction: row.direction,
@@ -119,11 +159,43 @@ export function parseConsensusFile(raw: unknown): EconEvent[] {
   return out;
 }
 
-/** Every hand-maintained release, release-time order, oldest first. */
-export function getConsensusEvents(): EconEvent[] {
-  return parseConsensusFile(rawConsensus).sort(
-    (a, b) => Date.parse(a.releaseAt) - Date.parse(b.releaseAt),
-  );
+/**
+ * Where the file lives, resolved from the project root at runtime.
+ *
+ * `process.cwd()` is the project root under `next dev`, `next start`, and a
+ * Vercel serverless function alike.
+ */
+const CONSENSUS_PATH = path.join(process.cwd(), 'data', 'econ-consensus.json');
+
+/**
+ * How long a read of the file is reused.
+ *
+ * Short, because the whole point of reading at runtime is that a freshly-filled
+ * number shows up without a rebuild — a long cache would put that behind a wait.
+ * Long enough that a burst of page views is one disk read, not one each.
+ */
+const RELOAD_SECONDS = 30;
+
+/**
+ * Every usable hand-maintained release, release-time order, oldest first.
+ *
+ * Async because the file is read from disk. A read failure degrades to an empty
+ * list — the card simply shows nothing rather than taking the page down — with
+ * one warning so a genuinely missing or unreadable file is not silent.
+ */
+export function getConsensusEvents(): Promise<EconEvent[]> {
+  return cached('macro:consensus-file', RELOAD_SECONDS, async () => {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await fs.readFile(CONSENSUS_PATH, 'utf8'));
+    } catch (e) {
+      console.warn(`[macro] could not read ${CONSENSUS_PATH}: ${(e as Error).message}`);
+      return [];
+    }
+    return parseConsensusFile(raw).sort(
+      (a, b) => Date.parse(a.releaseAt) - Date.parse(b.releaseAt),
+    );
+  });
 }
 
 /**
@@ -162,8 +234,10 @@ export function selectReleases(
   return { mostRecent, next };
 }
 
-export function getMacroSelection(now: Date = new Date()): MacroSelection {
-  return selectReleases(getConsensusEvents(), now);
+export async function getMacroSelection(
+  now: Date = new Date(),
+): Promise<MacroSelection> {
+  return selectReleases(await getConsensusEvents(), now);
 }
 
 // --- FMP cross-check (gated, never displayed) ------------------------------
@@ -235,7 +309,7 @@ export async function crossCheckConsensus(
       const byName = new Map(us.map((r) => [(r.event ?? '').toLowerCase(), r]));
       let disagreements = 0;
 
-      for (const local of getConsensusEvents()) {
+      for (const local of await getConsensusEvents()) {
         const match = byName.get(local.event.toLowerCase());
         if (!match || typeof match.estimate !== 'number') continue;
         if (Math.abs(match.estimate - local.consensus) > CONSENSUS_TRIVIAL) {

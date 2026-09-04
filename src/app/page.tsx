@@ -12,7 +12,7 @@ import { buildGammaProfile } from '@/lib/gammaProfile';
 import { getPositioningView, normaliseSymbol } from '@/lib/positioning';
 import { getBreadth } from '@/lib/breadth';
 import { macroTranslatorEnabled } from '@/lib/pageFlag';
-import { getMacroSelection } from '@/lib/macro/consensus';
+import { getMacroSelection, type MacroSelection } from '@/lib/macro/consensus';
 import { getOvernight, type OvernightData } from '@/lib/macro/overnight';
 import type { BreadthReading } from '@/lib/breadth/types';
 import { getMarketContextQuotes } from '@/lib/marketContext/quotes';
@@ -84,14 +84,16 @@ export default async function HomePage({ searchParams }: PageProps) {
    * feed must not cost the reader the positioning they came for.
    */
   const macroOn = macroTranslatorEnabled();
-  const macroSelection = macroOn ? getMacroSelection() : null;
 
-  const [breadth, quotes, overnight, log, archive] = await Promise.all([
+  const [breadth, quotes, overnight, macroSelection, log, archive] = await Promise.all([
     getBreadth().catch((): BreadthReading | null => null),
     getMarketContextQuotes().catch((): MarketContextQuotes | null => null),
     macroOn
       ? getOvernight().catch((): OvernightData | null => null)
       : Promise.resolve<OvernightData | null>(null),
+    macroOn
+      ? getMacroSelection().catch((): MacroSelection | null => null)
+      : Promise.resolve<MacroSelection | null>(null),
     /*
       Two stored reads for the what-changed lines. Both are allowed to fail on
       their own and both degrade to an empty list, which renders nothing —
