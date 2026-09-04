@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
+import { RefreshStatus } from '@/components/RefreshStatus';
 import { RsBoard } from '@/components/RsBoard';
 import { getRsInputs, storeStatus } from '@/lib/rs';
 import { peekStoredSectors, toSectorPulse } from '@/lib/sectors';
@@ -72,6 +73,10 @@ export default async function StrengthPage() {
               {formatAsOf(new Date(result.computedAt))}
             </p>
           )}
+        </div>
+
+        <div className="flex justify-end">
+          <RefreshStatus readOnly />
         </div>
 
         {/* Above the data, because it changes how every number below should be

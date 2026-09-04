@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { Footer } from '@/components/Footer';
+import { RefreshStatus } from '@/components/RefreshStatus';
 import { VelocityBoard, type SymbolMeta } from '@/components/VelocityBoard';
 import { formatAsOf } from '@/lib/time';
 import { getMembership } from '@/lib/rs/membership';
@@ -94,6 +95,10 @@ export default async function VelocityPage() {
               {data.capturedAt && ` · ${formatAsOf(new Date(data.capturedAt))}`}
             </p>
           )}
+        </div>
+
+        <div className="flex justify-end">
+          <RefreshStatus readOnly />
         </div>
 
         {/* Placed above the data, because it changes how every row reads. */}

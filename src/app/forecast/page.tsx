@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { AutoRefresh } from '@/components/AutoRefresh';
 import { Footer } from '@/components/Footer';
 import { ForecastChart } from '@/components/ForecastChart';
 import { ForecastSearch } from '@/components/ForecastSearch';
@@ -8,6 +9,7 @@ import { config } from '@/lib/config';
 import { getForecast, TickerError } from '@/lib/forecast';
 import { BLEND } from '@/lib/forecast/magnets';
 import { MAX_BEND_SIGMA } from '@/lib/forecast/simulate';
+import { DELAYED_FEED_REFRESH_MS } from '@/hooks/useAutoRefresh';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatPrice } from '@/lib/format';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
@@ -74,6 +76,10 @@ export default async function ForecastPage({ searchParams }: PageProps) {
           }
           asOfLabel={data?.asOfLabel}
         />
+
+        <div className="flex justify-end">
+          <AutoRefresh intervalMs={DELAYED_FEED_REFRESH_MS} />
+        </div>
 
         <ForecastSearch initial={data?.symbol ?? requested} />
 

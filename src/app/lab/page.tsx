@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { AutoRefresh } from '@/components/AutoRefresh';
 import { Footer } from '@/components/Footer';
 import { LabBoard } from '@/components/LabBoard';
 import { PageBar } from '@/components/PageBar';
+import { LIVE_FEED_REFRESH_MS } from '@/hooks/useAutoRefresh';
 import { SwingBoard } from '@/components/SwingBoard';
 import { getLabView } from '@/lib/lab';
 import { getSwingView } from '@/lib/lab/swing';
@@ -149,6 +151,18 @@ export default async function LabPage() {
             view.scannedAt ? formatAsOf(new Date(view.scannedAt)) : undefined
           }
         />
+
+        {/*
+          /lab is the one page on a live feed: its swing triggers and gamma room
+          recompute against a Tradier quote read seconds ago. Sixty seconds
+          keeps those current without out-pacing a feed that only exists on a
+          local machine. Everything else on the page is a stored reading, so a
+          refetch mostly re-reads the same document — cheap, and the point is
+          the two live columns.
+        */}
+        <div className="flex justify-end">
+          <AutoRefresh intervalMs={LIVE_FEED_REFRESH_MS} />
+        </div>
 
         {/*
           Above the table rather than under it, because it changes how every

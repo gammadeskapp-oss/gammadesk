@@ -1,7 +1,9 @@
 import { regimeLabel, regimeSubLine, regimeTone } from '@/lib/regime';
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { AutoRefresh } from '@/components/AutoRefresh';
 import { Footer } from '@/components/Footer';
+import { DELAYED_FEED_REFRESH_MS } from '@/hooks/useAutoRefresh';
 import {
   NetLiquidityTile,
   NetLiquidityUnavailable,
@@ -260,13 +262,16 @@ export default async function DashboardPage() {
               {PAGE_DESCRIPTIONS['/dashboard']}
             </p>
           </div>
-          <p className="text-2xs text-term-faint">
-            {positioning
-              // The quote date, for the same reason as `Dashboard.tsx`: the
-              // render stamp reads "now" even when the snapshot is a day old.
-              ? `${config.symbol} ${formatPrice(positioning.spot)} · as of ${positioning.meta.quoteDateLabel}`
-              : `${config.symbol} · quote service unreachable`}
-          </p>
+          <div className="flex flex-col items-end gap-1">
+            <p className="text-2xs text-term-faint">
+              {positioning
+                // The quote date, for the same reason as `Dashboard.tsx`: the
+                // render stamp reads "now" even when the snapshot is a day old.
+                ? `${config.symbol} ${formatPrice(positioning.spot)} · as of ${positioning.meta.quoteDateLabel}`
+                : `${config.symbol} · quote service unreachable`}
+            </p>
+            <AutoRefresh intervalMs={DELAYED_FEED_REFRESH_MS} />
+          </div>
         </div>
 
         {/*

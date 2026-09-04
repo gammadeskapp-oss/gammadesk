@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
+import { RefreshStatus } from '@/components/RefreshStatus';
 import { ScannerBoard } from '@/components/ScannerBoard';
 import { ScannerRunRate } from '@/components/ScannerRunRate';
 import { InfoTip } from '@/components/InfoTip';
@@ -67,6 +68,10 @@ export default async function ScannerPage() {
           */
           asOfLabel={scan ? formatAsOf(new Date(scan.scannedAt)) : undefined}
         />
+
+        <div className="flex justify-end">
+          <RefreshStatus readOnly />
+        </div>
 
         {/*
           One read-only line of market-wide context.
