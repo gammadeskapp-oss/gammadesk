@@ -69,3 +69,19 @@ export function labEnabled(): boolean {
 export function legacyScannerEnabled(): boolean {
   return pageFlagEnabled('GAMMADESK_LEGACY_SCANNER');
 }
+
+/**
+ * The overnight & macro translator card. `GAMMADESK_MACRO=1`.
+ *
+ * Off by default so the feature can ship dark: the card can land in the tree,
+ * be reviewed, and be turned on later without a second deploy. Two reasons this
+ * one in particular wants a gate. It reads a new hand-maintained file and a new
+ * set of overnight tickers, and shipping it dark means the wording and the
+ * numbers can be checked on a preview before anyone reads them as fact. And the
+ * FMP cross-check underneath it is held behind its own separate switch until a
+ * display-licensing question is settled — see `lib/macro/consensus.ts` — so
+ * while this card is on, it is still local-only.
+ */
+export function macroTranslatorEnabled(): boolean {
+  return pageFlagEnabled('GAMMADESK_MACRO');
+}

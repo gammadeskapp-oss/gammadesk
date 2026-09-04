@@ -1,0 +1,58 @@
+[
+  {
+    "event": "CPI YoY",
+    "releaseAt": "2026-09-11T12:30:00Z",
+    "consensus": 2.9,
+    "previous": 3.0,
+    "actual": null,
+    "unit": "%",
+    "direction": "higher_is_tightening"
+  },
+  {
+    "event": "PPI YoY",
+    "releaseAt": "2026-09-12T12:30:00Z",
+    "consensus": 2.6,
+    "previous": 2.5,
+    "actual": null,
+    "unit": "%",
+    "direction": "higher_is_tightening"
+  },
+  {
+    "event": "Initial Jobless Claims",
+    "releaseAt": "2026-09-11T12:30:00Z",
+    "consensus": 231,
+    "previous": 227,
+    "actual": null,
+    "unit": "K",
+    "direction": "higher_is_easing",
+    "inLineTolerance": 3
+  },
+  {
+    "event": "Nonfarm Payrolls",
+    "releaseAt": "2026-09-04T12:30:00Z",
+    "consensus": 160,
+    "previous": 142,
+    "actual": 142,
+    "unit": "K",
+    "direction": "higher_is_tightening",
+    "inLineTolerance": 10
+  },
+  {
+    "event": "Unemployment Rate",
+    "releaseAt": "2026-09-04T12:30:00Z",
+    "consensus": 4.3,
+    "previous": 4.2,
+    "actual": 4.3,
+    "unit": "%",
+    "direction": "higher_is_easing"
+  },
+  {
+    "event": "Core PCE YoY",
+    "releaseAt": "2026-09-26T12:30:00Z",
+    "consensus": 2.7,
+    "previous": 2.6,
+    "actual": null,
+    "unit": "%",
+    "direction": "higher_is_tightening"
+  }
+]
