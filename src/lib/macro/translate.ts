@@ -24,7 +24,7 @@
  *
  * 1. The mechanical reading and the actual market reaction are always produced
  *    together, and their disagreement is stated out loud rather than smoothed
- *    over. See `reactionNote`.
+ *    over. See `releaseReadout`.
  * 2. The overnight aggregate is *allowed to be unclear, and is built to reach
  *    that verdict often*. Conflicting inputs are called mixed, not averaged into
  *    a number — see `aggregateOvernight`. A translator that always picks a side
@@ -130,11 +130,14 @@ export function signedPct(changePct: number): string {
   return `${sign}${Math.abs(rounded).toFixed(1)}%`;
 }
 
-const CONDITION_CLAUSE: Record<Reading, string> = {
-  tightening: 'Mechanically this tightens conditions.',
-  easing: 'Mechanically this eases conditions.',
-  in_line: 'Mechanically this leaves conditions about where they were.',
+/** The mechanical condition clause, without its trailing punctuation. */
+const CONDITION_BASE: Record<'tightening' | 'easing', string> = {
+  tightening: 'Mechanically this tightens conditions',
+  easing: 'Mechanically this eases conditions',
 };
+
+/** What an in-line print says — no direction, and no repetition of the tape. */
+const IN_LINE_CLAUSE = 'Little changed either way.';
 
 const SIDE_WORDS: Record<Surprise['side'], string> = {
   higher: 'higher than forecast',
@@ -142,14 +145,20 @@ const SIDE_WORDS: Record<Surprise['side'], string> = {
   in_line: 'in line with forecast',
 };
 
+/** The opening half every released line shares: the two figures and the side. */
+function surpriseSentence(event: EconEvent): string {
+  const { side } = surpriseReading(event);
+  return `${event.event} came in at ${fig(event.actual as number, event.unit)} vs ${fig(event.consensus, event.unit)} expected — ${SIDE_WORDS[side]}.`;
+}
+
 /**
- * The one-line translation of a released number.
- *
- * "CPI came in at 3.1% vs 2.9% expected — higher than forecast. Mechanically
- * this tightens conditions."
+ * The standalone one-line translation of a release.
  *
  * Before the release it says so rather than inventing a reading, because a
- * consensus with no actual beside it is a schedule entry, not a result.
+ * consensus with no actual beside it is a schedule entry, not a result. After
+ * the release it states the mechanical reading. The version the card renders is
+ * `releaseReadout`, which folds the market's response into this same sentence
+ * rather than repeating the reading in a second one.
  */
 export function translateRelease(event: EconEvent): string {
   if (event.actual === null) {
@@ -160,71 +169,84 @@ export function translateRelease(event: EconEvent): string {
     return `${event.event} is due, with ${fig(event.consensus, event.unit)} expected${priorClause}. No reading until it prints.`;
   }
 
-  const { reading, side } = surpriseReading(event);
-  return `${event.event} came in at ${fig(event.actual, event.unit)} vs ${fig(event.consensus, event.unit)} expected — ${SIDE_WORDS[side]}. ${CONDITION_CLAUSE[reading]}`;
+  const { reading } = surpriseReading(event);
+  const clause = reading === 'in_line' ? IN_LINE_CLAUSE : `${CONDITION_BASE[reading]}.`;
+  return `${surpriseSentence(event)} ${clause}`;
 }
 
 /**
- * The mechanical reading beside the market's actual response, with disagreement
- * flagged.
+ * The released line the card shows, with the market's response folded in.
  *
- * The textbook response to a tightening print is equities lower and to an
- * easing print equities higher. Markets move against the textbook constantly —
- * they are pricing the whole distribution, not this one number — and pretending
- * otherwise is how a mechanical reading gets mistaken for a forecast. So when
- * the tape and the mechanics disagree, this says so in plain words rather than
- * hiding the tension.
+ * One sentence, not two. The mechanical reading and the tape belong together —
+ * the whole point is to show them side by side and flag when they disagree — and
+ * stacking a second sentence that restates "this print tightens conditions" just
+ * to hang the futures move off it reads as repetition. So the reading is stated
+ * once and the tape continues it:
  *
- * `spyChangePct` is the equity-futures overnight change. Null when there is no
- * quote — then there is a reading but nothing to check it against, and the
- * sentence says exactly that.
+ *   "…higher than forecast. Mechanically this tightens conditions, but the tape
+ *    disagrees so far: SPY futures +0.5%."
+ *
+ * The textbook response to a tightening print is equities lower, to an easing
+ * print equities higher. Markets move against the textbook constantly — they
+ * price the whole distribution, not this one number — which is exactly why the
+ * disagreement is named rather than smoothed over. An in-line print carries no
+ * tape clause at all: there is no reading for the tape to agree or disagree
+ * with. A flat quote is stated plainly, never forced into a verdict; an absent
+ * quote ends the line after the reading rather than spending a sentence on its
+ * own absence.
+ *
+ * `spyChangePct` is the equity-futures overnight change; null when there is no
+ * quote.
  */
-export interface Reaction {
-  sentence: string;
-  /** True when the tape matches the textbook response, false when it fights it. */
+export interface ReleaseReadout {
+  line: string;
+  /** True when the tape matches the textbook response, false when it fights it, null when neither applies. */
   agrees: boolean | null;
 }
 
-export function reactionNote(
-  reading: Reading,
-  spyChangePct: number | null,
+export function releaseReadout(
+  event: EconEvent,
+  spyChangePct: number | null = null,
   flatPct = OVERNIGHT_FLAT_PCT,
-): Reaction {
-  const lead =
-    reading === 'tightening'
-      ? 'This print tightens conditions.'
-      : reading === 'easing'
-        ? 'This print eases conditions.'
-        : 'This print leaves conditions about where they were.';
+): ReleaseReadout {
+  if (event.actual === null) {
+    return { line: translateRelease(event), agrees: null };
+  }
 
+  const { reading } = surpriseReading(event);
+  const surprise = surpriseSentence(event);
+
+  // In line: no direction, and nothing for the tape to agree or disagree with.
+  if (reading === 'in_line') {
+    return { line: `${surprise} ${IN_LINE_CLAUSE}`, agrees: null };
+  }
+
+  const base = CONDITION_BASE[reading];
+
+  // No quote to check the reading against: end after the reading. The absence of
+  // a tape is not worth a sentence of its own.
   if (spyChangePct === null) {
-    return {
-      sentence: `${lead} There is no equity-futures quote to read the response against yet.`,
-      agrees: null,
-    };
+    return { line: `${surprise} ${base}.`, agrees: null };
   }
 
   const move = signedPct(spyChangePct);
 
-  // A flat tape says nothing either way, and calling a 0.1% drift agreement or
+  // A flat tape says nothing either way; calling a 0.1% drift agreement or
   // disagreement invents precision the number does not carry.
-  if (Math.abs(spyChangePct) < flatPct || reading === 'in_line') {
+  if (Math.abs(spyChangePct) < flatPct) {
     return {
-      sentence: `${lead} Market reaction so far: SPY futures ${move} — little immediate response.`,
+      line: `${surprise} ${base}, and the tape is little changed so far: SPY futures ${move}.`,
       agrees: null,
     };
   }
 
   const textbookUp = reading === 'easing';
   const agrees = textbookUp ? spyChangePct > 0 : spyChangePct < 0;
-  const tail = agrees
-    ? 'the textbook response.'
-    : 'not the textbook response.';
+  const clause = agrees
+    ? `, and the tape agrees so far: SPY futures ${move}.`
+    : `, but the tape disagrees so far: SPY futures ${move}.`;
 
-  return {
-    sentence: `${lead} Market reaction so far: SPY futures ${move} — ${tail}`,
-    agrees,
-  };
+  return { line: `${surprise} ${base}${clause}`, agrees };
 }
 
 // --- overnight -------------------------------------------------------------
@@ -347,7 +369,7 @@ export function aggregateOvernight(
   if (riskOn > 0 && riskOff > 0) {
     return {
       aggregate: 'mixed',
-      sentence: `Overnight is mixed — ${riskOn} reading${riskOn === 1 ? '' : 's'} lean risk-on and ${riskOff} lean risk-off, so the session has not settled on a direction. Read the rows below rather than the label.`,
+      sentence: `Overnight is mixed — ${riskOn} reading${riskOn === 1 ? '' : 's'} ${riskOn === 1 ? 'leans' : 'lean'} risk-on and ${riskOff} ${riskOff === 1 ? 'leans' : 'lean'} risk-off, so the session has not settled on a direction. Read the rows below rather than the label.`,
       riskOn,
       riskOff,
     };

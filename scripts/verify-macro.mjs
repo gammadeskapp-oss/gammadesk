@@ -22,7 +22,7 @@ registerTsImports();
 const {
   surpriseReading,
   translateRelease,
-  reactionNote,
+  releaseReadout,
   rowLean,
   rowClause,
   aggregateOvernight,
@@ -126,26 +126,36 @@ ok('states the mechanical tightening', /tightens conditions/i.test(hot), hot);
 const pending = translateRelease(ev({ actual: null }));
 ok('an unreleased event says there is no reading yet', /no reading/i.test(pending), pending);
 
+const inLine = translateRelease(ev({ actual: 2.9 }));
+ok('an in-line print reads "Little changed either way"', /in line with forecast\. Little changed either way\.$/.test(inLine), inLine);
+ok('an in-line print does not repeat a mechanical clause', !/Mechanically/.test(inLine), inLine);
+
 // --- reaction: the mechanical reading beside the tape ------------------------
 
-section('The mechanical reading and the tape are shown together, disagreement flagged');
+section('The reading and the tape are one sentence, disagreement flagged, no repetition');
 
 {
-  const fights = reactionNote('tightening', 0.6);
-  ok('tightening + SPY up is flagged as not textbook', fights.agrees === false, fights.sentence);
-  ok('and says so in words', /not the textbook/i.test(fights.sentence), fights.sentence);
+  const fights = releaseReadout(ev({ actual: 3.1 }), 0.6); // tightening + SPY up
+  ok('tightening + SPY up is flagged as disagreement', fights.agrees === false, fights.line);
+  ok('and says so in words', /the tape disagrees so far: SPY futures \+0\.6%/i.test(fights.line), fights.line);
+  ok('the condition is stated once, not twice', (fights.line.match(/tightens conditions/g) || []).length === 1, fights.line);
 
-  const agrees = reactionNote('tightening', -0.6);
-  ok('tightening + SPY down agrees', agrees.agrees === true, agrees.sentence);
+  const agrees = releaseReadout(ev({ actual: 3.1 }), -0.6); // tightening + SPY down
+  ok('tightening + SPY down agrees', agrees.agrees === true, agrees.line);
+  ok('and says the tape agrees', /the tape agrees so far/i.test(agrees.line), agrees.line);
 
-  const easingAgrees = reactionNote('easing', 0.6);
-  ok('easing + SPY up agrees', easingAgrees.agrees === true, easingAgrees.sentence);
+  const easingAgrees = releaseReadout(ev({ actual: 2.7 }), 0.6); // easing + SPY up
+  ok('easing + SPY up agrees', easingAgrees.agrees === true, easingAgrees.line);
 
-  const flat = reactionNote('tightening', 0.05);
-  ok('a flat tape is neither agreement nor disagreement', flat.agrees === null, flat.sentence);
+  const flat = releaseReadout(ev({ actual: 3.1 }), 0.05);
+  ok('a flat tape is neither agreement nor disagreement', flat.agrees === null, flat.line);
+  ok('and says the tape is little changed', /little changed so far/i.test(flat.line), flat.line);
 
-  const noQuote = reactionNote('tightening', null);
-  ok('a missing quote is said out loud', noQuote.agrees === null && /no equity-futures quote/i.test(noQuote.sentence), noQuote.sentence);
+  const noQuote = releaseReadout(ev({ actual: 3.1 }), null);
+  ok('a missing quote ends after the reading, no extra sentence', noQuote.agrees === null && /tightens conditions\.$/.test(noQuote.line) && !/tape|quote/i.test(noQuote.line), noQuote.line);
+
+  const inLineTape = releaseReadout(ev({ actual: 2.9 }), 0.6);
+  ok('an in-line print carries no tape clause', inLineTape.agrees === null && !/tape/i.test(inLineTape.line), inLineTape.line);
 }
 
 // --- overnight leans ---------------------------------------------------------
@@ -173,6 +183,14 @@ section('The overnight aggregate returns mixed on conflict, and often');
     { key: 'DXY', changePct: 0.6 }, // risk-off
   ]);
   ok('conflicting inputs are mixed, not averaged', conflict.aggregate === 'mixed', conflict.sentence);
+  ok('the singular verb agrees when one leans each way', /1 reading leans risk-on and 1 leans risk-off/.test(conflict.sentence), conflict.sentence);
+
+  const twoOne = aggregateOvernight([
+    { key: 'NIKKEI', changePct: 1.2 },
+    { key: 'KOSPI', changePct: 0.9 },
+    { key: 'DXY', changePct: 0.6 },
+  ]);
+  ok('and the plural verb agrees when several lean one way', /2 readings lean risk-on and 1 leans risk-off/.test(twoOne.sentence), twoOne.sentence);
 
   const oneSided = aggregateOvernight([
     { key: 'NIKKEI', changePct: 1.2 },
@@ -204,9 +222,9 @@ const sentences = [
   translateRelease(ev({ actual: 2.7 })),
   translateRelease(ev({ direction: 'higher_is_easing', consensus: 4.2, actual: 4.4 })),
   translateRelease(ev({ actual: 2.9 })),
-  reactionNote('tightening', 0.6).sentence,
-  reactionNote('easing', 0.6).sentence,
-  reactionNote('tightening', null).sentence,
+  releaseReadout(ev({ actual: 3.1 }), 0.6).line,
+  releaseReadout(ev({ actual: 2.7 }), 0.6).line,
+  releaseReadout(ev({ actual: 3.1 }), null).line,
   aggregateOvernight([{ key: 'NIKKEI', changePct: 1.2 }, { key: 'DXY', changePct: 0.6 }]).sentence,
   aggregateOvernight([{ key: 'NIKKEI', changePct: 1.2 }]).sentence,
   aggregateOvernight([{ key: 'DXY', changePct: 0.6 }]).sentence,

@@ -177,25 +177,74 @@ const CONSENSUS_PATH = path.join(process.cwd(), 'data', 'econ-consensus.json');
 const RELOAD_SECONDS = 30;
 
 /**
- * Every usable hand-maintained release, release-time order, oldest first.
+ * The parsed JSON, read from disk once per cache period.
  *
- * Async because the file is read from disk. A read failure degrades to an empty
- * list — the card simply shows nothing rather than taking the page down — with
- * one warning so a genuinely missing or unreadable file is not silent.
+ * The raw array is cached rather than the parsed events, because two consumers
+ * want two different views of it: the usable events, and the *placeholders* — a
+ * gap-finder cannot work off the parsed list, which has already dropped exactly
+ * the rows it needs to warn about. A read failure degrades to an empty array
+ * with one warning, so a missing or unreadable file is loud but never fatal.
  */
-export function getConsensusEvents(): Promise<EconEvent[]> {
+function readConsensusRaw(): Promise<unknown> {
   return cached('macro:consensus-file', RELOAD_SECONDS, async () => {
-    let raw: unknown;
     try {
-      raw = JSON.parse(await fs.readFile(CONSENSUS_PATH, 'utf8'));
+      return JSON.parse(await fs.readFile(CONSENSUS_PATH, 'utf8'));
     } catch (e) {
       console.warn(`[macro] could not read ${CONSENSUS_PATH}: ${(e as Error).message}`);
       return [];
     }
-    return parseConsensusFile(raw).sort(
-      (a, b) => Date.parse(a.releaseAt) - Date.parse(b.releaseAt),
-    );
   });
+}
+
+/** Every usable hand-maintained release, release-time order, oldest first. */
+export async function getConsensusEvents(): Promise<EconEvent[]> {
+  return parseConsensusFile(await readConsensusRaw()).sort(
+    (a, b) => Date.parse(a.releaseAt) - Date.parse(b.releaseAt),
+  );
+}
+
+/**
+ * How near a release has to be before an empty consensus is worth flagging.
+ *
+ * A placeholder for a print three weeks out is not a gap — there is nothing to
+ * fill in yet. One whose date is within a week, or has already passed, is a slot
+ * the author meant to fill and did not, and the whole reason this exists is so
+ * that omission is visible rather than silently rendering nothing.
+ */
+const GAP_WINDOW_DAYS = 7;
+
+/** A due-or-overdue release whose consensus was never entered. */
+export interface ConsensusGap {
+  event: string;
+  /** Always present — a row with no date cannot be judged due, so it is not a gap. */
+  releaseAt: string;
+}
+
+/**
+ * Placeholders that should have been filled in by now: consensus still null, and
+ * a release date that is past or inside the next `GAP_WINDOW_DAYS`.
+ *
+ * Deliberately separate from `parseConsensusFile`, which drops these. That drop
+ * is right for the reading — an unfilled row must never render a number — but
+ * wrong as the last word, because a forgotten entry then disappears with no
+ * trace. This is the trace.
+ */
+export function findConsensusGaps(raw: unknown, now: Date = new Date()): ConsensusGap[] {
+  if (!Array.isArray(raw)) return [];
+  const horizonMs = now.getTime() + GAP_WINDOW_DAYS * 86_400_000;
+  const gaps: ConsensusGap[] = [];
+
+  for (const row of raw as RawEvent[]) {
+    if (!row || typeof row.event !== 'string') continue;
+    const consensusMissing = row.consensus === null || row.consensus === undefined;
+    if (!consensusMissing) continue;
+    if (typeof row.releaseAt !== 'string') continue;
+    const at = Date.parse(row.releaseAt);
+    if (Number.isNaN(at)) continue;
+    if (at <= horizonMs) gaps.push({ event: row.event, releaseAt: row.releaseAt });
+  }
+
+  return gaps;
 }
 
 /**
@@ -209,12 +258,14 @@ export function getConsensusEvents(): Promise<EconEvent[]> {
 export interface MacroSelection {
   mostRecent: EconEvent | null;
   next: EconEvent | null;
+  /** Due-or-overdue releases whose consensus was never entered. */
+  gaps: ConsensusGap[];
 }
 
 export function selectReleases(
   events: EconEvent[],
   now: Date = new Date(),
-): MacroSelection {
+): Pick<MacroSelection, 'mostRecent' | 'next'> {
   const nowMs = now.getTime();
 
   let mostRecent: EconEvent | null = null;
@@ -237,7 +288,11 @@ export function selectReleases(
 export async function getMacroSelection(
   now: Date = new Date(),
 ): Promise<MacroSelection> {
-  return selectReleases(await getConsensusEvents(), now);
+  const raw = await readConsensusRaw();
+  const events = parseConsensusFile(raw).sort(
+    (a, b) => Date.parse(a.releaseAt) - Date.parse(b.releaseAt),
+  );
+  return { ...selectReleases(events, now), gaps: findConsensusGaps(raw, now) };
 }
 
 // --- FMP cross-check (gated, never displayed) ------------------------------

@@ -2,12 +2,11 @@ import { MethodologyDrawer } from './MethodologyDrawer';
 import type { EconEvent } from '@/lib/macro/translate';
 import {
   aggregateOvernight,
-  reactionNote,
+  releaseReadout,
   signedPct,
-  surpriseReading,
-  translateRelease,
   type OvernightRow,
 } from '@/lib/macro/translate';
+import type { ConsensusGap } from '@/lib/macro/consensus';
 import type { OvernightData } from '@/lib/macro/overnight';
 import { formatAsOf } from '@/lib/time';
 
@@ -64,17 +63,20 @@ const AGG_TONE = {
 export function MacroTranslatorCard({
   mostRecent,
   next,
+  gaps = [],
   overnight,
   now = new Date(),
 }: {
   mostRecent: EconEvent | null;
   next: EconEvent | null;
+  /** Due-or-overdue releases whose consensus was never entered — shown as gaps. */
+  gaps?: ConsensusGap[];
   overnight: OvernightData | null;
   now?: Date;
 }) {
   // Nothing to say and nothing to show. An empty shell would imply the readings
   // were taken and came back unremarkable.
-  if (!mostRecent && !next && !overnight) return null;
+  if (!mostRecent && !next && gaps.length === 0 && !overnight) return null;
 
   /*
    * Two ways the overnight rows are withheld and the aggregate forced to mixed.
@@ -92,17 +94,12 @@ export function MacroTranslatorCard({
   const leanRows: OvernightRow[] = overnight?.leanRows ?? [];
   const verdict = aggregateOvernight(leanRows, { stale });
 
-  // The release reading, and the market's response beside it. SPY's overnight
-  // change is the tape the mechanical reading is checked against.
+  // The release reading with the market's response folded into one sentence.
+  // SPY's overnight change is the tape the mechanical reading is checked
+  // against; withheld when the feed is stale so a dead quote is not read as calm.
   const spy = overnight?.quotes.find((q) => q.key === 'SPY') ?? null;
   const release = mostRecent
-    ? {
-        line: translateRelease(mostRecent),
-        reaction: reactionNote(
-          surpriseReading(mostRecent).reading,
-          stale ? null : (spy?.changePct ?? null),
-        ),
-      }
+    ? releaseReadout(mostRecent, stale ? null : (spy?.changePct ?? null))
     : null;
 
   const methodology = {
@@ -141,14 +138,30 @@ export function MacroTranslatorCard({
 
   return (
     <section aria-label="Overnight and macro translator" className="space-y-2">
-      {/* Most recent release, translated. */}
+      {/* Most recent release, translated — reading and tape in one line. */}
       {release && (
         <div className="panel border-l-2 border-l-term-line px-3.5 py-2.5">
           <div className="label-xs">Latest release</div>
           <p className="mt-1 text-xs leading-relaxed text-term-text">{release.line}</p>
-          <p className="mt-1.5 text-2xs leading-relaxed text-term-dim">
-            {release.reaction.sentence}
-          </p>
+        </div>
+      )}
+
+      {/*
+        Gaps: due-or-overdue releases whose consensus was never entered. The
+        loader drops them so no number is invented, but a forgotten entry that
+        renders nothing is a silent failure — this makes the omission visible so
+        it can be filled in. Amber, the site's "attention, not alarm" tone.
+      */}
+      {gaps.length > 0 && (
+        <div className="panel border-l-2 border-l-flip/60 bg-flip/[0.06] px-3.5 py-2.5">
+          <div className="label-xs text-flip">Consensus not entered</div>
+          <ul className="mt-1 space-y-0.5">
+            {gaps.map((gap) => (
+              <li key={`${gap.event}-${gap.releaseAt}`} className="text-2xs leading-relaxed text-flip/90">
+                <span className="font-bold">{gap.event}</span> — due {formatAsOf(new Date(gap.releaseAt))}, consensus not entered.
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

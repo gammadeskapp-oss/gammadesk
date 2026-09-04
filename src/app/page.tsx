@@ -207,6 +207,7 @@ export default async function HomePage({ searchParams }: PageProps) {
                 <MacroTranslatorCard
                   mostRecent={macroSelection?.mostRecent ?? null}
                   next={macroSelection?.next ?? null}
+                  gaps={macroSelection?.gaps ?? []}
                   overnight={overnight}
                 />
               )}
@@ -233,6 +234,7 @@ export default async function HomePage({ searchParams }: PageProps) {
             <MacroTranslatorCard
               mostRecent={macroSelection?.mostRecent ?? null}
               next={macroSelection?.next ?? null}
+              gaps={macroSelection?.gaps ?? []}
               overnight={overnight}
             />
           )}
