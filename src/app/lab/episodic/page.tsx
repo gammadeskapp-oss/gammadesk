@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { EpisodicBoard } from '@/components/EpisodicBoard';
+import { EpisodicCalibrationPanel } from '@/components/EpisodicCalibrationPanel';
+import { EpisodicFindingList } from '@/components/EpisodicFindingList';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { getEpisodicView } from '@/lib/episodic';
@@ -57,7 +59,9 @@ export default async function EpisodicPage() {
           description="Flat, ignored, then a hard gap up on volume — and what each name has done since."
           meta={
             view.scanDate
-              ? `${view.findings.length} tracked · ${view.scanDate} scan`
+              ? view.mode === 'backfill' && view.calibration
+                ? `${view.findings.length} findings · ${view.calibration.months}-month backfill`
+                : `${view.findings.length} tracked · ${view.scanDate} scan`
               : 'Nothing stored'
           }
           asOfLabel={view.scannedAt ? formatAsOf(new Date(view.scannedAt)) : undefined}
@@ -77,6 +81,10 @@ export default async function EpisodicPage() {
           </ul>
         )}
 
+        {view.mode === 'backfill' && view.calibration && (
+          <EpisodicCalibrationPanel cal={view.calibration} />
+        )}
+
         {view.scanDate ? (
           <EpisodicBoard view={view} />
         ) : (
@@ -88,6 +96,21 @@ export default async function EpisodicPage() {
               scan job has run.
             </p>
           </div>
+        )}
+
+        {view.mode === 'backfill' && view.trendRemoved.length > 0 && (
+          <section className="panel px-3.5 py-3">
+            <h2 className="label-xs text-term-text">Removed by the base-trend filter</h2>
+            <p className="mt-1 text-2xs leading-relaxed text-term-dim">
+              These cleared every other rule but were rejected because their base fit a clean rising
+              line — already moving, not flat and ignored. Open a few and check the shape: a rising
+              channel into the gap is a correct reject; a flat base here would mean the filter is too
+              aggressive. {view.trendRemoved.length} shown (capped).
+            </p>
+            <div className="mt-2">
+              <EpisodicFindingList findings={view.trendRemoved} />
+            </div>
+          </section>
         )}
 
         {/* The pause tracker is the important half — say what its columns mean. */}

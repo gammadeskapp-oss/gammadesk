@@ -564,7 +564,7 @@ export async function runEpisodicBackfill(months: number): Promise<EpisodicBackf
   // Label the grid for the report/page: gap% → vol× → count.
   const labeledGrid: Record<string, Record<string, number>> = {};
   for (let g = 0; g < GRID_GAP_PCTS.length; g += 1) {
-    const gk = String(GRID_GAP_PCTS[g] * 100);
+    const gk = String(Math.round(GRID_GAP_PCTS[g] * 100));
     labeledGrid[gk] = {};
     for (let v = 0; v < GRID_VOLUME_MULTS.length; v += 1) {
       labeledGrid[gk][String(GRID_VOLUME_MULTS[v])] = grid[g][v];
