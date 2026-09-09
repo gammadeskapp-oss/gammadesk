@@ -84,18 +84,81 @@ function sessionDate(epochSeconds: number): string {
  * window and a 50-session volume average, comfortably inside 250 sessions,
  * while a shorter request would leave recently listed names unevaluable.
  */
+/**
+ * One fetch, with a single retry for a *transient* failure.
+ *
+ * The full-universe run measured zero rate-limiting at concurrency 24, so this
+ * is insurance rather than a fix for a problem we have — but a scan that runs
+ * on a busier day, or against a slower Yahoo, should not throw away a name over
+ * one 429 or one dropped connection. So a 429, a 5xx or a network/timeout error
+ * is retried once after a short backoff (honouring `Retry-After` when Yahoo
+ * sends it); a 404 and every other 4xx pass straight through, because a retry
+ * cannot turn an unknown ticker into a known one and would only slow the run.
+ */
+async function fetchWithRetry(url: string): Promise<Response> {
+  const attempt = () =>
+    fetch(url, {
+      headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' },
+      cache: 'no-store',
+      // A hung request must fail cleanly rather than hold a worker for the whole
+      // run; the pool has its own deadline above this as a backstop.
+      signal: AbortSignal.timeout(12_000),
+    });
+
+  let res: Response;
+  try {
+    res = await attempt();
+    if (res.status !== 429 && res.status < 500) return res;
+  } catch {
+    // Network error or the 12s abort — fall through to the single retry.
+    res = undefined as unknown as Response;
+  }
+
+  const retryAfter = res ? Number(res.headers.get('retry-after')) : NaN;
+  const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+    ? Math.min(retryAfter * 1000, 5_000)
+    : 500 + Math.floor(Math.random() * 500);
+  await new Promise((r) => setTimeout(r, waitMs));
+
+  // Second and last attempt: let its result (or its throw) stand.
+  return attempt();
+}
+
+/** A declared or applied split, in the plain shape the diagnostics carry. */
+export interface SplitEvent {
+  date: string;
+  /** numerator / denominator — below 1 is a reverse split. */
+  ratio: number;
+}
+
+/**
+ * Bars plus the split provenance behind them, for auditing.
+ *
+ * `declared` is every split Yahoo reported in the window; `applied` is the
+ * subset this code actually corrected for (the ones the series had not already
+ * been adjusted for upstream). The reverse-split audit and the `?probe=` route
+ * read these to prove a reverse split was neutralised rather than left to read
+ * as a fake gap.
+ */
+export interface DetailedBars {
+  bars: EpisodicBar[];
+  declared: SplitEvent[];
+  applied: SplitEvent[];
+}
+
+/** Bars only — the hot path the scan uses. */
 export async function fetchDailyBars(symbol: string): Promise<EpisodicBar[] | null> {
+  const detailed = await fetchDailyBarsDetailed(symbol);
+  return detailed ? detailed.bars : null;
+}
+
+/** Bars plus split provenance, for the reverse-split audit and the probe route. */
+export async function fetchDailyBarsDetailed(symbol: string): Promise<DetailedBars | null> {
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol(symbol)}` +
     `?range=1y&interval=1d&events=split`;
 
-  const res = await fetch(url, {
-    headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' },
-    cache: 'no-store',
-    // A hung request must fail cleanly rather than hold a worker for the whole
-    // run; the pool has its own deadline above this as a backstop.
-    signal: AbortSignal.timeout(12_000),
-  });
+  const res = await fetchWithRetry(url);
 
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -159,10 +222,10 @@ type SplitEvents = Record<
  * one (~1), and a big-but-real earnings day (somewhere between). The only
  * change here is that all four prices are scaled, not just the close.
  */
-function applySplits(bars: EpisodicBar[], splits: SplitEvents | undefined): EpisodicBar[] {
-  if (!splits) return bars;
+function applySplits(bars: EpisodicBar[], splits: SplitEvents | undefined): DetailedBars {
+  if (!splits) return { bars, declared: [], applied: [] };
 
-  const declared = Object.values(splits)
+  const declared: SplitEvent[] = Object.values(splits)
     .map((s) => ({
       date: typeof s.date === 'number' ? sessionDate(s.date) : null,
       ratio:
@@ -173,7 +236,7 @@ function applySplits(bars: EpisodicBar[], splits: SplitEvents | undefined): Epis
           ? s.numerator / s.denominator
           : null,
     }))
-    .filter((s): s is { date: string; ratio: number } => s.date !== null && s.ratio !== null)
+    .filter((s): s is SplitEvent => s.date !== null && s.ratio !== null)
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const events = declared.filter(({ date, ratio }) => {
@@ -191,7 +254,7 @@ function applySplits(bars: EpisodicBar[], splits: SplitEvents | undefined): Epis
     return Math.abs(observed / ratio - 1) < 0.15;
   });
 
-  if (events.length === 0) return bars;
+  if (events.length === 0) return { bars, declared, applied: [] };
 
   // Suffix products: a bar is divided by the combined ratio of every split
   // dated strictly after it.
@@ -201,7 +264,7 @@ function applySplits(bars: EpisodicBar[], splits: SplitEvents | undefined): Epis
   }
 
   let next = 0;
-  return bars.map((bar) => {
+  const adjusted = bars.map((bar) => {
     while (next < events.length && events[next].date <= bar.date) next += 1;
     const factor = pending[next];
     if (factor === 1) return bar;
@@ -214,4 +277,6 @@ function applySplits(bars: EpisodicBar[], splits: SplitEvents | undefined): Epis
       volume: bar.volume * factor,
     };
   });
+
+  return { bars: adjusted, declared, applied: events };
 }

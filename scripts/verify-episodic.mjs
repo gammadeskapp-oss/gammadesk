@@ -198,7 +198,7 @@ function textbook({
   const pause = baseBars({ count: 10, price: 21.7, vol: 300_000 });
   const bars = dated([...base, gap, ...pause]);
   const res = scanSeries('WIDE', null, bars, EPISODIC_CAPTURE);
-  ok('a wide base drops base-not-quiet', res.kind === 'drop' && res.reason === 'base-not-quiet', res.kind === 'drop' ? res.reason : res.kind);
+  ok('a wide base drops base-too-wide', res.kind === 'drop' && res.reason === 'base-too-wide', res.kind === 'drop' ? res.reason : res.kind);
 }
 
 // --- 5b. base not quiet: volume already rising -------------------------------
@@ -211,7 +211,38 @@ function textbook({
   const pause = baseBars({ count: 10, price: 21.7, vol: 300_000 });
   const bars = dated([...base, gap, ...pause]);
   const res = scanSeries('RAMP', null, bars, EPISODIC_CAPTURE);
-  ok('a rising-volume base drops base-not-quiet', res.kind === 'drop' && res.reason === 'base-not-quiet', res.kind === 'drop' ? res.reason : res.kind);
+  ok('a rising-volume base drops base-vol-rising', res.kind === 'drop' && res.reason === 'base-vol-rising', res.kind === 'drop' ? res.reason : res.kind);
+}
+
+// --- 5b'. base already trending up (a clean rising channel) ------------------
+{
+  // A base that climbs cleanly from ~19 to ~24 over 75 sessions, then a gap.
+  const base = [];
+  for (let i = 0; i < 75; i += 1) {
+    const p = 19 + (i / 74) * 5 + (i % 2 === 0 ? 0.03 : -0.03); // clean +26% ramp
+    base.push({ open: p, high: p * 1.004, low: p * 0.996, close: p, volume: 600_000 });
+  }
+  const prevClose = base[base.length - 1].close;
+  const gap = { open: prevClose * 1.06, high: prevClose * 1.1, low: prevClose * 1.05, close: prevClose * 1.09, volume: 3_600_000 };
+  const pause = baseBars({ count: 10, price: prevClose * 1.08, vol: 300_000 });
+  const bars = dated([...base, gap, ...pause]);
+  const res = scanSeries('TREND', null, bars, EPISODIC_CAPTURE);
+  ok('a clean rising base drops base-trending', res.kind === 'drop' && res.reason === 'base-trending', res.kind === 'drop' ? res.reason : res.kind);
+}
+
+// --- 5b''. a gap up out of a clean DOWNtrend is kept (a reversal) ------------
+{
+  const base = [];
+  for (let i = 0; i < 75; i += 1) {
+    const p = 24 - (i / 74) * 4 + (i % 2 === 0 ? 0.03 : -0.03); // clean -17% fall
+    base.push({ open: p, high: p * 1.004, low: p * 0.996, close: p, volume: 600_000 });
+  }
+  const prevClose = base[base.length - 1].close;
+  const gap = { open: prevClose * 1.06, high: prevClose * 1.1, low: prevClose * 1.05, close: prevClose * 1.09, volume: 3_600_000 };
+  const pause = baseBars({ count: 10, price: prevClose * 1.08, vol: 300_000 });
+  const bars = dated([...base, gap, ...pause]);
+  const res = scanSeries('REVERSAL', null, bars, EPISODIC_CAPTURE);
+  ok('a gap out of a clean downtrend is kept', res.kind === 'finding', res.kind === 'drop' ? res.reason : res.kind);
 }
 
 // --- 5c. dead: a close breaks the gap-day midpoint ---------------------------

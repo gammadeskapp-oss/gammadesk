@@ -3,7 +3,7 @@ import 'server-only';
 import { createJsonStore, storeStatus } from '../jsonStore';
 import { runPool } from '../scanUniverse';
 import { marketToday } from '../time';
-import { fetchDailyBars } from './bars';
+import { fetchDailyBarsDetailed } from './bars';
 import { scanSeries, type ScanDrop } from './scan';
 import {
   EPISODIC_CAPTURE,
@@ -107,7 +107,9 @@ function emptyStore(): EpisodicStore {
       droppedLiquidity: 0,
       droppedNoGap: 0,
       droppedNotFresh: 0,
-      droppedBaseNotQuiet: 0,
+      droppedBaseTooWide: 0,
+      droppedBaseTrending: 0,
+      droppedBaseVolRising: 0,
       survived: 0,
       fetchFailed: 0,
       notReached: 0,
@@ -156,7 +158,14 @@ export interface EpisodicRunReport {
   totalFindings: number;
   cursor: number;
   wrapped: boolean;
+  /** Whether this environment's store is configured to persist across deploys. */
   durable: boolean;
+  /**
+   * Whether the write actually landed. Distinct from `durable`: a Blob store
+   * can be "durable" by configuration yet reject the write for a bad token,
+   * which is precisely what must not be reported as success.
+   */
+  stored: boolean;
   notes: string[];
 }
 
@@ -180,20 +189,71 @@ export async function runEpisodicScan(): Promise<EpisodicRunReport> {
 
   const nameOf = new Map(symbols.map((s) => [s.symbol, s.name]));
 
+  /*
+   * Failure diagnostics, so a run can say *why* it failed rather than only how
+   * often. Rate-limiting (HTTP 429), a dead upstream (other HTTP), a hung
+   * request (aborted) and a genuinely unknown ticker (no data) are four very
+   * different problems, and the fix for each is different. Logged periodically
+   * to the dev/server console during the run, and folded into the notes at the
+   * end.
+   */
+  const diag = { http429: 0, httpOther: 0, aborted: 0, noData: 0, otherErr: 0, done: 0 };
+  const runStart = Date.now();
+
+  /*
+   * Reverse-split audit. A reverse split (ratio < 1) is a fake gap *up* if left
+   * raw — the single worst false positive this scanner could produce — so every
+   * run records the recent reverse splits it corrected for and whether the name
+   * still surfaced as a finding. If the split handling works, that list is long
+   * and none of it is a finding; if a reverse split ever shows up as a gap, this
+   * is where it becomes visible instead of silently topping the ranking.
+   */
+  const reverseSplits: Array<{ symbol: string; date: string; ratio: number; becameFinding: boolean }> = [];
+  const recentSplitWindowDays = 90;
+
   const worker = async (symbol: string): Promise<WorkerResult> => {
-    let bars;
+    let detailed;
     try {
-      bars = await fetchDailyBars(symbol);
-    } catch {
+      detailed = await fetchDailyBarsDetailed(symbol);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/HTTP 429/.test(msg)) diag.http429 += 1;
+      else if (/HTTP \d/.test(msg)) diag.httpOther += 1;
+      else if (/abort|timeout/i.test(msg)) diag.aborted += 1;
+      else diag.otherErr += 1;
+      return { symbol, kind: 'fetch-failed' };
+    } finally {
+      diag.done += 1;
+      if (diag.done % 500 === 0) {
+        const secs = (Date.now() - runStart) / 1000;
+        console.warn(
+          `[episodic] ${diag.done} done in ${secs.toFixed(0)}s (${(diag.done / secs).toFixed(1)}/s) — ` +
+            `429:${diag.http429} httpOther:${diag.httpOther} aborted:${diag.aborted} noData:${diag.noData} err:${diag.otherErr} revSplits:${reverseSplits.length}`,
+        );
+      }
+    }
+    if (!detailed) {
+      diag.noData += 1;
       return { symbol, kind: 'fetch-failed' };
     }
-    if (!bars) return { symbol, kind: 'fetch-failed' };
 
-    const result = scanSeries(symbol, nameOf.get(symbol) ?? null, bars, EPISODIC_CAPTURE);
-    return result.kind === 'finding'
+    const result = scanSeries(symbol, nameOf.get(symbol) ?? null, detailed.bars, EPISODIC_CAPTURE);
+    const becameFinding = result.kind === 'finding';
+
+    for (const s of detailed.applied) {
+      if (s.ratio < 1 && ageOfDate(s.date) <= recentSplitWindowDays) {
+        reverseSplits.push({ symbol, date: s.date, ratio: s.ratio, becameFinding });
+      }
+    }
+
+    return becameFinding
       ? { symbol, kind: 'finding', finding: result.finding }
-      : { symbol, kind: 'drop', reason: result.reason };
+      : { symbol, kind: 'drop', reason: (result as { reason: ScanDrop }).reason };
   };
+
+  console.warn(
+    `[episodic] starting: universe ${universeSize}, slice ${slice.length} from ${start}, concurrency ${CONCURRENCY}`,
+  );
 
   const { results, covered, skipped, timedOut } = await runPool(slice.map((s) => s.symbol), worker, {
     concurrency: CONCURRENCY,
@@ -210,7 +270,9 @@ export async function runEpisodicScan(): Promise<EpisodicRunReport> {
     droppedLiquidity: 0,
     droppedNoGap: 0,
     droppedNotFresh: 0,
-    droppedBaseNotQuiet: 0,
+    droppedBaseTooWide: 0,
+    droppedBaseTrending: 0,
+    droppedBaseVolRising: 0,
     survived: 0,
     // A timed-out symbol produced no reading, so it counts with the fetch
     // failures rather than as a verdict.
@@ -223,7 +285,9 @@ export async function runEpisodicScan(): Promise<EpisodicRunReport> {
     liquidity: 'droppedLiquidity',
     'no-gap': 'droppedNoGap',
     'not-fresh': 'droppedNotFresh',
-    'base-not-quiet': 'droppedBaseNotQuiet',
+    'base-too-wide': 'droppedBaseTooWide',
+    'base-trending': 'droppedBaseTrending',
+    'base-vol-rising': 'droppedBaseVolRising',
   };
 
   const now = new Date().toISOString();
@@ -270,6 +334,37 @@ export async function runEpisodicScan(): Promise<EpisodicRunReport> {
     );
   }
 
+  const elapsedS = (Date.now() - runStart) / 1000;
+  console.warn(
+    `[episodic] finished ${covered.length} names in ${elapsedS.toFixed(0)}s — ` +
+      `429:${diag.http429} httpOther:${diag.httpOther} aborted:${diag.aborted} noData:${diag.noData} err:${diag.otherErr} survived:${funnel.survived}`,
+  );
+
+  // Reverse-split audit. Any reverse split that leaked through as a finding is a
+  // real bug and must shout; a clean run confirms the adjustment is working on
+  // live data, not just synthetic tests.
+  const revLeaked = reverseSplits.filter((r) => r.becameFinding);
+  console.warn(
+    `[episodic] reverse-split audit: ${reverseSplits.length} recent reverse split(s) corrected across the run; ` +
+      `${revLeaked.length} leaked into findings${revLeaked.length ? ' -> ' + revLeaked.map((r) => `${r.symbol}@${r.date}`).join(', ') : ''}`,
+  );
+  console.warn(
+    `[episodic] reverse-split sample: ${reverseSplits.slice(0, 12).map((r) => `${r.symbol}(${r.ratio.toFixed(3)}@${r.date})`).join(', ')}`,
+  );
+  if (reverseSplits.length > 0) {
+    notes.push(
+      `Reverse-split audit: corrected ${reverseSplits.length} recent reverse split(s); ${revLeaked.length} slipped through as a finding${revLeaked.length ? ` (${revLeaked.map((r) => r.symbol).join(', ')}) — this is a bug` : ' — split handling held'}.`,
+    );
+  }
+  if (diag.http429 > 0) {
+    notes.push(
+      `Yahoo rate-limited this run ${diag.http429} time(s) (HTTP 429). Those names were not evaluated and will be retried on the next pass.`,
+    );
+  }
+  notes.push(
+    `Run took ${elapsedS.toFixed(0)}s for ${covered.length} names (${(covered.length / Math.max(elapsedS, 1)).toFixed(1)}/s). Fetch outcomes — 429: ${diag.http429}, other HTTP: ${diag.httpOther}, timed out: ${diag.aborted + timedOut.length}, no data: ${diag.noData}, other error: ${diag.otherErr}.`,
+  );
+
   const covedEnd = start + covered.length;
   const wrapped = covedEnd >= universeSize;
   const nextCursor = universeSize > 0 ? covedEnd % universeSize : 0;
@@ -296,11 +391,13 @@ export async function runEpisodicScan(): Promise<EpisodicRunReport> {
     notes,
   };
 
+  let stored = true;
   try {
     await episodicStore.write(next);
   } catch (error) {
+    stored = false;
     notes.push(
-      `The scan ran but could not be stored: ${error instanceof Error ? error.message : String(error)}`,
+      `The scan ran but could not be stored (${status.kind} store): ${error instanceof Error ? error.message : String(error)}. Nothing was persisted, so the page will not see this run.`,
     );
   }
 
@@ -312,6 +409,7 @@ export async function runEpisodicScan(): Promise<EpisodicRunReport> {
     cursor: nextCursor,
     wrapped,
     durable: status.durable,
+    stored,
     notes,
   };
 }

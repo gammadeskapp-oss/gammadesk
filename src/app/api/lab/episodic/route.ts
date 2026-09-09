@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
 import { runEpisodicScan } from '@/lib/episodic';
+import { fetchDailyBarsDetailed } from '@/lib/episodic/bars';
 import { episodicEnabled } from '@/lib/episodic/flag';
+import { scanSeries } from '@/lib/episodic/scan';
+import { EPISODIC_CAPTURE } from '@/lib/episodic/types';
 
 /**
  * Run the episodic-pivot scan, by hand.
@@ -50,7 +53,76 @@ export async function GET(request: Request) {
   const denied = denyUnauthorisedCron(request);
   if (denied) return denied;
 
-  const wantsText = new URL(request.url).searchParams.get('format') === 'text';
+  const params = new URL(request.url).searchParams;
+  const wantsText = params.get('format') === 'text';
+
+  /*
+   * `?probe=SYM1,SYM2` — a diagnostic that runs the real fetch → scan path for
+   * named symbols and returns what it found, without touching the store. It is
+   * how the split handling and individual findings get audited by hand against
+   * live data: for each name it reports the verdict, the declared and applied
+   * splits, and — for any recent reverse split — the adjusted open-vs-prior-close
+   * on the split date, which must be near zero rather than a fake gap. Gated by
+   * the same flag and auth as the scan, since it spends the same upstream calls.
+   */
+  const probe = params.get('probe');
+  if (probe) {
+    const symbols = probe
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean)
+      .slice(0, 25);
+
+    const results = await Promise.all(
+      symbols.map(async (symbol) => {
+        try {
+          const detailed = await fetchDailyBarsDetailed(symbol);
+          if (!detailed) return { symbol, error: 'no data (unknown or delisted)' };
+          const scan = scanSeries(symbol, null, detailed.bars, EPISODIC_CAPTURE);
+
+          // For each applied split, show the adjusted gap across the split date —
+          // this is the number that proves a reverse split was neutralised.
+          const bars = detailed.bars;
+          const splitChecks = detailed.applied.map((s) => {
+            const i = bars.findIndex((b) => b.date >= s.date);
+            const acrossGapPct =
+              i > 0 ? (bars[i].open - bars[i - 1].close) / bars[i - 1].close : null;
+            return {
+              date: s.date,
+              ratio: Number(s.ratio.toFixed(4)),
+              reverse: s.ratio < 1,
+              adjustedOpenVsPrevClosePct:
+                acrossGapPct === null ? null : Number((acrossGapPct * 100).toFixed(1)),
+            };
+          });
+
+          return {
+            symbol,
+            bars: bars.length,
+            firstDate: bars[0]?.date,
+            lastDate: bars[bars.length - 1]?.date,
+            verdict: scan.kind === 'finding' ? 'FINDING' : `drop: ${scan.reason}`,
+            finding:
+              scan.kind === 'finding'
+                ? {
+                    gapDate: scan.finding.gapDate,
+                    gapPct: Number((scan.finding.gapPct * 100).toFixed(1)),
+                    volumeRatio: Number(scan.finding.volumeRatio.toFixed(1)),
+                    dollarVolumeM: Number((scan.finding.dollarVolume / 1e6).toFixed(1)),
+                    baseRangePct: Number((scan.finding.baseRangePct * 100).toFixed(1)),
+                  }
+                : null,
+            declaredSplits: detailed.declared.length,
+            appliedSplits: splitChecks,
+          };
+        } catch (error) {
+          return { symbol, error: error instanceof Error ? error.message : String(error) };
+        }
+      }),
+    );
+
+    return NextResponse.json({ probe: results });
+  }
 
   const report = await runEpisodicScan();
 
@@ -59,10 +131,26 @@ export async function GET(request: Request) {
     `Scanned ${f.scanned} of ${report.universeSize} names — ${f.survived} new finding(s), ` +
     `${report.totalFindings} tracked in total. ` +
     `Dropped: ${f.droppedShortHistory} short history, ${f.droppedLiquidity} illiquid, ` +
-    `${f.droppedNoGap} no gap, ${f.droppedNotFresh} not fresh, ${f.droppedBaseNotQuiet} base not quiet. ` +
+    `${f.droppedNoGap} no gap, ${f.droppedNotFresh} not fresh, ${f.droppedBaseTooWide} base too wide, ` +
+    `${f.droppedBaseTrending} base trending, ${f.droppedBaseVolRising} base volume rising. ` +
     `${f.fetchFailed} fetch failure(s), ${f.notReached} not reached. ` +
     `${report.wrapped ? 'Full pass complete.' : `Next run resumes at ${report.cursor}.`}` +
-    `${report.durable ? '' : ' Storage is not durable in this environment.'}`;
+    // The write result is the headline, not a footnote: a run that computed
+    // findings but failed to store them looks identical to a good run in every
+    // count above, and only this line tells them apart.
+    `${report.stored ? '' : ' WARNING: the results could not be stored — nothing was persisted.'}` +
+    `${report.durable ? '' : ' (Storage is not durable in this environment.)'}`;
+
+  // Reflect a failed write in the status code too, so a scripted caller does
+  // not read a 200 as "stored".
+  if (!report.stored) {
+    return wantsText
+      ? new NextResponse(`${summary}\n`, {
+          status: 500,
+          headers: { 'content-type': 'text/plain; charset=utf-8' },
+        })
+      : NextResponse.json({ summary, report }, { status: 500 });
+  }
 
   if (wantsText) {
     return new NextResponse(`${summary}\n`, {

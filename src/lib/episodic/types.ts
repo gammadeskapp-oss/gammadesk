@@ -128,6 +128,24 @@ export const BASE_LOOKBACK = 60;
 export const BASE_VOLUME_RISE_MAX = 2;
 
 /**
+ * How clean an upward trend the base may have before it stops being "flat and
+ * ignored" and becomes a stock that was already moving.
+ *
+ * The price-range test alone cannot tell a flat band from a rising channel of
+ * the same amplitude — a stock that climbed smoothly 15% over the base has the
+ * same high-minus-low as one that chopped sideways in a 15% range. So the base
+ * closes are fit to a line, and a base that both rises materially
+ * (`BASE_MIN_TREND_RISE`) *and* does so cleanly (R² at or above
+ * `BASE_MAX_TREND_R2`) is rejected as already trending. A *falling* clean base
+ * is kept — a gap up out of a downtrend is a reversal, which is exactly the
+ * kind of ignored name this is meant to catch. Both are judgment calls, found
+ * by hand-checking real findings (RSKD, a clean rising channel, was slipping
+ * through the range filter); see the sanity-check notes.
+ */
+export const BASE_MAX_TREND_R2 = 0.5;
+export const BASE_MIN_TREND_RISE = 0.1;
+
+/**
  * Where in the gap day's range the close has to sit. The spec says "top half",
  * so the close must be at or above the midpoint of that day's high–low range.
  */
@@ -247,8 +265,16 @@ export interface EpisodicFunnel {
   droppedNoGap: number;
   /** Had a gap but it was not fresh — another gap sat inside the prior base. */
   droppedNotFresh: number;
-  /** Had a fresh gap but the base before it was not quiet enough. */
-  droppedBaseNotQuiet: number;
+  /** Had a fresh gap but the base's price range was too wide to be "quiet". */
+  droppedBaseTooWide: number;
+  /** Had a tight base by range, but it was a clean rising trend — already moving. */
+  droppedBaseTrending: number;
+  /**
+   * Had a fresh gap and a tight base, but the 50-day average volume was already
+   * rising sharply into it. This is the count the `BASE_VOLUME_RISE_MAX`
+   * judgment call removes — kept separate so its cost is always visible.
+   */
+  droppedBaseVolRising: number;
   /** Survivors — the findings this run produced. */
   survived: number;
   /** Symbols whose bar fetch failed outright (upstream error, not a verdict). */

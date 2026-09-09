@@ -39,6 +39,8 @@
 import {
   ADV_WINDOW,
   BASE_LOOKBACK,
+  BASE_MAX_TREND_R2,
+  BASE_MIN_TREND_RISE,
   BASE_VOLUME_RISE_MAX,
   GAP_CLOSE_TOP_FRACTION,
   GAP_LOOKBACK,
@@ -53,13 +55,24 @@ import {
   type EpisodicParams,
 } from './types';
 
-/** Why a name left the scan, in the order the funnel applies the stages. */
+/**
+ * Why a name left the scan, in the order the funnel applies the stages.
+ *
+ * The quiet-base test has two distinct failure modes kept apart on purpose:
+ * `base-too-wide` (the price range over the base blew past the limit) and
+ * `base-vol-rising` (volume was already climbing sharply into the gap). They
+ * are different stories, and separating them is what lets the page — and a
+ * skeptical operator — see exactly how many names the volume-rise rule removed,
+ * which was a judgment call worth being able to audit.
+ */
 export type ScanDrop =
   | 'short-history'
   | 'liquidity'
   | 'no-gap'
   | 'not-fresh'
-  | 'base-not-quiet';
+  | 'base-too-wide'
+  | 'base-trending'
+  | 'base-vol-rising';
 
 export type ScanResult =
   | { kind: 'finding'; finding: EpisodicFinding }
@@ -87,6 +100,35 @@ function extent(bars: EpisodicBar[], from: number, to: number): { high: number; 
 /** True when `open` gaps up from `prevClose` by at least `pct` (a fraction). */
 function gapsUp(open: number, prevClose: number, pct: number): boolean {
   return prevClose > 0 && (open - prevClose) / prevClose >= pct;
+}
+
+/**
+ * Fit the values to a line and report how clean the trend is (R², 0..1) and the
+ * net rise the fit implies across the window, as a fraction of the first fitted
+ * value. Used to separate a flat, ignored base from a base that was already
+ * climbing in a clean channel.
+ */
+function trendFit(values: number[]): { r2: number; rise: number } {
+  const n = values.length;
+  if (n < 2) return { r2: 0, rise: 0 };
+  const mx = (n - 1) / 2;
+  const my = values.reduce((a, b) => a + b, 0) / n;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (let i = 0; i < n; i += 1) {
+    sxy += (i - mx) * (values[i] - my);
+    sxx += (i - mx) ** 2;
+    syy += (values[i] - my) ** 2;
+  }
+  if (sxx <= 0 || syy <= 0) return { r2: 0, rise: 0 };
+  const slope = sxy / sxx;
+  const r2 = (sxy * sxy) / (sxx * syy);
+  // Rise implied by the fitted line from the first to the last point, relative
+  // to the fitted start — steadier than raw first/last endpoints.
+  const fittedStart = my - slope * mx;
+  const rise = fittedStart > 0 ? (slope * (n - 1)) / fittedStart : 0;
+  return { r2, rise };
 }
 
 /**
@@ -229,10 +271,22 @@ export function scanSeries(
 
   // --- quiet base ------------------------------------------------------------
   const { high: baseHigh, low: baseLow } = extent(bars, baseFrom, gapIndex);
-  if (baseLow <= 0) return { kind: 'drop', reason: 'base-not-quiet' };
+  if (baseLow <= 0) return { kind: 'drop', reason: 'base-too-wide' };
   const baseRangePct = (baseHigh - baseLow) / baseLow;
   if (baseRangePct > params.baseRangeMax) {
-    return { kind: 'drop', reason: 'base-not-quiet' };
+    return { kind: 'drop', reason: 'base-too-wide' };
+  }
+
+  // A base that fits a rising line cleanly was already trending, not flat and
+  // ignored — the range test cannot see this, because a rising channel and a
+  // sideways band of the same amplitude have the same high-minus-low. Only an
+  // *upward* clean trend is rejected; a gap up out of a clean downtrend is a
+  // reversal and kept.
+  const baseCloses: number[] = [];
+  for (let i = baseFrom; i < gapIndex; i += 1) baseCloses.push(bars[i].close);
+  const { r2, rise } = trendFit(baseCloses);
+  if (r2 >= BASE_MAX_TREND_R2 && rise >= BASE_MIN_TREND_RISE) {
+    return { kind: 'drop', reason: 'base-trending' };
   }
 
   // The 50-day average volume must not already have been climbing sharply into
@@ -242,7 +296,7 @@ export function scanSeries(
   const lateVol = mean(volumes, gapIndex - half, gapIndex);
   if (earlyVol !== null && lateVol !== null && earlyVol > 0) {
     if (lateVol / earlyVol > BASE_VOLUME_RISE_MAX) {
-      return { kind: 'drop', reason: 'base-not-quiet' };
+      return { kind: 'drop', reason: 'base-vol-rising' };
     }
   }
 
