@@ -146,17 +146,33 @@ export interface DetailedBars {
   applied: SplitEvent[];
 }
 
-/** Bars only — the hot path the scan uses. */
+/** Yahoo accepts only fixed range tokens; snap up to the nearest that covers. */
+function rangeToken(years: number): '1y' | '2y' | '5y' {
+  if (years <= 1) return '1y';
+  if (years <= 2) return '2y';
+  return '5y';
+}
+
+/** Bars only — the hot path the daily scan uses (one year). */
 export async function fetchDailyBars(symbol: string): Promise<EpisodicBar[] | null> {
   const detailed = await fetchDailyBarsDetailed(symbol);
   return detailed ? detailed.bars : null;
 }
 
-/** Bars plus split provenance, for the reverse-split audit and the probe route. */
-export async function fetchDailyBarsDetailed(symbol: string): Promise<DetailedBars | null> {
+/**
+ * Bars plus split provenance, for the reverse-split audit and the probe route.
+ *
+ * `years` sets the fetch depth: one year for the daily scan, two for the
+ * historical backfill (which needs a 60-session base *before* the earliest gap
+ * date in a 12-month window, so ~15 months of bars minimum).
+ */
+export async function fetchDailyBarsDetailed(
+  symbol: string,
+  years = 1,
+): Promise<DetailedBars | null> {
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol(symbol)}` +
-    `?range=1y&interval=1d&events=split`;
+    `?range=${rangeToken(years)}&interval=1d&events=split`;
 
   const res = await fetchWithRetry(url);
 

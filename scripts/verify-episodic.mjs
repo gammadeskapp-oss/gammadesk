@@ -28,7 +28,7 @@ import { registerTsImports } from './ts-imports.mjs';
 
 registerTsImports();
 
-const { scanSeries, passesDisplay } = await import('../src/lib/episodic/scan.ts');
+const { scanSeries, scanHistory, passesDisplay } = await import('../src/lib/episodic/scan.ts');
 const {
   EPISODIC_CAPTURE,
   EPISODIC_DEFAULTS,
@@ -282,6 +282,41 @@ function textbook({
     // The 6% gap should fail a 10% gap threshold.
     ok('a tighter gap threshold excludes it', !passesDisplay(f, { ...EPISODIC_DEFAULTS, gapMinPct: 0.1 }));
   }
+}
+
+// --- 7. scanHistory finds every distinct episode across a series -------------
+{
+  // Two fresh episodes > 60 sessions apart: a flat base, gap #1, a long flat
+  // stretch, then gap #2. Both should surface as separate findings.
+  const seg = (count, price, vol) => {
+    const out = [];
+    for (let i = 0; i < count; i += 1) {
+      const p = price * (1 + (i % 2 === 0 ? 0.008 : -0.008));
+      out.push({ open: p, high: p * 1.004, low: p * 0.996, close: p, volume: vol });
+    }
+    return out;
+  };
+  const gapBar = (prev) => ({
+    open: prev * 1.06, high: prev * 1.1, low: prev * 1.05, close: prev * 1.09, volume: 3_600_000,
+  });
+  const b1 = seg(64, 20, 600_000);
+  const g1 = gapBar(b1[b1.length - 1].close);
+  const mid = seg(70, g1.close, 600_000);
+  const g2 = gapBar(mid[mid.length - 1].close);
+  const tail = seg(12, g2.close, 300_000);
+  const bars = dated([...b1, g1, ...mid, g2, ...tail]);
+
+  const h = scanHistory('MULTI', null, bars, '2000-01-01', EPISODIC_CAPTURE, EPISODIC_CAPTURE);
+  ok('scanHistory finds both episodes', h.findings.length === 2, `got ${h.findings.length}`);
+  const dates = h.findings.map((f) => f.gapDate).sort();
+  ok('episode #1 dated at the first gap', dates[0] === dateAt(64), dates[0]);
+  ok('episode #2 dated at the second gap', dates[1] === dateAt(64 + 1 + 70), dates[1]);
+  ok('funnel counted the findings', h.funnel.findings === 2, String(h.funnel.findings));
+  ok('grid top-left (4%/3x) counts at least both', h.grid[0][0] >= 2, String(h.grid[0][0]));
+
+  // A window that starts after the first gap should drop it to one finding.
+  const h2 = scanHistory('MULTI', null, bars, dateAt(100), EPISODIC_CAPTURE, EPISODIC_CAPTURE);
+  ok('a later fromDate excludes the earlier episode', h2.findings.length === 1, String(h2.findings.length));
 }
 
 // --- sanity: the constants line up -------------------------------------------

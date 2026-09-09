@@ -4,12 +4,16 @@ import { createJsonStore, storeStatus } from '../jsonStore';
 import { runPool } from '../scanUniverse';
 import { marketToday } from '../time';
 import { fetchDailyBarsDetailed } from './bars';
-import { scanSeries, type ScanDrop } from './scan';
+import { scanHistory, scanSeries, type ScanDrop } from './scan';
 import {
   EPISODIC_CAPTURE,
   EPISODIC_SCHEMA,
+  GRID_GAP_PCTS,
+  GRID_VOLUME_MULTS,
+  type EpisodicCalibration,
   type EpisodicFinding,
   type EpisodicFunnel,
+  type EpisodicYearFunnel,
 } from './types';
 import { getEpisodicUniverse } from './universe';
 
@@ -78,24 +82,35 @@ interface StoredFinding extends EpisodicFinding {
 
 interface EpisodicStore {
   schema: number;
+  /** How the document was produced: the rolling daily scan or a historical backfill. */
+  mode: 'daily' | 'backfill';
   /** ISO timestamp of the most recent run. */
   updatedAt: string;
   /** New York date of the most recent run. */
   scanDate: string;
-  /** Where the next run starts in the universe list. */
+  /** Where the next run starts in the universe list (daily mode only). */
   cursor: number;
   /** Universe size at the most recent run, for the page's coverage line. */
   universeSize: number;
   /** The most recent run's funnel over its slice. */
   lastFunnel: EpisodicFunnel;
-  /** Every accumulated finding, keyed by symbol. */
+  /**
+   * Every finding. In daily mode the key is the symbol (one current episode per
+   * name); in backfill mode it is `symbol:gapDate`, because a year of history
+   * turns up many episodes per name at different dates.
+   */
   findings: Record<string, StoredFinding>;
+  /** Backfill only: the calibration report — counts over the whole window. */
+  calibration?: EpisodicCalibration;
+  /** Backfill only: a capped sample of findings the base-trend filter removed. */
+  trendRemoved?: StoredFinding[];
   notes: string[];
 }
 
 function emptyStore(): EpisodicStore {
   return {
     schema: EPISODIC_SCHEMA,
+    mode: 'daily',
     updatedAt: new Date(0).toISOString(),
     scanDate: '',
     cursor: 0,
@@ -295,7 +310,10 @@ export async function runEpisodicScan(): Promise<EpisodicRunReport> {
 
   // Start from the previous findings and apply this run's verdicts. A symbol we
   // actually evaluated is upserted or removed; one we never reached is left be.
-  const findings: Record<string, StoredFinding> = { ...previous.findings };
+  // But never merge onto a backfill document — its `symbol:gapDate` keys and
+  // year-deep set are a different thing from the rolling daily set.
+  const findings: Record<string, StoredFinding> =
+    previous.mode === 'backfill' ? {} : { ...previous.findings };
 
   for (const r of results) {
     if (r.kind === 'fetch-failed') {
@@ -382,6 +400,7 @@ export async function runEpisodicScan(): Promise<EpisodicRunReport> {
   const status = storeStatus();
   const next: EpisodicStore = {
     schema: EPISODIC_SCHEMA,
+    mode: 'daily',
     updatedAt: now,
     scanDate,
     cursor: nextCursor,
@@ -408,6 +427,219 @@ export async function runEpisodicScan(): Promise<EpisodicRunReport> {
     totalFindings: Object.keys(findings).length,
     cursor: nextCursor,
     wrapped,
+    durable: status.durable,
+    stored,
+    notes,
+  };
+}
+
+// --- the historical backfill -------------------------------------------------
+
+/** Years of history to fetch for the backfill — two, to cover a base before a 12-month window. */
+const BACKFILL_YEARS = 2;
+
+/** The loosest thresholds the backfill detects candidates at (so the grid's 4%/3× cells fill). */
+const BACKFILL_DETECT = {
+  gapMinPct: GRID_GAP_PCTS[0],
+  volumeMult: GRID_VOLUME_MULTS[0],
+  dollarMin: EPISODIC_CAPTURE.dollarMin,
+  baseRangeMax: EPISODIC_CAPTURE.baseRangeMax,
+};
+
+/** How many trend-removed examples to keep for eyeballing (each carries a chart). */
+const TREND_REMOVED_CAP = 80;
+
+export interface EpisodicBackfillReport {
+  months: number;
+  fromDate: string;
+  universeSize: number;
+  scanned: number;
+  complete: boolean;
+  findingsTotal: number;
+  calibration: EpisodicCalibration;
+  durable: boolean;
+  stored: boolean;
+  notes: string[];
+}
+
+/** Subtract whole months from a `YYYY-MM-DD` date, clamping the day. */
+function subMonths(isoDate: string, months: number): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1 - months, d));
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Run the scanner over the last `months` of history across the whole universe.
+ *
+ * Fetches two years of bars per symbol once, then slides the identical rules
+ * (`scanHistory`) across the window and aggregates: findings, a stage-by-stage
+ * funnel over the whole window, the base-trend filter's cost, and the gap×volume
+ * sensitivity grid. It is a single complete pass on purpose — the calibration
+ * counts are only meaningful over the whole universe — and it is local-only, so
+ * there is no function timeout to fit inside the way the daily scan has.
+ */
+export async function runEpisodicBackfill(months: number): Promise<EpisodicBackfillReport> {
+  const universe = await getEpisodicUniverse();
+  const symbols = universe.symbols;
+  const universeSize = symbols.length;
+  const notes: string[] = [];
+
+  const fromDate = subMonths(marketToday(), months);
+  const nameOf = new Map(symbols.map((s) => [s.symbol, s.name]));
+
+  const funnel: EpisodicYearFunnel = {
+    candidateGapDays: 0,
+    droppedLiquidity: 0,
+    droppedNotFresh: 0,
+    droppedBaseTooWide: 0,
+    droppedBaseTrending: 0,
+    droppedBaseVolRising: 0,
+    findings: 0,
+  };
+  const grid = GRID_GAP_PCTS.map(() => GRID_VOLUME_MULTS.map(() => 0));
+  const findings: Record<string, StoredFinding> = {};
+  const trendRemoved: StoredFinding[] = [];
+  const perMonth: Record<string, number> = {};
+
+  const runStart = Date.now();
+  let done = 0;
+
+  const worker = async (symbol: string) => {
+    let detailed;
+    try {
+      detailed = await fetchDailyBarsDetailed(symbol, BACKFILL_YEARS);
+    } catch {
+      return; // a fetch failure costs one name; the aggregate is over thousands
+    } finally {
+      done += 1;
+      if (done % 500 === 0) {
+        const secs = (Date.now() - runStart) / 1000;
+        console.warn(
+          `[episodic backfill] ${done} done in ${secs.toFixed(0)}s (${(done / secs).toFixed(1)}/s) — findings so far ${funnel.findings}`,
+        );
+      }
+    }
+    if (!detailed) return;
+
+    const h = scanHistory(symbol, nameOf.get(symbol) ?? null, detailed.bars, fromDate, BACKFILL_DETECT, EPISODIC_CAPTURE);
+
+    funnel.candidateGapDays += h.funnel.candidateGapDays;
+    funnel.droppedLiquidity += h.funnel.droppedLiquidity;
+    funnel.droppedNotFresh += h.funnel.droppedNotFresh;
+    funnel.droppedBaseTooWide += h.funnel.droppedBaseTooWide;
+    funnel.droppedBaseTrending += h.funnel.droppedBaseTrending;
+    funnel.droppedBaseVolRising += h.funnel.droppedBaseVolRising;
+    funnel.findings += h.funnel.findings;
+
+    for (let g = 0; g < grid.length; g += 1) {
+      for (let v = 0; v < grid[g].length; v += 1) grid[g][v] += h.grid[g][v];
+    }
+
+    const now = new Date().toISOString();
+    for (const f of h.findings) {
+      findings[`${f.symbol}:${f.gapDate}`] = { ...f, scannedAt: now };
+      const month = f.gapDate.slice(0, 7);
+      perMonth[month] = (perMonth[month] ?? 0) + 1;
+    }
+    for (const f of h.trendRemoved) {
+      if (trendRemoved.length < TREND_REMOVED_CAP) trendRemoved.push({ ...f, scannedAt: now });
+    }
+  };
+
+  console.warn(`[episodic backfill] starting: universe ${universeSize}, from ${fromDate}, ${BACKFILL_YEARS}y bars`);
+
+  const { covered, skipped, timedOut } = await runPool(
+    symbols.map((s) => s.symbol),
+    worker,
+    { concurrency: CONCURRENCY, budgetMs: 600_000, perSymbolMs: PER_SYMBOL_MS, maxRequests: symbols.length },
+  );
+
+  const complete = skipped.length === 0;
+  const elapsedS = (Date.now() - runStart) / 1000;
+  console.warn(
+    `[episodic backfill] finished ${covered.length} names in ${elapsedS.toFixed(0)}s — findings ${funnel.findings}, trendRemoved(all) ${funnel.droppedBaseTrending}`,
+  );
+
+  // Label the grid for the report/page: gap% → vol× → count.
+  const labeledGrid: Record<string, Record<string, number>> = {};
+  for (let g = 0; g < GRID_GAP_PCTS.length; g += 1) {
+    const gk = String(GRID_GAP_PCTS[g] * 100);
+    labeledGrid[gk] = {};
+    for (let v = 0; v < GRID_VOLUME_MULTS.length; v += 1) {
+      labeledGrid[gk][String(GRID_VOLUME_MULTS[v])] = grid[g][v];
+    }
+  }
+
+  const calibration: EpisodicCalibration = {
+    months,
+    fromDate,
+    complete,
+    findingsTotal: funnel.findings,
+    perMonth,
+    yearFunnel: funnel,
+    trendRemoved: trendRemoved.length,
+    trendKept: funnel.findings,
+    grid: labeledGrid,
+  };
+
+  if (!complete) {
+    notes.push(
+      `The budget ran out after ${covered.length} of ${universeSize} names, so these counts cover only part of the universe. Re-run locally (no function timeout) for a complete pass.`,
+    );
+  }
+  if (timedOut.length > 0) notes.push(`${timedOut.length} symbol(s) timed out and were skipped.`);
+  notes.push(
+    `Backfilled ${months} months (gaps on or after ${fromDate}) over ${covered.length} names in ${elapsedS.toFixed(0)}s. ${funnel.findings} findings at the defaults, ${funnel.candidateGapDays} candidate gap-days examined.`,
+  );
+
+  const status = storeStatus();
+  const scanDate = marketToday();
+  const next: EpisodicStore = {
+    schema: EPISODIC_SCHEMA,
+    mode: 'backfill',
+    updatedAt: new Date().toISOString(),
+    scanDate,
+    cursor: 0,
+    universeSize,
+    lastFunnel: {
+      universe: universeSize,
+      scanned: covered.length,
+      droppedShortHistory: 0,
+      droppedLiquidity: funnel.droppedLiquidity,
+      droppedNoGap: 0,
+      droppedNotFresh: funnel.droppedNotFresh,
+      droppedBaseTooWide: funnel.droppedBaseTooWide,
+      droppedBaseTrending: funnel.droppedBaseTrending,
+      droppedBaseVolRising: funnel.droppedBaseVolRising,
+      survived: funnel.findings,
+      fetchFailed: 0,
+      notReached: skipped.length,
+    },
+    findings,
+    calibration,
+    trendRemoved,
+    notes,
+  };
+
+  let stored = true;
+  try {
+    await episodicStore.write(next);
+  } catch (error) {
+    stored = false;
+    notes.push(
+      `The backfill ran but could not be stored (${status.kind} store): ${error instanceof Error ? error.message : String(error)}. Nothing was persisted.`,
+    );
+  }
+
+  return {
+    months,
+    fromDate,
+    universeSize,
+    scanned: covered.length,
+    complete,
+    findingsTotal: funnel.findings,
+    calibration,
     durable: status.durable,
     stored,
     notes,

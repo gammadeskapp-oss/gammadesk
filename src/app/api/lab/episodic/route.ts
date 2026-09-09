@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
-import { runEpisodicScan } from '@/lib/episodic';
+import { runEpisodicBackfill, runEpisodicScan } from '@/lib/episodic';
 import { fetchDailyBarsDetailed } from '@/lib/episodic/bars';
 import { episodicEnabled } from '@/lib/episodic/flag';
 import { scanSeries } from '@/lib/episodic/scan';
@@ -122,6 +122,28 @@ export async function GET(request: Request) {
     );
 
     return NextResponse.json({ probe: results });
+  }
+
+  /*
+   * `?mode=backfill&months=N` runs the scanner over the last N months of
+   * history instead of the last 20 sessions, writing a browsable year of
+   * findings plus the calibration report. Local-only in practice (the flag
+   * gates it), and it runs longer than the daily scan — there is no function
+   * timeout locally to fit inside.
+   */
+  if (params.get('mode') === 'backfill') {
+    const monthsRaw = Number(params.get('months'));
+    const months = Number.isFinite(monthsRaw) && monthsRaw >= 1 && monthsRaw <= 24
+      ? Math.floor(monthsRaw)
+      : 12;
+    const report = await runEpisodicBackfill(months);
+    const c = report.calibration;
+    const summary =
+      `Backfilled ${report.months} months (from ${report.fromDate}) over ${report.scanned} of ${report.universeSize} names. ` +
+      `${report.findingsTotal} findings at the defaults; ${c.trendRemoved} removed by the base-trend filter. ` +
+      `${report.complete ? 'Complete pass.' : 'INCOMPLETE pass — counts are partial.'}` +
+      `${report.stored ? '' : ' WARNING: results could not be stored.'}`;
+    return NextResponse.json({ summary, report }, { status: report.stored ? 200 : 500 });
   }
 
   const report = await runEpisodicScan();

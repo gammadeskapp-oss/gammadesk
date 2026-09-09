@@ -44,15 +44,19 @@ import {
   BASE_VOLUME_RISE_MAX,
   GAP_CLOSE_TOP_FRACTION,
   GAP_LOOKBACK,
+  GRID_GAP_PCTS,
+  GRID_VOLUME_MULTS,
   MIN_BARS,
   PAUSE_TIGHT_WINDOW,
   PAUSE_VOLUME_WINDOW,
+  POST_GAP_MAX_SESSIONS,
   UNIVERSE_MIN_AVG_VOLUME,
   UNIVERSE_MIN_PRICE,
   type EpisodicBar,
   type EpisodicFinding,
   type EpisodicPause,
   type EpisodicParams,
+  type EpisodicYearFunnel,
 } from './types';
 
 /**
@@ -129,6 +133,171 @@ function trendFit(values: number[]): { r2: number; rise: number } {
   const fittedStart = my - slope * mx;
   const rise = fittedStart > 0 ? (slope * (n - 1)) / fittedStart : 0;
   return { r2, rise };
+}
+
+/**
+ * Every rule's verdict for one candidate gap day at index `i`, computed in one
+ * place so the live scan and the historical backfill apply *identical* rules —
+ * the whole point of the backfill is to calibrate the real scanner, not a copy.
+ *
+ * Gap-day criteria (gap %, top-half close, volume, dollar) are evaluated first;
+ * the base checks (freshness, range, trend, volume-rise) are only computed when
+ * the day is actually a gap day, since on a year of history the overwhelming
+ * majority of days are not and the base maths would be wasted. `i` must be at
+ * least `BASE_LOOKBACK` with `i-1 >= 0`.
+ */
+export interface GapEval {
+  isGapDay: boolean;
+  gapPct: number;
+  volumeRatio: number;
+  dollarVolume: number;
+  avg50Volume: number;
+  fresh: boolean;
+  baseRangePct: number;
+  baseWideOk: boolean;
+  trendOk: boolean;
+  volRiseOk: boolean;
+}
+
+function evalGapAt(
+  bars: EpisodicBar[],
+  i: number,
+  params: EpisodicParams,
+  volumes: number[],
+): GapEval {
+  const empty: GapEval = {
+    isGapDay: false,
+    gapPct: 0,
+    volumeRatio: 0,
+    dollarVolume: 0,
+    avg50Volume: 0,
+    fresh: false,
+    baseRangePct: 0,
+    baseWideOk: false,
+    trendOk: false,
+    volRiseOk: false,
+  };
+
+  const bar = bars[i];
+  const prevClose = bars[i - 1].close;
+
+  // --- gap-day criteria ---
+  if (!gapsUp(bar.open, prevClose, params.gapMinPct)) return empty;
+  const span = bar.high - bar.low;
+  if (span <= 0) return empty;
+  if ((bar.close - bar.low) / span < GAP_CLOSE_TOP_FRACTION) return empty;
+  const avg50 = mean(volumes, i - ADV_WINDOW, i);
+  if (avg50 === null || avg50 <= 0) return empty;
+  const volumeRatio = bar.volume / avg50;
+  if (volumeRatio < params.volumeMult) return empty;
+  const dollarVolume = bar.close * bar.volume;
+  if (dollarVolume < params.dollarMin) return empty;
+
+  const gapPct = (bar.open - prevClose) / prevClose;
+
+  // --- base checks (only now that it is a gap day) ---
+  const baseFrom = i - BASE_LOOKBACK;
+
+  let fresh = true;
+  for (let j = baseFrom; j < i; j += 1) {
+    if (j - 1 < 0) continue;
+    if (gapsUp(bars[j].open, bars[j - 1].close, params.gapMinPct)) {
+      fresh = false;
+      break;
+    }
+  }
+
+  const { high: baseHigh, low: baseLow } = extent(bars, baseFrom, i);
+  const baseRangePct = baseLow > 0 ? (baseHigh - baseLow) / baseLow : Infinity;
+  const baseWideOk = baseLow > 0 && baseRangePct <= params.baseRangeMax;
+
+  const baseCloses: number[] = [];
+  for (let k = baseFrom; k < i; k += 1) baseCloses.push(bars[k].close);
+  const { r2, rise } = trendFit(baseCloses);
+  const trendOk = !(r2 >= BASE_MAX_TREND_R2 && rise >= BASE_MIN_TREND_RISE);
+
+  const half = Math.floor(BASE_LOOKBACK / 2);
+  const earlyVol = mean(volumes, baseFrom, baseFrom + half);
+  const lateVol = mean(volumes, i - half, i);
+  const volRiseOk = !(
+    earlyVol !== null &&
+    lateVol !== null &&
+    earlyVol > 0 &&
+    lateVol / earlyVol > BASE_VOLUME_RISE_MAX
+  );
+
+  return {
+    isGapDay: true,
+    gapPct,
+    volumeRatio,
+    dollarVolume,
+    avg50Volume: avg50,
+    fresh,
+    baseRangePct,
+    baseWideOk,
+    trendOk,
+    volRiseOk,
+  };
+}
+
+/** The ordered drop reason for a gap day, or null when it passes everything. */
+function orderedDrop(e: GapEval): ScanDrop | null {
+  if (!e.fresh) return 'not-fresh';
+  if (!e.baseWideOk) return 'base-too-wide';
+  if (!e.trendOk) return 'base-trending';
+  if (!e.volRiseOk) return 'base-vol-rising';
+  return null;
+}
+
+/** Whether a gap-day evaluation clears the shipped capture thresholds. */
+function atCapture(e: GapEval, capture: EpisodicParams): boolean {
+  return (
+    e.gapPct >= capture.gapMinPct &&
+    e.volumeRatio >= capture.volumeMult &&
+    e.dollarVolume >= capture.dollarMin &&
+    e.baseRangePct <= capture.baseRangeMax
+  );
+}
+
+/**
+ * Assemble a finding for the gap at index `i`. `end` bounds the window used for
+ * the pause and the chart: the live scan passes the series length (measure
+ * through today), the backfill passes a few weeks after the gap so a months-old
+ * episode's pause reads off its pause, not half a year of later drift.
+ */
+function buildFinding(
+  symbol: string,
+  name: string | null,
+  bars: EpisodicBar[],
+  i: number,
+  e: GapEval,
+  end: number,
+): EpisodicFinding {
+  const view = end >= bars.length ? bars : bars.slice(0, end);
+  const currentPrice = view[view.length - 1].close;
+  const gap = bars[i];
+  const pctFromGapClose = gap.close > 0 ? (currentPrice - gap.close) / gap.close : 0;
+  const chartBars = view.slice(Math.max(0, i - BASE_LOOKBACK));
+
+  return {
+    symbol,
+    name,
+    gapDate: gap.date,
+    gapPct: e.gapPct,
+    volumeRatio: e.volumeRatio,
+    dollarVolume: e.dollarVolume,
+    baseRangePct: e.baseRangePct,
+    gapOpen: gap.open,
+    gapHigh: gap.high,
+    gapLow: gap.low,
+    gapClose: gap.close,
+    gapVolume: gap.volume,
+    avg50Volume: e.avg50Volume,
+    currentPrice,
+    pctFromGapClose,
+    pause: buildPause(view, i),
+    bars: chartBars,
+  };
 }
 
 /**
@@ -220,116 +389,133 @@ export function scanSeries(
 
   // --- find the earliest qualifying gap in the lookback window ---------------
   // A gap day needs a full base and a 50-session volume average sitting before
-  // it, so the earliest index it can occupy is `BASE_LOOKBACK`.
+  // it, so the earliest index it can occupy is `BASE_LOOKBACK`. The first gap
+  // day that clears the gap-day criteria is *the* episode; a later one carries
+  // it in its own base and would fail freshness anyway.
   const firstCandidate = Math.max(BASE_LOOKBACK, n - GAP_LOOKBACK);
 
   let gapIndex = -1;
-  let gapPct = 0;
-  let volumeRatio = 0;
-  let dollarVolume = 0;
-  let avg50Volume = 0;
-
+  let ev: GapEval | null = null;
   for (let i = firstCandidate; i < n; i += 1) {
-    const bar = bars[i];
-    const prevClose = bars[i - 1].close;
-
-    if (!gapsUp(bar.open, prevClose, params.gapMinPct)) continue;
-
-    // Close in the top half of the day's range.
-    const span = bar.high - bar.low;
-    if (span <= 0) continue;
-    if ((bar.close - bar.low) / span < GAP_CLOSE_TOP_FRACTION) continue;
-
-    // Volume against the 50-session average ending the day before the gap.
-    const avg50 = mean(volumes, i - ADV_WINDOW, i);
-    if (avg50 === null || avg50 <= 0) continue;
-    const ratio = bar.volume / avg50;
-    if (ratio < params.volumeMult) continue;
-
-    // Dollar volume that day.
-    const dollars = bar.close * bar.volume;
-    if (dollars < params.dollarMin) continue;
-
+    const e = evalGapAt(bars, i, params, volumes);
+    if (!e.isGapDay) continue;
     gapIndex = i;
-    gapPct = (bar.open - prevClose) / prevClose;
-    volumeRatio = ratio;
-    dollarVolume = dollars;
-    avg50Volume = avg50;
+    ev = e;
     break;
   }
 
-  if (gapIndex < 0) return { kind: 'drop', reason: 'no-gap' };
+  if (gapIndex < 0 || !ev) return { kind: 'drop', reason: 'no-gap' };
 
-  // --- freshness: no earlier gap of the same size inside the prior base ------
-  const baseFrom = gapIndex - BASE_LOOKBACK;
-  for (let j = baseFrom; j < gapIndex; j += 1) {
-    if (j - 1 < 0) continue;
-    if (gapsUp(bars[j].open, bars[j - 1].close, params.gapMinPct)) {
-      return { kind: 'drop', reason: 'not-fresh' };
-    }
-  }
+  const drop = orderedDrop(ev);
+  if (drop) return { kind: 'drop', reason: drop };
 
-  // --- quiet base ------------------------------------------------------------
-  const { high: baseHigh, low: baseLow } = extent(bars, baseFrom, gapIndex);
-  if (baseLow <= 0) return { kind: 'drop', reason: 'base-too-wide' };
-  const baseRangePct = (baseHigh - baseLow) / baseLow;
-  if (baseRangePct > params.baseRangeMax) {
-    return { kind: 'drop', reason: 'base-too-wide' };
-  }
+  // Measured through the latest session — the live scan's "since the gap".
+  return { kind: 'finding', finding: buildFinding(symbol, name, bars, gapIndex, ev, n) };
+}
 
-  // A base that fits a rising line cleanly was already trending, not flat and
-  // ignored — the range test cannot see this, because a rising channel and a
-  // sideways band of the same amplitude have the same high-minus-low. Only an
-  // *upward* clean trend is rejected; a gap up out of a clean downtrend is a
-  // reversal and kept.
-  const baseCloses: number[] = [];
-  for (let i = baseFrom; i < gapIndex; i += 1) baseCloses.push(bars[i].close);
-  const { r2, rise } = trendFit(baseCloses);
-  if (r2 >= BASE_MAX_TREND_R2 && rise >= BASE_MIN_TREND_RISE) {
-    return { kind: 'drop', reason: 'base-trending' };
-  }
+/**
+ * Run the scan across a window of history, returning every qualifying gap.
+ *
+ * The live `scanSeries` only ever looks at the last 20 sessions; this slides
+ * the identical rules (via the shared `evalGapAt`) across a whole `fromDate`→end
+ * window so the rules can be read over time rather than on one day. Candidates
+ * are detected at the loosest grid thresholds so the sensitivity grid can be
+ * filled from a single pass, and each qualifying gap becomes a finding bounded
+ * to the weeks after it. Per-symbol tallies here are summed across the universe
+ * in `refresh.ts`.
+ */
+export interface HistoryScan {
+  /** Findings at the shipped capture thresholds, bounded post-gap. */
+  findings: EpisodicFinding[];
+  /** Would-be findings the base-trend filter removed (for step-3 eyeballing). */
+  trendRemoved: EpisodicFinding[];
+  funnel: EpisodicYearFunnel;
+  /** grid[gapIndex][volIndex] over GRID_GAP_PCTS × GRID_VOLUME_MULTS. */
+  grid: number[][];
+}
 
-  // The 50-day average volume must not already have been climbing sharply into
-  // the gap: compare the recent half of the base against its earlier half.
-  const half = Math.floor(BASE_LOOKBACK / 2);
-  const earlyVol = mean(volumes, baseFrom, baseFrom + half);
-  const lateVol = mean(volumes, gapIndex - half, gapIndex);
-  if (earlyVol !== null && lateVol !== null && earlyVol > 0) {
-    if (lateVol / earlyVol > BASE_VOLUME_RISE_MAX) {
-      return { kind: 'drop', reason: 'base-vol-rising' };
-    }
-  }
-
-  // --- a finding -------------------------------------------------------------
-  const gap = bars[gapIndex];
-  const pctFromGapClose = gap.close > 0 ? (currentPrice - gap.close) / gap.close : 0;
-
-  // The chart window: the whole base through the latest session, so the flat
-  // stretch, the jump and everything since are all visible with the gap marked.
-  const chartFrom = Math.max(0, gapIndex - BASE_LOOKBACK);
-  const chartBars = bars.slice(chartFrom);
-
-  const finding: EpisodicFinding = {
-    symbol,
-    name,
-    gapDate: gap.date,
-    gapPct,
-    volumeRatio,
-    dollarVolume,
-    baseRangePct,
-    gapOpen: gap.open,
-    gapHigh: gap.high,
-    gapLow: gap.low,
-    gapClose: gap.close,
-    gapVolume: gap.volume,
-    avg50Volume,
-    currentPrice,
-    pctFromGapClose,
-    pause: buildPause(bars, gapIndex),
-    bars: chartBars,
+export function scanHistory(
+  symbol: string,
+  name: string | null,
+  bars: EpisodicBar[],
+  fromDate: string,
+  detect: EpisodicParams,
+  capture: EpisodicParams,
+): HistoryScan {
+  const funnel: EpisodicYearFunnel = {
+    candidateGapDays: 0,
+    droppedLiquidity: 0,
+    droppedNotFresh: 0,
+    droppedBaseTooWide: 0,
+    droppedBaseTrending: 0,
+    droppedBaseVolRising: 0,
+    findings: 0,
   };
+  const grid = GRID_GAP_PCTS.map(() => GRID_VOLUME_MULTS.map(() => 0));
+  const findings: EpisodicFinding[] = [];
+  const trendRemoved: EpisodicFinding[] = [];
 
-  return { kind: 'finding', finding };
+  const n = bars.length;
+  if (n < MIN_BARS) return { findings, trendRemoved, funnel, grid };
+
+  const volumes = bars.map((b) => b.volume);
+
+  for (let i = BASE_LOOKBACK; i < n; i += 1) {
+    if (bars[i].date < fromDate) continue;
+
+    const e = evalGapAt(bars, i, detect, volumes);
+    if (!e.isGapDay) continue;
+    funnel.candidateGapDays += 1;
+
+    // Liquidity as of the gap, not as of today: was this a $5+, 500k-share name
+    // during its base? (The live scan uses today's price/volume; a backfill has
+    // to judge each episode at its own time.)
+    const price = bars[i - 1].close;
+    const adv = mean(volumes, i - ADV_WINDOW, i);
+    if (price < UNIVERSE_MIN_PRICE || adv === null || adv < UNIVERSE_MIN_AVG_VOLUME) {
+      funnel.droppedLiquidity += 1;
+      continue;
+    }
+
+    const end = Math.min(n, i + POST_GAP_MAX_SESSIONS + 1);
+
+    if (!e.fresh) {
+      funnel.droppedNotFresh += 1;
+      continue;
+    }
+    if (!e.baseWideOk) {
+      funnel.droppedBaseTooWide += 1;
+      continue;
+    }
+    if (!e.trendOk) {
+      funnel.droppedBaseTrending += 1;
+      // A would-be finding the trend filter alone removed — kept for step 3.
+      if (e.volRiseOk && atCapture(e, capture)) {
+        trendRemoved.push(buildFinding(symbol, name, bars, i, e, end));
+      }
+      continue;
+    }
+    if (!e.volRiseOk) {
+      funnel.droppedBaseVolRising += 1;
+      continue;
+    }
+
+    // Passed every rule. Fill the sensitivity grid (other rules at default).
+    for (let g = 0; g < GRID_GAP_PCTS.length; g += 1) {
+      for (let v = 0; v < GRID_VOLUME_MULTS.length; v += 1) {
+        if (e.gapPct >= GRID_GAP_PCTS[g] && e.volumeRatio >= GRID_VOLUME_MULTS[v]) {
+          grid[g][v] += 1;
+        }
+      }
+    }
+
+    if (atCapture(e, capture)) {
+      funnel.findings += 1;
+      findings.push(buildFinding(symbol, name, bars, i, e, end));
+    }
+  }
+
+  return { findings, trendRemoved, funnel, grid };
 }
 
 /**

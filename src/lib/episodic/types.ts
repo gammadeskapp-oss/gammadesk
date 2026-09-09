@@ -166,6 +166,70 @@ export const PAUSE_VOLUME_WINDOW = 20;
  */
 export const MIN_BARS = BASE_LOOKBACK + GAP_LOOKBACK + 5;
 
+// --- historical backfill -----------------------------------------------------
+
+/**
+ * How many sessions after a historical gap the backfill measures the pause and
+ * draws the chart over. The live scanner measures "since the gap through now";
+ * for a gap months ago that would fold half a year of drift into the pause and
+ * a huge chart, so a backfilled finding is bounded to roughly six weeks after
+ * the gap — enough to see whether the pause held or the move failed, no more.
+ */
+export const POST_GAP_MAX_SESSIONS = 30;
+
+/**
+ * The gap and volume thresholds the sensitivity grid reports counts at. The
+ * loosest of each (4% and 3×) is what the backfill actually detects candidates
+ * at, so every cell above it can be counted from the same single pass.
+ */
+export const GRID_GAP_PCTS = [0.04, 0.05, 0.07, 0.1] as const;
+export const GRID_VOLUME_MULTS = [3, 5, 8] as const;
+
+/**
+ * Where a backfilled finding sat in a filter stage across the whole window —
+ * the funnel, but counted over a year of candidate gap-days instead of one day.
+ * `candidateGapDays` is every day that cleared the gap-day criteria (gap %,
+ * top-half close, volume, dollar) at the loosest grid thresholds; the rest is
+ * where those candidates dropped, in pipeline order, summing to `findings`.
+ */
+export interface EpisodicYearFunnel {
+  candidateGapDays: number;
+  droppedLiquidity: number;
+  droppedNotFresh: number;
+  droppedBaseTooWide: number;
+  droppedBaseTrending: number;
+  droppedBaseVolRising: number;
+  findings: number;
+}
+
+/** The calibration report a backfill produces, for reading the rules over time. */
+export interface EpisodicCalibration {
+  /** Months of gap dates the window covered. */
+  months: number;
+  /** Earliest gap date evaluated (`YYYY-MM-DD`). */
+  fromDate: string;
+  /** Whether the universe pass that produced these stats was complete. */
+  complete: boolean;
+  /** Findings at the shipped defaults, total across the window. */
+  findingsTotal: number;
+  /** Findings per calendar month, `YYYY-MM` → count, at the defaults. */
+  perMonth: Record<string, number>;
+  /** The stage-by-stage funnel over the whole window. */
+  yearFunnel: EpisodicYearFunnel;
+  /**
+   * The base-trend filter's cost: how many otherwise-complete findings it
+   * removed across the window (would-be findings that failed only the trend
+   * test), against how many findings survived. Step 3's "count with and without".
+   */
+  trendRemoved: number;
+  trendKept: number;
+  /**
+   * Sensitivity grid: `gapPct` (as a string like "5") → `volMult` ("5") →
+   * count of findings meeting both, other rules at default. Counts only.
+   */
+  grid: Record<string, Record<string, number>>;
+}
+
 // --- the finding -------------------------------------------------------------
 
 /** What a name has done since its gap — the pause tracker, the important half. */
@@ -286,8 +350,14 @@ export interface EpisodicFunnel {
 // --- the view the page reads -------------------------------------------------
 
 export interface EpisodicView {
+  /** How the stored document was produced. */
+  mode: 'daily' | 'backfill';
   /** Every accumulated finding, unsorted — the board sorts and filters. */
   findings: EpisodicFinding[];
+  /** Backfill only: the calibration report over the window. */
+  calibration: EpisodicCalibration | null;
+  /** Backfill only: a capped sample of findings the base-trend filter removed. */
+  trendRemoved: EpisodicFinding[];
   /** The most recent run's funnel over its slice. */
   funnel: EpisodicFunnel | null;
   /** The shipped defaults, so the controls open where the spec says. */

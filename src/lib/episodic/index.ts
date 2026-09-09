@@ -10,8 +10,8 @@ import {
   type EpisodicView,
 } from './types';
 
-export { runEpisodicScan } from './refresh';
-export type { EpisodicRunReport } from './refresh';
+export { runEpisodicScan, runEpisodicBackfill } from './refresh';
+export type { EpisodicRunReport, EpisodicBackfillReport } from './refresh';
 
 /**
  * The read path for the episodic-pivot page.
@@ -60,7 +60,10 @@ export async function getEpisodicView(): Promise<EpisodicView> {
   if (!doc || !doc.scanDate) {
     return {
       ...base,
+      mode: 'daily',
       findings: [],
+      calibration: null,
+      trendRemoved: [],
       funnel: null,
       scanDate: null,
       scannedAt: null,
@@ -71,21 +74,32 @@ export async function getEpisodicView(): Promise<EpisodicView> {
   }
 
   const findings: EpisodicFinding[] = Object.values(doc.findings);
+  const mode = doc.mode ?? 'daily';
 
   const notes: string[] = [];
-  notes.push(
-    `${findings.length} name(s) currently qualify, accumulated across runs. The most recent run, on ${doc.scanDate}, scanned ${doc.lastFunnel.scanned} of ${doc.universeSize} names in the universe.`,
-  );
-  if (doc.cursor !== 0) {
+  if (mode === 'backfill' && doc.calibration) {
+    const c = doc.calibration;
     notes.push(
-      `A full pass is not yet complete: the next run resumes at position ${doc.cursor} of ${doc.universeSize}. Names past that point were scanned on an earlier run or not yet this pass.`,
+      `Historical backfill over ${c.months} months (gaps on or after ${c.fromDate}): ${findings.length} findings at the defaults across ${doc.universeSize} names.${c.complete ? '' : ' NB: the universe pass was incomplete, so these counts are partial.'}`,
     );
+  } else {
+    notes.push(
+      `${findings.length} name(s) currently qualify, accumulated across runs. The most recent run, on ${doc.scanDate}, scanned ${doc.lastFunnel.scanned} of ${doc.universeSize} names in the universe.`,
+    );
+    if (doc.cursor !== 0) {
+      notes.push(
+        `A full pass is not yet complete: the next run resumes at position ${doc.cursor} of ${doc.universeSize}. Names past that point were scanned on an earlier run or not yet this pass.`,
+      );
+    }
   }
   for (const n of doc.notes) notes.push(n);
 
   return {
     ...base,
+    mode,
     findings,
+    calibration: doc.calibration ?? null,
+    trendRemoved: doc.trendRemoved ?? [],
     funnel: doc.lastFunnel,
     scanDate: doc.scanDate,
     scannedAt: doc.updatedAt,
