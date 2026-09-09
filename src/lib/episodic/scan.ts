@@ -42,6 +42,7 @@ import {
   BASE_MAX_TREND_R2,
   BASE_MIN_TREND_RISE,
   BASE_VOLUME_RISE_MAX,
+  EPISODIC_DEFAULTS,
   GAP_CLOSE_TOP_FRACTION,
   GAP_LOOKBACK,
   GRID_GAP_PCTS,
@@ -500,11 +501,19 @@ export function scanHistory(
       continue;
     }
 
-    // Passed every rule. Fill the sensitivity grid (other rules at default).
-    for (let g = 0; g < GRID_GAP_PCTS.length; g += 1) {
-      for (let v = 0; v < GRID_VOLUME_MULTS.length; v += 1) {
-        if (e.gapPct >= GRID_GAP_PCTS[g] && e.volumeRatio >= GRID_VOLUME_MULTS[v]) {
-          grid[g][v] += 1;
+    // Passed every rule. Fill the sensitivity grid, varying only gap and volume
+    // with the dollar and base-range rules held at their shipped defaults — so a
+    // grid cell reads as the finding count you would actually get at that gap ×
+    // volume pair, and the 5%/5× cell equals the board's default count.
+    const gridEligible =
+      e.dollarVolume >= EPISODIC_DEFAULTS.dollarMin &&
+      e.baseRangePct <= EPISODIC_DEFAULTS.baseRangeMax;
+    if (gridEligible) {
+      for (let g = 0; g < GRID_GAP_PCTS.length; g += 1) {
+        for (let v = 0; v < GRID_VOLUME_MULTS.length; v += 1) {
+          if (e.gapPct >= GRID_GAP_PCTS[g] && e.volumeRatio >= GRID_VOLUME_MULTS[v]) {
+            grid[g][v] += 1;
+          }
         }
       }
     }
