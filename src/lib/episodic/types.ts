@@ -85,12 +85,17 @@ export const EPISODIC_CAPTURE: EpisodicParams = {
   baseRangeMax: 0.32,
 };
 
-/** The strict end of every slider, so tightening has a stop too. */
+/**
+ * The strict end of every slider, so tightening has a stop too. Note that for
+ * `baseRangeMax`, *lower* is stricter — a quieter base — so its strict value is
+ * the small number and the capture floor above is the loose one. The board
+ * reads the direction per field rather than assuming strict is always larger.
+ */
 export const EPISODIC_STRICT: EpisodicParams = {
   gapMinPct: 0.15,
   volumeMult: 15,
   dollarMin: 100_000_000,
-  baseRangeMax: 0.5,
+  baseRangeMax: 0.1,
 };
 
 // --- fixed universe filters (not slider-adjustable) --------------------------
