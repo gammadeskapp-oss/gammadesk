@@ -143,7 +143,7 @@ for (let i = 0; i < 25; i += 1) {
 section('buildContextBand assembles both horizons and the surrounding reads');
 
 /** A stubbed event lookup, so the pure builder needs no calendar. */
-const noEvents = () => ({ count: 0, names: [] });
+const noEvents = () => [];
 
 function baseInput(over = {}) {
   return {
@@ -159,6 +159,7 @@ function baseInput(over = {}) {
     magnetBelow: { strike: 95, distancePct: -5 },
     dailyBars: seeded,
     breadthPct: 61,
+    breadthReason: null,
     atmIv: 0.18,
     realisedVol: 0.14,
     regimeTracked: true,
@@ -227,11 +228,44 @@ function baseInput(over = {}) {
 {
   const band = buildContextBand(baseInput());
   ok('breadth over 50 is an up tone', band.market.breadthTone === 'up');
+  ok('a real breadth value carries no reason', band.market.breadthReason === null);
   ok('the ETF states it has no earnings', /index ETF/.test(band.market.earnings), band.market.earnings);
+
+  // Breadth absent: never a bare number, always a stated reason.
+  const noBreadth = buildContextBand(
+    baseInput({ breadthPct: null, breadthReason: 'no reading taken yet today' }),
+  );
+  ok('missing breadth has no value', noBreadth.market.breadthPct === null);
+  ok('and always carries a reason', noBreadth.market.breadthReason === 'no reading taken yet today');
+  const noBreadthNoReason = buildContextBand(baseInput({ breadthPct: null, breadthReason: null }));
+  ok(
+    'a null breadth with no reason still gets a fallback rather than a bare dash',
+    typeof noBreadthNoReason.market.breadthReason === 'string' &&
+      noBreadthNoReason.market.breadthReason.length > 0,
+    noBreadthNoReason.market.breadthReason,
+  );
 
   const disagree = buildContextBand(baseInput({ observedRegime: 'negative' }));
   ok('a chain/feed disagreement is surfaced', typeof disagree.regime.disagreement === 'string', disagree.regime.disagreement);
   ok('agreement leaves no disagreement note', band.regime.disagreement === null);
+}
+
+{
+  // Events flow through with date, time and name, in each horizon view.
+  const withEvents = buildContextBand(
+    baseInput({
+      eventsInWindow: (from, to) => [
+        { date: '2026-01-14', timeEt: '08:30', name: 'CPI' },
+        { date: '2026-01-28', timeEt: '14:00', name: 'FOMC decision' },
+      ],
+    }),
+  );
+  const view = withEvents.horizons.find((h) => h.horizon === 20);
+  ok('events reach the horizon view', view.events.length === 2, `${view.events.length}`);
+  ok('each event keeps its date, time and name', view.events[0].date === '2026-01-14' && view.events[0].timeEt === '08:30' && view.events[0].name === 'CPI');
+
+  const noneView = buildContextBand(baseInput()).horizons[0];
+  ok('an empty window carries an empty event list, not a fabricated one', Array.isArray(noneView.events) && noneView.events.length === 0);
 }
 
 // --- result ------------------------------------------------------------------
