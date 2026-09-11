@@ -548,6 +548,15 @@ export default async function DecisionPage({ searchParams }: PageProps) {
           : null,
         dailyBars,
         breadthPct: breadth?.computed?.pctAbovePriorClose ?? null,
+        /*
+         * The field is wired; when it is null the breadth sweep has simply
+         * taken no reading yet (it runs each minute the market is open), so
+         * the band says that rather than showing a bare dash. `getBreadth`
+         * already carries the sentence — used verbatim, with a fallback.
+         */
+        breadthReason: breadth?.computed
+          ? null
+          : breadth?.notes[0] ?? 'No breadth reading has been taken yet today.',
         atmIv: positioning?.summary.atmIv ?? null,
         realisedVol: forecast?.volatility ?? null,
         regimeTracked: tracksLog,
@@ -560,10 +569,12 @@ export default async function DecisionPage({ searchParams }: PageProps) {
                 : 'below'
               : null,
         })),
-        eventsInWindow: (from, to) => {
-          const events = eventsBetween(from, to);
-          return { count: events.length, names: events.map((ev) => ev.name) };
-        },
+        eventsInWindow: (from, to) =>
+          eventsBetween(from, to).map((ev) => ({
+            date: ev.date,
+            timeEt: ev.timeEt,
+            name: ev.name,
+          })),
       })
     : null;
 
