@@ -41,7 +41,9 @@
     "verify:macro": "node scripts/verify-macro.mjs",
     "verify:episodic": "node scripts/verify-episodic.mjs",
     "verify:context-band": "node scripts/verify-context-band.mjs",
-    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:regime && npm run verify:retests && npm run verify:staleness && npm run verify:market-phase && npm run verify:context && npm run verify:context-band && npm run verify:events && npm run verify:research && npm run verify:scanner && npm run verify:scanner-record && npm run verify:movers && npm run verify:errors && npm run verify:history && npm run verify:track-record && npm run verify:positioning-record && npm run verify:what-changed && npm run verify:session-history && npm run verify:analogues && npm run verify:macro && npm run verify:episodic"
+    "verify:et-time": "node scripts/verify-et-time.mjs",
+    "verify:chart-timeframe": "node scripts/verify-chart-timeframe.mjs",
+    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:regime && npm run verify:retests && npm run verify:staleness && npm run verify:market-phase && npm run verify:context && npm run verify:context-band && npm run verify:et-time && npm run verify:chart-timeframe && npm run verify:events && npm run verify:research && npm run verify:scanner && npm run verify:scanner-record && npm run verify:movers && npm run verify:errors && npm run verify:history && npm run verify:track-record && npm run verify:positioning-record && npm run verify:what-changed && npm run verify:session-history && npm run verify:analogues && npm run verify:macro && npm run verify:episodic"
   },
   "dependencies": {
     "@vercel/blob": "^2.7.0",

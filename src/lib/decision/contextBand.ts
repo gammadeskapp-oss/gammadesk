@@ -45,16 +45,23 @@ export interface BandLevel {
   side: 'above' | 'below';
 }
 
+/** One scheduled macro event, enough to list it with a date and time. */
+export interface BandEvent {
+  /** `YYYY-MM-DD`, New York. */
+  date: string;
+  /** New York wall clock, 24-hour, e.g. `08:30`. */
+  timeEt: string;
+  name: string;
+}
+
 export interface HorizonView {
   horizon: Horizon;
   /** Hold result per level, keyed so the band can align it to its level row. */
   holds: Record<LevelKey, HoldResult>;
   /** The dates the window actually covers, or null when there are no bars. */
   window: WindowRange | null;
-  /** Scheduled macro events that fell inside the window. */
-  eventCount: number;
-  /** Their names, newest first, for a compact list or tooltip. */
-  eventNames: string[];
+  /** Scheduled events that fell inside the window, in date order. */
+  events: BandEvent[];
 }
 
 export interface RegimeBand {
@@ -81,6 +88,12 @@ export interface MarketBand {
   breadthPct: number | null;
   /** Green over 50, red under, neutral when unmeasured. */
   breadthTone: 'up' | 'down' | 'neutral';
+  /**
+   * Why breadth is unavailable, when it is — the sweep has taken no reading
+   * yet today, say. Set whenever `breadthPct` is null, so the band can say why
+   * rather than showing a bare dash. Null when a real value is present.
+   */
+  breadthReason: string | null;
   /** Honest one-liner: an index ETF has no earnings; a stock is not tracked. */
   earnings: string;
   vrp: {
@@ -128,6 +141,8 @@ export interface BuildContextBandInput {
   /** Daily bars, oldest first, for the hold-rate backtest. */
   dailyBars: DailyBar[];
   breadthPct: number | null;
+  /** Why breadth is unavailable, when `breadthPct` is null. */
+  breadthReason: string | null;
   /** Implied vol (annualised decimal) of the ~1-month ATM contract, or null. */
   atmIv: number | null;
   /** Annualised realised volatility, as the forecast measured it, or null. */
@@ -140,11 +155,11 @@ export interface BuildContextBandInput {
   /** One entry per settled session, any order — sorted here. */
   regimeSides: RegimeSide[];
   /**
-   * Count scheduled events inside a date range. Injected rather than imported
-   * so this module stays pure and testable; the page passes the calendar-aware
-   * lookup.
+   * The scheduled events inside a date range, in date order. Injected rather
+   * than imported so this module stays pure and testable; the page passes the
+   * calendar-aware lookup.
    */
-  eventsInWindow: (from: string, to: string) => { count: number; names: string[] };
+  eventsInWindow: (from: string, to: string) => BandEvent[];
 }
 
 const MONTHS = [
@@ -235,17 +250,9 @@ function horizonView(
   }
 
   const window = windowRange(input.dailyBars, horizon);
-  const events = window
-    ? input.eventsInWindow(window.from, window.to)
-    : { count: 0, names: [] };
+  const events = window ? input.eventsInWindow(window.from, window.to) : [];
 
-  return {
-    horizon,
-    holds,
-    window,
-    eventCount: events.count,
-    eventNames: events.names,
-  };
+  return { horizon, holds, window, events };
 }
 
 /** A hold result for a level that is not present, so the record is always full. */
@@ -295,6 +302,12 @@ export function buildContextBand(input: BuildContextBandInput): ContextBand {
     breadthPct,
     breadthTone:
       breadthPct === null ? 'neutral' : breadthPct >= 50 ? 'up' : 'down',
+    // A reason is required whenever there is no value, so the band never shows
+    // a bare dash. A fallback covers a null slipping through without a note.
+    breadthReason:
+      breadthPct === null
+        ? input.breadthReason ?? 'no breadth reading is available right now'
+        : null,
     earnings: earningsLine(input.symbol),
     vrp: buildVrp(input.atmIv, input.realisedVol),
   };

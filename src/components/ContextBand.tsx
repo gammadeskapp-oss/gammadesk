@@ -1,6 +1,6 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { Fragment, useSyncExternalStore } from 'react';
 import { InfoTip } from './InfoTip';
 import type {
   ContextBand as ContextBandData,
@@ -85,7 +85,7 @@ function holdPct(rate: number): string {
 
 // --- zones -------------------------------------------------------------------
 
-/** One price row of the left rail, and the aligned HELD cell beside it. */
+/** One price row of the rail, and its aligned HELD figure. */
 interface RailRow {
   key: LevelKey | 'spot';
   price: number;
@@ -96,19 +96,47 @@ interface RailRow {
   hold: HoldResult | null;
 }
 
-function Levels({ rows }: { rows: RailRow[] }) {
+/**
+ * A full-height vertical rule between zones.
+ *
+ * `self-stretch` makes it span the whole band even though the row is
+ * `items-start` — so the zones size to their own content (no panel stretches
+ * to fill a blank) while the dividers still run the band's height, which is
+ * what keeps four columns reading as one band rather than as ragged cards.
+ */
+function Divider() {
+  return <div aria-hidden className="hidden w-px shrink-0 self-stretch bg-term-line sm:block" />;
+}
+
+/**
+ * Levels and their hold rates as ONE grid, a row per level.
+ *
+ * The two used to be separate stacked columns, so a long "not reached" note on
+ * one side pushed its neighbour's rows out of line with it. Here each level's
+ * price/label cell and its HELD cell share a grid row, so the row's height is
+ * the taller of the two and the two can never drift apart — at any width, and
+ * for any number of levels.
+ */
+function LevelsHeld({ rows }: { rows: RailRow[] }) {
   return (
-    <div className="flex shrink-0 flex-col justify-between gap-3 sm:w-[170px]">
+    <div className="grid shrink-0 grid-cols-[1fr_7rem] items-start gap-x-5 gap-y-3 sm:w-[280px]">
       <span className="label-xs">Levels</span>
-      <div className="flex flex-col gap-3">
-        {rows.map((row) => (
-          <div key={row.key}>
+      <span className="flex items-center justify-end gap-1 label-xs">
+        Held
+        <InfoTip
+          tip={{
+            label: 'Held',
+            plain:
+              'How often price respected this level, over the sessions tested. Not a win rate.',
+          }}
+        />
+      </span>
+
+      {rows.map((row) => (
+        <Fragment key={row.key}>
+          <div>
             <div className="flex items-baseline gap-2">
-              <span
-                className={`text-[15px] font-medium tabular-nums ${
-                  row.key === 'spot' ? 'text-term-text' : 'text-term-text'
-                }`}
-              >
+              <span className="text-[15px] font-medium tabular-nums text-term-text">
                 {row.key === 'spot' ? formatPrice(row.price) : formatStrike(row.price)}
               </span>
               {row.distancePct !== null && (
@@ -121,31 +149,9 @@ function Levels({ rows }: { rows: RailRow[] }) {
               {row.name}
             </div>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
-function Held({ rows }: { rows: RailRow[] }) {
-  return (
-    <div className="flex shrink-0 flex-col justify-between gap-3 border-term-line sm:border-l sm:pl-4 sm:w-[96px]">
-      <span className="flex items-center gap-1 label-xs">
-        Held
-        <InfoTip
-          tip={{
-            label: 'Held',
-            plain:
-              'How often price respected this level, over the sessions tested. Not a win rate.',
-          }}
-        />
-      </span>
-      <div className="flex flex-col gap-3">
-        {rows.map((row) => (
-          <div key={row.key} className="min-h-[34px]">
-            {row.key === 'spot' || row.hold === null ? (
-              <span className="text-[15px] text-term-faint">&nbsp;</span>
-            ) : row.hold.rate === null ? (
+          <div className="text-right">
+            {row.key === 'spot' || row.hold === null ? null : row.hold.rate === null ? (
               <>
                 <div className="text-[15px] font-medium text-term-faint">—</div>
                 <div className="mt-0.5 text-[11px] leading-tight text-term-faint">
@@ -163,8 +169,8 @@ function Held({ rows }: { rows: RailRow[] }) {
               </>
             )}
           </div>
-        ))}
-      </div>
+        </Fragment>
+      ))}
     </div>
   );
 }
@@ -183,7 +189,7 @@ function Regime({ band }: { band: ContextBandData }) {
   const toneClass = r.tone === 'success' ? 'text-bull' : 'text-flip';
 
   return (
-    <div className="flex min-w-[150px] flex-1 flex-col gap-2 border-term-line sm:border-l sm:pl-4">
+    <div className="flex min-w-[150px] flex-1 flex-col gap-2">
       <span className="label-xs">Gamma regime</span>
       <div className={`text-[24px] font-medium leading-none ${toneClass}`}>{r.word}</div>
       <p className="text-[11px] leading-relaxed text-term-faint">{r.changeLine}</p>
@@ -197,10 +203,7 @@ function Regime({ band }: { band: ContextBandData }) {
           label="From flip"
           value={r.flipDistancePct === null ? '—' : signedPct(r.flipDistancePct)}
         />
-        <Row
-          label="Calmer side"
-          value={r.aboveIsCalmer ? 'above the flip' : '—'}
-        />
+        <Row label="Calmer side" value={r.aboveIsCalmer ? 'above the flip' : '—'} />
       </div>
 
       {r.disagreement && (
@@ -210,10 +213,58 @@ function Regime({ band }: { band: ContextBandData }) {
   );
 }
 
+/** The events row: plain text at zero, a click-to-expand drawer otherwise. */
+function Events({ view }: { view: HorizonView }) {
+  if (view.window === null) {
+    return <Row label="Events in window" value="—" tone="text-term-faint" />;
+  }
+  if (view.events.length === 0) {
+    return <Row label="Events in window" value="none scheduled" tone="text-term-faint" />;
+  }
+
+  return (
+    <details className="group">
+      <summary className="flex cursor-pointer list-none items-baseline justify-between gap-3">
+        <span className="text-[11px] uppercase tracking-[0.12em] text-term-faint">
+          Events in window
+        </span>
+        <span className="text-xs tabular-nums text-term-text">
+          {view.events.length} scheduled
+          <span aria-hidden className="ml-1 text-term-faint group-open:hidden">
+            ▸
+          </span>
+          <span aria-hidden className="ml-1 hidden text-term-faint group-open:inline">
+            ▾
+          </span>
+        </span>
+      </summary>
+      <ul className="mt-1.5 space-y-1">
+        {view.events.map((ev, i) => (
+          <li
+            key={`${ev.date}-${ev.timeEt}-${i}`}
+            className="flex items-baseline justify-between gap-3 text-[11px]"
+          >
+            <span className="text-term-dim">{ev.name}</span>
+            <span className="shrink-0 tabular-nums text-term-faint">
+              {dayLabel(ev.date)} · {ev.timeEt} ET
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 function Market({ band, view }: { band: ContextBandData; view: HorizonView }) {
   const m = band.market;
-  const breadthTone =
-    m.breadthTone === 'up' ? 'text-bull' : m.breadthTone === 'down' ? 'text-bear' : 'text-term-faint';
+  const breadthUnavailable = m.breadthPct === null;
+  const breadthTone = breadthUnavailable
+    ? 'text-term-faint'
+    : m.breadthTone === 'up'
+      ? 'text-bull'
+      : m.breadthTone === 'down'
+        ? 'text-bear'
+        : 'text-term-faint';
 
   const windowLabel = view.window
     ? view.window.from === view.window.to
@@ -221,38 +272,28 @@ function Market({ band, view }: { band: ContextBandData; view: HorizonView }) {
       : `${dayLabel(view.window.from)} – ${dayLabel(view.window.to)}`
     : '—';
 
-  const eventsLabel =
-    view.window === null
-      ? '—'
-      : view.eventCount === 0
-        ? 'none'
-        : `${view.eventCount} scheduled`;
-
   const vrpLabel =
     m.vrp.valuePts === null
       ? '—'
       : `${m.vrp.valuePts >= 0 ? '+' : ''}${m.vrp.valuePts.toFixed(1)} pts`;
 
   return (
-    <div className="flex min-w-[150px] flex-1 flex-col gap-2 border-term-line sm:border-l sm:pl-4">
+    <div className="flex min-w-[150px] flex-1 flex-col gap-2">
       <span className="label-xs">Market context</span>
 
       <div className="space-y-1.5">
         <Row
           label="Breadth"
-          value={m.breadthPct === null ? '—' : `${Math.round(m.breadthPct)}%`}
+          value={breadthUnavailable ? 'unavailable' : `${Math.round(m.breadthPct as number)}%`}
           tone={breadthTone}
         />
+        {breadthUnavailable && m.breadthReason && (
+          <p className="text-[11px] leading-tight text-term-faint">{m.breadthReason}</p>
+        )}
         <div className="border-t border-term-line" />
         <Row label="Window" value={windowLabel} />
         <div className="border-t border-term-line" />
-        <Row label="Events in window" value={eventsLabel} />
-        {view.eventCount > 0 && (
-          <p className="text-[11px] leading-tight text-term-faint">
-            {view.eventNames.slice(0, 3).join(', ')}
-            {view.eventNames.length > 3 ? ` +${view.eventNames.length - 3} more` : ''}
-          </p>
-        )}
+        <Events view={view} />
         <div className="border-t border-term-line" />
         <Row label="Earnings" value={m.earnings} />
         <div className="border-t border-term-line" />
@@ -301,9 +342,8 @@ export function ContextBand({ band }: { band: ContextBandData }) {
   const view =
     band.horizons.find((h) => h.horizon === horizon) ?? band.horizons[0];
 
-  // Left rail rows, high price to low: call wall, spot, put wall. A missing
-  // wall still gets a row so the three-row rail and the HELD column stay
-  // aligned, rather than collapsing and mismatching.
+  // Rail rows, high price to low: call wall, spot, put wall. A missing wall
+  // still gets a row so the rail and the HELD figures stay aligned.
   const callWall = band.levels.find((l) => l.key === 'callWall') ?? null;
   const putWall = band.levels.find((l) => l.key === 'putWall') ?? null;
 
@@ -379,10 +419,13 @@ export function ContextBand({ band }: { band: ContextBandData }) {
         </div>
       </div>
 
-      <div className="panel flex flex-col gap-4 p-4 sm:flex-row sm:gap-0">
-        <Levels rows={rows} />
-        <Held rows={rows} />
+      {/* items-start so each zone sizes to its own content; the dividers
+          self-stretch to keep the band reading as one. */}
+      <div className="panel flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:gap-4">
+        <LevelsHeld rows={rows} />
+        <Divider />
         <Regime band={band} />
+        <Divider />
         <Market band={band} view={view} />
       </div>
     </section>

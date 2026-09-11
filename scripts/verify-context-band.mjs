@@ -8,11 +8,12 @@
  * and each session written as an explicit high/low/close, so the expected hold
  * count can be read off the fixture by eye rather than trusted to the code.
  *
- * The load-bearing check is the last one: the 5-day and 20-day hold rates must
- * disagree on seeded data. The whole reason the horizon switch exists is that a
- * level can hold all week and have broken repeatedly the month before; a bug
- * that carried the 5-day figure into the 20-day view would erase exactly that,
- * and would still render a plausible-looking band.
+ * Two load-bearing checks. First, the horizon must reach the computation: the
+ * 5-day and 20-day windows test different session counts on seeded data, so a
+ * bug that carried one figure into the other is caught. Second, the
+ * minimum-sample rule: a window under the floor states no rate, so a wall
+ * touched once or twice can never surface as a flattering 100%. Both would
+ * otherwise render a plausible-looking band.
  *
  * Run: npm run verify:context-band
  */
@@ -23,7 +24,7 @@ import { registerTsImports } from './ts-imports.mjs';
 // modules use, exactly as every other verify script does.
 registerTsImports();
 
-const { holdRate, windowRange } = await import('../src/lib/decision/backtest.ts');
+const { holdRate, windowRange, MIN_HOLD_SESSIONS } = await import('../src/lib/decision/backtest.ts');
 const { buildContextBand, HORIZONS } = await import('../src/lib/decision/contextBand.ts');
 
 let failures = 0;
@@ -65,14 +66,27 @@ const UNTOUCHED = { h: 98, l: 96, c: 97 };
 
 section('Hold rate counts only sessions that reached the level');
 
+/*
+ * Each fixture is padded over the minimum-sample floor with untouched sessions
+ * — whose range never reaches the level, so they change neither the tested nor
+ * the held count — while making the window long enough to state a rate. This
+ * keeps the meaningful sessions readable by eye and isolates the counting logic
+ * from the floor, which the next section tests on its own.
+ */
+function overFloor(meaningful) {
+  const padCount = Math.max(0, MIN_HOLD_SESSIONS - meaningful.length);
+  const pad = Array.from({ length: padCount }, (_, i) => bar(-1 - i, UNTOUCHED));
+  return [...pad, ...meaningful];
+}
+
 {
-  const bars = [
+  const bars = overFloor([
     bar(0, UNTOUCHED),
     bar(1, HELD_ABOVE),
     bar(2, BROKE_ABOVE),
     bar(3, HELD_ABOVE),
-  ];
-  const r = holdRate(bars, LEVEL, 'above', 10);
+  ]);
+  const r = holdRate(bars, LEVEL, 'above', bars.length);
   ok('untouched sessions stay out of the denominator', r.tested === 3, `tested ${r.tested}`);
   ok('holds are counted', r.held === 2, `held ${r.held}`);
   near('rate is holds over tests', r.rate, 2 / 3);
@@ -83,12 +97,14 @@ section('Hold rate counts only sessions that reached the level');
   // A wall below spot: price approaches from above, holds by closing back above.
   const heldBelow = { h: 101, l: 99, c: 100.5 };
   const brokeBelow = { h: 101, l: 98, c: 98.5 };
-  const r = holdRate([bar(0, heldBelow), bar(1, brokeBelow)], LEVEL, 'below', 10);
+  const bars = overFloor([bar(0, heldBelow), bar(1, brokeBelow)]);
+  const r = holdRate(bars, LEVEL, 'below', bars.length);
   ok('the below side mirrors the above side', r.tested === 2 && r.held === 1, JSON.stringify(r));
 }
 
 {
-  const r = holdRate([bar(0, UNTOUCHED), bar(1, UNTOUCHED)], LEVEL, 'above', 10);
+  const bars = overFloor([bar(0, UNTOUCHED), bar(1, UNTOUCHED)]);
+  const r = holdRate(bars, LEVEL, 'above', bars.length);
   ok('a level never reached yields no rate', r.rate === null);
   ok('and says why', typeof r.reason === 'string' && r.reason.includes('did not reach'), r.reason);
 }
@@ -115,14 +131,17 @@ section('Window range reports the sessions actually in scope');
 
 // --- the horizon switch really recomputes -----------------------------------
 
-section('5-day and 20-day hold rates disagree on seeded data');
+section('5-day and 20-day hold rates measure different windows');
 
 /*
  * Twenty-five sessions. The oldest fifteen inside the 20-session window all
- * break the wall; the most recent five all hold it. So:
- *   - 5-day  window: 5 tested, 5 held  -> 1.00
+ * break the wall; the most recent five all hold it. So each window tests its
+ * own slice:
+ *   - 5-day  window: 5 tested, 5 held
  *   - 20-day window: 20 tested, 5 held -> 0.25
- * Any code that reuses one answer for the other fails this outright.
+ * The five-session window is below the minimum-sample floor, so its rate is
+ * withheld even though it was measured — the horizon still reaches the count.
+ * Any code that reused one horizon's answer for the other would fail here.
  */
 const seeded = [];
 for (let i = 0; i < 25; i += 1) {
@@ -133,9 +152,54 @@ for (let i = 0; i < 25; i += 1) {
 {
   const five = holdRate(seeded, LEVEL, 'above', 5);
   const twenty = holdRate(seeded, LEVEL, 'above', 20);
-  near('5-day rate is a clean sweep of holds', five.rate, 1);
-  near('20-day rate is dragged down by the earlier breaks', twenty.rate, 0.25);
-  ok('the two horizons genuinely differ', five.rate !== twenty.rate, `${five.rate} vs ${twenty.rate}`);
+  // The horizon genuinely reaches the computation: each window tests its own
+  // sessions, so the session counts differ.
+  ok('the 5-day window tests five sessions', five.tested === 5, `tested ${five.tested}`);
+  ok('the 20-day window tests twenty sessions', twenty.tested === 20, `tested ${twenty.tested}`);
+  ok(
+    'the two horizons test different session counts',
+    five.tested !== twenty.tested,
+    `${five.tested} vs ${twenty.tested}`,
+  );
+  // ...but only the longer window clears the floor, so the five-session sweep
+  // is withheld rather than published as a flattering 100%.
+  ok(
+    'the five-session window is withheld as too short',
+    five.rate === null && five.reason === 'not enough history yet',
+    JSON.stringify(five),
+  );
+  near('the 20-day rate is dragged down by the earlier breaks', twenty.rate, 0.25);
+}
+
+// --- the minimum-sample rule -------------------------------------------------
+
+section('A window under the floor shows no rate, only a reason');
+
+{
+  // Three sessions, two of them holds: a naive rate is 2/3 = 67%. It must not
+  // render as a number — three sessions is not enough history to state one.
+  const threeSessions = [bar(0, HELD_ABOVE), bar(1, BROKE_ABOVE), bar(2, HELD_ABOVE)];
+  const r = holdRate(threeSessions, LEVEL, 'above', 20);
+  ok('a three-session input yields no rate', r.rate === null, JSON.stringify(r));
+  ok('and says the history is too short', r.reason === 'not enough history yet', r.reason);
+  ok('the tested count is still reported', r.tested === 3, `tested ${r.tested}`);
+  ok('two-of-three never surfaces as a 67% rate', r.rate === null);
+}
+
+{
+  // The floor sits at 20 sessions: nineteen is one short, twenty earns a rate.
+  const allHeld = (n) => Array.from({ length: n }, (_, i) => bar(i, HELD_ABOVE));
+  ok('the floor is the documented 20 sessions', MIN_HOLD_SESSIONS === 20, String(MIN_HOLD_SESSIONS));
+
+  const nineteen = holdRate(allHeld(19), LEVEL, 'above', 20);
+  ok(
+    'nineteen sessions is one short of the floor',
+    nineteen.rate === null && nineteen.reason === 'not enough history yet',
+    JSON.stringify(nineteen),
+  );
+
+  const twenty = holdRate(allHeld(20), LEVEL, 'above', 20);
+  near('twenty sessions clears the floor and states a rate', twenty.rate, 1);
 }
 
 // --- the assembled band ------------------------------------------------------
@@ -143,7 +207,7 @@ for (let i = 0; i < 25; i += 1) {
 section('buildContextBand assembles both horizons and the surrounding reads');
 
 /** A stubbed event lookup, so the pure builder needs no calendar. */
-const noEvents = () => ({ count: 0, names: [] });
+const noEvents = () => [];
 
 function baseInput(over = {}) {
   return {
@@ -159,6 +223,7 @@ function baseInput(over = {}) {
     magnetBelow: { strike: 95, distancePct: -5 },
     dailyBars: seeded,
     breadthPct: 61,
+    breadthReason: null,
     atmIv: 0.18,
     realisedVol: 0.14,
     regimeTracked: true,
@@ -178,14 +243,24 @@ function baseInput(over = {}) {
 
   const five = band.horizons.find((h) => h.horizon === 5);
   const twenty = band.horizons.find((h) => h.horizon === 20);
-  near('band carries the 5-day call-wall rate', five.holds.callWall.rate, 1);
+  ok(
+    'band withholds the 5-day call-wall rate as too short',
+    five.holds.callWall.rate === null && five.holds.callWall.reason === 'not enough history yet',
+    JSON.stringify(five.holds.callWall),
+  );
   near('band carries the 20-day call-wall rate', twenty.holds.callWall.rate, 0.25);
   ok(
     'the band never carries one horizon into the other',
     five.holds.callWall.rate !== twenty.holds.callWall.rate,
   );
 
-  ok('the put wall was never reached in the window', band.horizons[0].holds.putWall.rate === null);
+  // The put wall sits at 95, which the seeded range never reaches — so over the
+  // 20-session window it is untested rather than merely short of history.
+  ok(
+    'a wall the window never reached still yields no rate',
+    twenty.holds.putWall.rate === null && /did not reach/.test(twenty.holds.putWall.reason),
+    twenty.holds.putWall.reason,
+  );
   ok('call wall is named plainly', band.levels.find((l) => l.key === 'callWall').name === 'CALL WALL');
 }
 
@@ -227,11 +302,44 @@ function baseInput(over = {}) {
 {
   const band = buildContextBand(baseInput());
   ok('breadth over 50 is an up tone', band.market.breadthTone === 'up');
+  ok('a real breadth value carries no reason', band.market.breadthReason === null);
   ok('the ETF states it has no earnings', /index ETF/.test(band.market.earnings), band.market.earnings);
+
+  // Breadth absent: never a bare number, always a stated reason.
+  const noBreadth = buildContextBand(
+    baseInput({ breadthPct: null, breadthReason: 'no reading taken yet today' }),
+  );
+  ok('missing breadth has no value', noBreadth.market.breadthPct === null);
+  ok('and always carries a reason', noBreadth.market.breadthReason === 'no reading taken yet today');
+  const noBreadthNoReason = buildContextBand(baseInput({ breadthPct: null, breadthReason: null }));
+  ok(
+    'a null breadth with no reason still gets a fallback rather than a bare dash',
+    typeof noBreadthNoReason.market.breadthReason === 'string' &&
+      noBreadthNoReason.market.breadthReason.length > 0,
+    noBreadthNoReason.market.breadthReason,
+  );
 
   const disagree = buildContextBand(baseInput({ observedRegime: 'negative' }));
   ok('a chain/feed disagreement is surfaced', typeof disagree.regime.disagreement === 'string', disagree.regime.disagreement);
   ok('agreement leaves no disagreement note', band.regime.disagreement === null);
+}
+
+{
+  // Events flow through with date, time and name, in each horizon view.
+  const withEvents = buildContextBand(
+    baseInput({
+      eventsInWindow: (from, to) => [
+        { date: '2026-01-14', timeEt: '08:30', name: 'CPI' },
+        { date: '2026-01-28', timeEt: '14:00', name: 'FOMC decision' },
+      ],
+    }),
+  );
+  const view = withEvents.horizons.find((h) => h.horizon === 20);
+  ok('events reach the horizon view', view.events.length === 2, `${view.events.length}`);
+  ok('each event keeps its date, time and name', view.events[0].date === '2026-01-14' && view.events[0].timeEt === '08:30' && view.events[0].name === 'CPI');
+
+  const noneView = buildContextBand(baseInput()).horizons[0];
+  ok('an empty window carries an empty event list, not a fabricated one', Array.isArray(noneView.events) && noneView.events.length === 0);
 }
 
 // --- result ------------------------------------------------------------------
