@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { isTimeframe, TIMEFRAMES, type Timeframe } from '@/lib/bars/types';
 import { ema, rsi } from '@/lib/ticker/indicators';
+import { InfoTip } from './InfoTip';
 import {
   VolumeProfilePrimitive,
   type VolumeProfileColours,
@@ -31,6 +32,8 @@ const COLOR = {
   ema200: '#8494a8',
   vwap: '#c8d6e5',
   rsi: '#f0a500',
+  /* The gamma flip's own tone — the purple the strike profile already uses. */
+  level: '#a78bfa',
   grid: '#161d2c',
   border: '#232c3f',
   text: '#8494a8',
@@ -59,17 +62,19 @@ const POC_SWATCH = '#e05f9e';
 
 // --- overlay preferences -----------------------------------------------------
 
-export type OverlayKey = 'ema9' | 'ema13' | 'ema50' | 'ema200' | 'vwap';
+/** The price-pane line overlays, plus RSI, which renders in its own pane. */
+export type OverlayKey = 'ema9' | 'ema13' | 'ema50' | 'ema200' | 'vwap' | 'rsi';
 
 interface Overlay {
   key: OverlayKey;
   label: string;
   colour: string;
   period?: number;
-  /** VWAP is meaningless on a daily series; it resets every session. */
+  /** VWAP is meaningless above 15 minutes; it resets every session. */
   intradayOnly?: boolean;
 }
 
+/** The moving-average and VWAP lines drawn on the price pane. */
 const OVERLAYS: Overlay[] = [
   { key: 'ema9', label: '9 EMA', colour: COLOR.ema9, period: 9 },
   { key: 'ema13', label: '13 EMA', colour: COLOR.ema13, period: 13 },
@@ -83,15 +88,35 @@ type OverlayState = Record<OverlayKey, boolean>;
 const DEFAULT_OVERLAYS: OverlayState = {
   ema9: true,
   ema13: false,
-  ema50: true,
-  ema200: true,
+  ema50: false,
+  ema200: false,
   vwap: true,
+  rsi: false,
 };
+
+/** Every toggle key, in the order the store validates them. */
+const OVERLAY_KEYS: OverlayKey[] = ['ema9', 'ema13', 'ema50', 'ema200', 'vwap', 'rsi'];
+
+/**
+ * VWAP only means something intraday, and only below an hour: on a 1h or 4h
+ * series each bar already spans a large slice of the session, so a running
+ * session average is noise. The toggle is hidden entirely above 15 minutes
+ * rather than shown disabled.
+ */
+function vwapApplies(timeframe: Timeframe): boolean {
+  return timeframe === '1m' || timeframe === '5m' || timeframe === '15m';
+}
 
 const OVERLAY_KEY = 'gammadesk.chart.overlays';
 const TF_KEY = 'gammadesk.chart.timeframe';
 const PROFILE_KEY = 'gammadesk.chart.volumeProfile';
+const LEVELS_KEY = 'gammadesk.chart.levels';
 const STORE_EVENT = 'gammadesk:chart';
+
+/** Sessions shown when the chart first loads, and after a symbol change. */
+const INITIAL_SESSIONS = 5;
+/** Levels farther than this from spot are hidden — they are not in play. */
+const LEVEL_RANGE_PCT = 8;
 
 /*
  * Parsed value is memoised against the raw string.
@@ -120,7 +145,7 @@ function readOverlays(): OverlayState {
     try {
       const parsed = JSON.parse(raw) as Partial<OverlayState>;
       const next = { ...DEFAULT_OVERLAYS };
-      for (const { key } of OVERLAYS) {
+      for (const key of OVERLAY_KEYS) {
         if (typeof parsed[key] === 'boolean') next[key] = parsed[key];
       }
       cachedValue = next;
@@ -205,6 +230,28 @@ function writeProfileEnabled(value: boolean): void {
   window.dispatchEvent(new CustomEvent(STORE_EVENT));
 }
 
+/**
+ * The gamma-level overlay toggle, a standing preference like the moving
+ * averages — so `localStorage`, and on by default. Same event bus as the rest.
+ */
+function readLevelsEnabled(): boolean {
+  try {
+    // On unless explicitly turned off, so a first-time reader sees the levels.
+    return window.localStorage.getItem(LEVELS_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function writeLevelsEnabled(value: boolean): void {
+  try {
+    window.localStorage.setItem(LEVELS_KEY, value ? '1' : '0');
+  } catch {
+    // Storage can be unavailable; the event still syncs this session.
+  }
+  window.dispatchEvent(new CustomEvent(STORE_EVENT));
+}
+
 // --- indicator maths ---------------------------------------------------------
 
 interface Bar {
@@ -258,6 +305,36 @@ function vwapSeries(bars: Bar[]): (number | null)[] {
   return out;
 }
 
+/**
+ * The epoch-seconds start of the window covering the last `sessions` New York
+ * calendar dates in `bars`, or null when there are none. Used to open the chart
+ * on the most recent few sessions rather than the whole fetched month.
+ */
+function lastSessionsFrom(bars: Bar[], sessions: number): number | null {
+  if (bars.length === 0) return null;
+
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+
+  const seen = new Set<string>();
+  // Walk newest-first, collecting distinct session dates until we have enough;
+  // the first bar of the oldest kept date is where the window starts.
+  let start = bars[0].t;
+  for (let i = bars.length - 1; i >= 0; i -= 1) {
+    const date = formatter.format(new Date(bars[i].t * 1000));
+    if (!seen.has(date)) {
+      if (seen.size >= sessions) break;
+      seen.add(date);
+    }
+    start = bars[i].t;
+  }
+  return start;
+}
+
 // --- component ---------------------------------------------------------------
 
 interface SeriesResponse {
@@ -268,14 +345,38 @@ interface SeriesResponse {
   asOfLabel: string;
 }
 
+/**
+ * A gamma level to draw as a flat horizontal line across the chart.
+ *
+ * One value per level for the whole window, from the latest daily snapshot —
+ * these are today's book, not a per-bar history. `kind` decides the tone: the
+ * flip gets its own colour, the walls share a neutral one, and nothing here
+ * implies a direction to trade.
+ */
+export interface ChartLevel {
+  key: string;
+  /** Plain name shown at the right edge, e.g. `Call wall`. */
+  name: string;
+  price: number;
+  kind: 'flip' | 'wall';
+  /** One plain-English sentence for the legend tooltip. No jargon. */
+  plain: string;
+}
+
 export function InteractiveChart({
   symbol,
-  initialTimeframe = '5m',
+  initialTimeframe = '15m',
+  levels = [],
+  spot = null,
   profileBuckets = DEFAULT_BUCKET_COUNT,
   profileLookback = null,
 }: {
   symbol: string;
   initialTimeframe?: Timeframe;
+  /** Gamma levels from today's snapshot, drawn as flat lines when in range. */
+  levels?: ChartLevel[];
+  /** Spot the levels are measured against, so far-off ones can be hidden. */
+  spot?: number | null;
   /** Price levels the volume profile is divided into. */
   profileBuckets?: number;
   /** Bars to profile, counting back from the newest in view. Null = the view. */
@@ -299,12 +400,33 @@ export function InteractiveChart({
     () => false,
   );
 
+  const levelsOn = useSyncExternalStore(
+    subscribeStore,
+    readLevelsEnabled,
+    () => true,
+  );
+
   const [data, setData] = useState<SeriesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** EMAs the fetched history was too short to warm up, by label. */
+  const [unavailableEmas, setUnavailableEmas] = useState<string[]>([]);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const seriesRef = useRef<Partial<Record<OverlayKey, { applyOptions: (o: object) => void }>>>({});
   const profileRef = useRef<VolumeProfilePrimitive | null>(null);
+
+  /*
+   * The visible time window, remembered across rebuilds.
+   *
+   * Switching timeframe refetches and rebuilds the chart, and the requirement
+   * is that the window you were looking at does not jump — a 5-session view on
+   * 15m stays a 5-session view when you move to 1h. So the range is captured as
+   * the user pans and reapplied after each rebuild. It is cleared on a symbol
+   * change (below), which is the one case that should reset to the last few
+   * sessions of the new ticker rather than reuse the old one's window.
+   */
+  const visibleRangeRef = useRef<{ from: number; to: number } | null>(null);
+  const builtSymbolRef = useRef<string | null>(null);
 
   /*
    * Derived, not tracked. Setting a `loading` flag at the top of the fetch
@@ -313,6 +435,25 @@ export function InteractiveChart({
    * what was asked for.
    */
   const loading = !error && (data?.timeframe !== timeframe || data?.symbol !== symbol);
+
+  /*
+   * A stable key for the level set, so the build effect rebuilds when the
+   * levels themselves change but not on every parent render that happens to
+   * hand down a fresh array of the same values.
+   */
+  const levelsKey = JSON.stringify(levels.map((l) => [l.key, l.price]));
+
+  /*
+   * The levels actually drawn: those within range of spot. Kept in sync with
+   * the same test the build effect uses, so the legend never lists a line that
+   * is not on the chart.
+   */
+  const visibleLevels = levels.filter(
+    (l) =>
+      spot === null ||
+      !(spot > 0) ||
+      Math.abs((l.price - spot) / spot) * 100 <= LEVEL_RANGE_PCT,
+  );
 
   // --- fetch ---
   useEffect(() => {
@@ -438,10 +579,21 @@ export function InteractiveChart({
 
         const closes = bars.map((b) => b.c);
         // Read straight from the store rather than through a ref: this effect
-        // must not depend on overlay state, or every toggle would rebuild the
-        // whole chart instead of flipping a visibility flag.
+        // must not depend on the EMA/VWAP toggles, or ticking one would rebuild
+        // the whole chart instead of flipping a visibility flag.
         const current = readOverlays();
+        const vwapUsable = vwapApplies(data.timeframe);
         seriesRef.current = {};
+
+        /*
+         * EMAs are computed over the whole fetched series, not just the
+         * sessions on screen, so by the time the visible window begins each
+         * average is already warmed up from the bars before it. The only line
+         * that genuinely cannot be drawn is one whose period is longer than the
+         * entire history available — and that one is hidden and named below,
+         * rather than drawn from a half-formed average.
+         */
+        const unavailable: string[] = [];
 
         for (const overlay of OVERLAYS) {
           const values = overlay.period
@@ -452,9 +604,15 @@ export function InteractiveChart({
             .map((value, i) => ({ time: bars[i].t as never, value }))
             .filter((p): p is { time: never; value: number } => p.value !== null);
 
-          if (points.length === 0) continue;
+          // A moving average with no defined point is one the history is too
+          // short to warm up. VWAP producing nothing is not that — it is a
+          // volumeless series — so only the EMAs are named as missing.
+          if (points.length === 0) {
+            if (overlay.period && current[overlay.key]) unavailable.push(overlay.label);
+            continue;
+          }
 
-          const usable = !overlay.intradayOnly || data.intraday;
+          const usable = overlay.key === 'vwap' ? vwapUsable : true;
           const line = chart.addSeries(LineSeries, {
             color: overlay.colour,
             lineWidth: 1,
@@ -468,57 +626,120 @@ export function InteractiveChart({
           seriesRef.current[overlay.key] = line;
         }
 
-        // --- RSI, in its own pane ---
-        const rsiValues = rsi(closes, 14);
-        const rsiPoints = rsiValues
-          .map((value, i) => ({ time: bars[i].t as never, value }))
-          .filter((p): p is { time: never; value: number } => p.value !== null);
+        setUnavailableEmas(unavailable);
 
-        if (rsiPoints.length > 0) {
-          const rsiSeries = chart.addSeries(
-            LineSeries,
-            {
-              color: COLOR.rsi,
-              lineWidth: 1,
-              priceLineVisible: false,
-              lastValueVisible: true,
-              crosshairMarkerVisible: false,
-            },
-            1,
-          );
-          rsiSeries.setData(rsiPoints);
+        // --- RSI, in its own pane, only when it is turned on ---
+        // Built conditionally so the pane simply does not exist when RSI is
+        // off and the price chart keeps the full height. Toggling RSI is in
+        // this effect's deps, so flipping it rebuilds — the visible window is
+        // restored below, so the rebuild is not visible as a jump.
+        if (current.rsi) {
+          const rsiValues = rsi(closes, 14);
+          const rsiPoints = rsiValues
+            .map((value, i) => ({ time: bars[i].t as never, value }))
+            .filter((p): p is { time: never; value: number } => p.value !== null);
 
-          for (const level of [70, 30]) {
-            rsiSeries.createPriceLine({
-              price: level,
-              color: COLOR.band,
-              lineWidth: 1,
-              lineStyle: LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: String(level),
+          if (rsiPoints.length > 0) {
+            const rsiSeries = chart.addSeries(
+              LineSeries,
+              {
+                color: COLOR.rsi,
+                lineWidth: 1,
+                priceLineVisible: false,
+                lastValueVisible: true,
+                crosshairMarkerVisible: false,
+              },
+              1,
+            );
+            rsiSeries.setData(rsiPoints);
+
+            for (const level of [70, 30]) {
+              rsiSeries.createPriceLine({
+                price: level,
+                color: COLOR.band,
+                lineWidth: 1,
+                lineStyle: LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: String(level),
+              });
+            }
+
+            // Pinned so RSI cannot autoscale to a flat line in a quiet stretch.
+            rsiSeries.applyOptions({
+              autoscaleInfoProvider: () => ({
+                priceRange: { minValue: 0, maxValue: 100 },
+              }),
             });
+            // Default margins pad a 0-100 range out to roughly 0-120, which
+            // squeezes the 30-70 band nobody is looking away from.
+            rsiSeries.priceScale().applyOptions({
+              scaleMargins: { top: 0.08, bottom: 0.08 },
+            });
+
+            const panes = chart.panes();
+            if (panes.length > 1) panes[1].setHeight(110);
           }
-
-          // Pinned so RSI cannot autoscale to a flat line in a quiet stretch.
-          rsiSeries.applyOptions({
-            autoscaleInfoProvider: () => ({
-              priceRange: { minValue: 0, maxValue: 100 },
-            }),
-          });
-          // Default margins pad a 0-100 range out to roughly 0-120, which
-          // squeezes the 30-70 band nobody is looking away from.
-          rsiSeries.priceScale().applyOptions({
-            scaleMargins: { top: 0.08, bottom: 0.08 },
-          });
-
-          const panes = chart.panes();
-          if (panes.length > 1) panes[1].setHeight(110);
         }
 
-        chart.timeScale().fitContent();
+        // --- gamma levels, as flat lines from today's snapshot ---
+        // Only those within range of spot; a wall 20% away is not in play and
+        // would only compress the price scale. The walls share a neutral tone
+        // and the flip gets its own, so nothing here reads as a buy or sell.
+        if (levelsOn) {
+          for (const level of levels) {
+            if (
+              spot !== null &&
+              spot > 0 &&
+              Math.abs((level.price - spot) / spot) * 100 > LEVEL_RANGE_PCT
+            ) {
+              continue;
+            }
+            candles.createPriceLine({
+              price: level.price,
+              color: level.kind === 'flip' ? COLOR.level : COLOR.vwap,
+              lineWidth: 1,
+              lineStyle: level.kind === 'flip' ? LineStyle.Dashed : LineStyle.Solid,
+              axisLabelVisible: true,
+              title: level.name,
+            });
+          }
+        }
+
+        // --- the visible window ---
+        // A symbol change opens on the last few sessions of the new ticker; a
+        // timeframe change keeps whatever window was on screen. See the ref.
+        const timeScale = chart.timeScale();
+        if (builtSymbolRef.current !== data.symbol) {
+          visibleRangeRef.current = null;
+          builtSymbolRef.current = data.symbol;
+        }
+
+        const restore = visibleRangeRef.current;
+        if (restore) {
+          timeScale.setVisibleRange({ from: restore.from as never, to: restore.to as never });
+        } else {
+          const from = lastSessionsFrom(bars, INITIAL_SESSIONS);
+          if (from !== null) {
+            timeScale.setVisibleRange({
+              from: from as never,
+              to: bars[bars.length - 1].t as never,
+            });
+          } else {
+            timeScale.fitContent();
+          }
+        }
+
+        // Remember the window as the reader pans or zooms, so the next
+        // timeframe switch reopens on it rather than resetting.
+        const onRange = (range: { from: number; to: number } | null) => {
+          if (range) visibleRangeRef.current = { from: range.from, to: range.to };
+        };
+        timeScale.subscribeVisibleTimeRangeChange(onRange as never);
+
         cleanup = () => {
           seriesRef.current = {};
           profileRef.current = null;
+          timeScale.unsubscribeVisibleTimeRangeChange(onRange as never);
           // `chart.remove()` disposes attached primitives with the series.
           chart.remove();
         };
@@ -531,17 +752,21 @@ export function InteractiveChart({
       disposed = true;
       cleanup?.();
     };
-  }, [data]);
+    // RSI, the levels and the levels toggle change the chart's structure — a
+    // pane, or a set of price lines — so they rebuild. The EMA/VWAP toggles do
+    // not: they only flip a line's visibility, handled by the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, overlays.rsi, levelsOn, levelsKey, spot]);
 
-  // --- toggle without rebuilding ---
+  // --- toggle the moving averages without rebuilding ---
   useEffect(() => {
     for (const overlay of OVERLAYS) {
       const series = seriesRef.current[overlay.key];
       if (!series) continue;
-      const usable = !overlay.intradayOnly || (data?.intraday ?? true);
+      const usable = overlay.key === 'vwap' ? vwapApplies(timeframe) : true;
       series.applyOptions({ visible: usable && overlays[overlay.key] });
     }
-  }, [overlays, data]);
+  }, [overlays, timeframe]);
 
   // --- volume profile, likewise without rebuilding ---
   useEffect(() => {
@@ -592,23 +817,17 @@ export function InteractiveChart({
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           {OVERLAYS.map((overlay) => {
-            const usable = !overlay.intradayOnly || (data?.intraday ?? true);
+            // VWAP is hidden entirely above 15 minutes rather than shown
+            // disabled — a running session average is meaningless there.
+            if (overlay.key === 'vwap' && !vwapApplies(timeframe)) return null;
             return (
               <label
                 key={overlay.key}
-                className={`flex cursor-pointer items-center gap-1.5 py-1 text-2xs tracking-[0.08em] ${
-                  usable ? 'text-term-dim' : 'cursor-not-allowed text-term-faint/50'
-                }`}
-                title={
-                  usable
-                    ? undefined
-                    : 'VWAP resets each session, so it only applies to intraday timeframes.'
-                }
+                className="flex cursor-pointer items-center gap-1.5 py-1 text-2xs tracking-[0.08em] text-term-dim"
               >
                 <input
                   type="checkbox"
-                  checked={usable && overlays[overlay.key]}
-                  disabled={!usable}
+                  checked={overlays[overlay.key]}
                   onChange={() => toggle(overlay.key)}
                   className="h-3.5 w-3.5 shrink-0 accent-[#f0a500]"
                 />
@@ -617,13 +836,57 @@ export function InteractiveChart({
                   className="h-0.5 w-3.5 shrink-0"
                   style={{
                     background: overlay.colour,
-                    opacity: usable && overlays[overlay.key] ? 1 : 0.3,
+                    opacity: overlays[overlay.key] ? 1 : 0.3,
                   }}
                 />
                 {overlay.label}
               </label>
             );
           })}
+
+          {/*
+            RSI is a toggle like the moving averages, but it draws in its own
+            pane below price rather than as a line over it — so it sits with
+            them here, and turning it on rebuilds to make room for the pane.
+          */}
+          <label className="flex cursor-pointer items-center gap-1.5 py-1 text-2xs tracking-[0.08em] text-term-dim">
+            <input
+              type="checkbox"
+              checked={overlays.rsi}
+              onChange={() => toggle('rsi')}
+              className="h-3.5 w-3.5 shrink-0 accent-[#f0a500]"
+            />
+            <span
+              aria-hidden
+              className="h-0.5 w-3.5 shrink-0"
+              style={{ background: COLOR.rsi, opacity: overlays.rsi ? 1 : 0.3 }}
+            />
+            RSI
+          </label>
+
+          {/*
+            The gamma levels toggle. On by default, and its own standing
+            preference — so it is grouped apart from the price-derived overlays.
+          */}
+          {levels.length > 0 && (
+            <label
+              className="flex cursor-pointer items-center gap-1.5 border-l border-term-line py-1 pl-3 text-2xs tracking-[0.08em] text-term-dim"
+              title="Gamma levels from today's option snapshot, drawn as flat lines. Toggling only changes what is drawn."
+            >
+              <input
+                type="checkbox"
+                checked={levelsOn}
+                onChange={() => writeLevelsEnabled(!levelsOn)}
+                className="h-3.5 w-3.5 shrink-0 accent-[#f0a500]"
+              />
+              <span
+                aria-hidden
+                className="h-0.5 w-3.5 shrink-0"
+                style={{ background: COLOR.level, opacity: levelsOn ? 1 : 0.3 }}
+              />
+              Gamma levels
+            </label>
+          )}
 
           {/*
             Separated from the moving averages because it is a different kind
@@ -662,6 +925,42 @@ export function InteractiveChart({
             </span>
           )}
         </div>
+
+        {/*
+          The level key, with a plain-English line on each. It doubles as the
+          place the level tooltips live, since a price line drawn on the canvas
+          has nowhere to hang one.
+        */}
+        {levelsOn && visibleLevels.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-term-line pt-1.5 text-2xs text-term-faint">
+            {visibleLevels.map((level) => (
+              <span key={level.key} className="flex items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className="h-0.5 w-3.5 shrink-0"
+                  style={{
+                    background: level.kind === 'flip' ? COLOR.level : COLOR.vwap,
+                  }}
+                />
+                {level.name}
+                <InfoTip tip={{ label: level.name, plain: level.plain }} />
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/*
+          A moving average the fetched history was too short to warm up is
+          hidden rather than drawn from a half-formed average — and said here,
+          so its empty toggle does not read as a bug.
+        */}
+        {unavailableEmas.length > 0 && (
+          <p className="border-t border-term-line pt-1.5 text-2xs leading-relaxed text-term-faint">
+            Not enough history on this timeframe to draw the{' '}
+            {unavailableEmas.join(' or the ')} yet, so {unavailableEmas.length > 1 ? 'they are' : 'it is'}{' '}
+            hidden rather than shown half-formed.
+          </p>
+        )}
       </figcaption>
 
       {error ? (
@@ -681,6 +980,7 @@ export function InteractiveChart({
         <span>
           <span className="text-flip">15-min delayed</span> · not live · RSI(14)
           with 30/70 marked
+          {levelsOn && visibleLevels.length > 0 && ' · levels are from today’s snapshot'}
         </span>
         {data && <span className="tabular-nums">last bar {data.asOfLabel}</span>}
       </div>
