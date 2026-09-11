@@ -1,10 +1,12 @@
 import raw from './calendar.json';
 import {
   eventsForRow,
+  eventsInRange,
   hasHighImportanceToday,
   sessionRules,
   type EventRow,
   type MarketCalendar,
+  type ScheduledEvent,
   type SessionRules,
 } from './rules';
 import {
@@ -48,6 +50,11 @@ export function eventRow(now: Date = new Date()): EventRow[] {
 /** True when something high-importance is scheduled for today. */
 export function highImportanceToday(now: Date = new Date()): boolean {
   return hasHighImportanceToday(calendar, marketToday(now));
+}
+
+/** Scheduled events on or between two `YYYY-MM-DD` dates, inclusive. */
+export function eventsBetween(fromDate: string, toDate: string): ScheduledEvent[] {
+  return eventsInRange(calendar, fromDate, toDate);
 }
 
 /**

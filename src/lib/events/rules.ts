@@ -150,6 +150,26 @@ export function hasHighImportanceToday(
   );
 }
 
+/**
+ * Scheduled events falling on or between two dates, inclusive, in date order.
+ *
+ * Used to say how eventful the sessions a hold rate was measured over actually
+ * were. The comparison is lexical on `YYYY-MM-DD`, which sorts the same as the
+ * dates do, so no parsing is needed and a malformed date simply falls outside
+ * every range rather than throwing.
+ */
+export function eventsInRange(
+  calendar: MarketCalendar,
+  fromDate: string,
+  toDate: string,
+): ScheduledEvent[] {
+  return calendar.events
+    .filter((e) => e.date >= fromDate && e.date <= toDate)
+    .sort((a, b) =>
+      a.date === b.date ? a.timeEt.localeCompare(b.timeEt) : a.date.localeCompare(b.date),
+    );
+}
+
 /** The line shown when it does. Fixed wording, one place. */
 export const EVENT_RISK_WARNING =
   'Dealer-positioning levels are less reliable around scheduled news.';

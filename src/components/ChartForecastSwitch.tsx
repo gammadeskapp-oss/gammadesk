@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { InteractiveChart } from './InteractiveChart';
+import { InteractiveChart, type ChartLevel } from './InteractiveChart';
 
 /**
  * One area, two views of the same ticker: the interactive chart and the
@@ -20,10 +20,16 @@ import { InteractiveChart } from './InteractiveChart';
 export function ChartForecastSwitch({
   symbol,
   forecast,
+  levels = [],
+  spot = null,
 }: {
   symbol: string;
   /** The forecast cone, or a panel explaining why there isn't one. */
   forecast: ReactNode;
+  /** Gamma levels drawn on the chart, from today's snapshot. */
+  levels?: ChartLevel[];
+  /** Spot the levels are measured against. */
+  spot?: number | null;
 }) {
   const [view, setView] = useState<'chart' | 'forecast'>('chart');
 
@@ -82,7 +88,7 @@ export function ChartForecastSwitch({
           had set up and refetch the bars.
         */}
         <div hidden={view !== 'chart'}>
-          <InteractiveChart symbol={symbol} />
+          <InteractiveChart symbol={symbol} levels={levels} spot={spot} />
         </div>
         <div hidden={view !== 'forecast'}>{forecast}</div>
       </div>
