@@ -7,7 +7,14 @@ import typescript from 'eslint-config-next/typescript';
  */
 const config = [
   {
-    ignores: ['.next/**', 'node_modules/**', 'next-env.d.ts'],
+    /*
+     * `**` prefixes so build output is ignored wherever it sits, not only at
+     * the repo root: the Claude harness checks other sessions out into
+     * `.claude/worktrees/*`, each with its own generated `.next`, and a bare
+     * `.next/**` matches none of them — so `eslint .` was linting tens of
+     * thousands of lines of compiled turbopack chunks from other branches.
+     */
+    ignores: ['**/.next/**', '**/node_modules/**', '.claude/**', 'next-env.d.ts'],
   },
   ...coreWebVitals,
   ...typescript,
