@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { AutoRefresh } from '@/components/AutoRefresh';
-import { BreadthCard } from '@/components/BreadthCard';
 import { ChartForecastSwitch } from '@/components/ChartForecastSwitch';
+import type { ChartLevel } from '@/components/InteractiveChart';
+import { ContextBand } from '@/components/ContextBand';
 import { DecisionSearch } from '@/components/DecisionSearch';
 import { ExposureTables } from '@/components/ExposureTables';
 import { Footer } from '@/components/Footer';
@@ -16,8 +17,11 @@ import { RetestFeed } from '@/components/RetestFeed';
 import { SimpleRead } from '@/components/SimpleRead';
 import { getBreadth } from '@/lib/breadth';
 import type { BreadthReading } from '@/lib/breadth/types';
-import { regimeDisplay, regimeOfMood } from '@/lib/regime';
+import { regimeOfMood } from '@/lib/regime';
 import { config } from '@/lib/config';
+import { getBars } from '@/lib/bars/intraday';
+import { buildContextBand, type ContextBand as ContextBandData } from '@/lib/decision/contextBand';
+import type { LogEntry } from '@/lib/log/types';
 import { TradeabilityPanel } from '@/components/TradeabilityPanel';
 import { ChainError } from '@/lib/chainSource';
 import { DecisionError, getDecision, type DecisionResult } from '@/lib/decision';
@@ -29,9 +33,9 @@ import {
 } from '@/lib/log/positioningRecord';
 import { getForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
-import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
+import { formatStrike } from '@/lib/format';
 import { getPositioningView } from '@/lib/positioning';
-import { currentMarketStatus, snapshotStaleness } from '@/lib/events';
+import { eventsBetween, snapshotStaleness } from '@/lib/events';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { MethodologyDrawer } from '@/components/MethodologyDrawer';
 import { positioningMethodology, type Methodology } from '@/lib/methodology';
@@ -114,60 +118,16 @@ function Section({
   );
 }
 
-function Tile({
-  label,
-  value,
-  sub,
-  tone = 'neutral',
-  tip,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: 'neutral' | 'pos' | 'neg' | 'flip' | 'bull' | 'bear';
-  tip?: TooltipKey;
-}) {
-  const colour = {
-    neutral: 'text-term-text',
-    pos: 'text-pos',
-    neg: 'text-neg',
-    flip: 'text-flip',
-    bull: 'text-bull',
-    bear: 'text-bear',
-  }[tone];
-  const edge = {
-    neutral: 'border-term-line',
-    pos: 'border-pos/40',
-    neg: 'border-neg/40',
-    flip: 'border-flip/40',
-    bull: 'border-bull/40',
-    bear: 'border-bear/40',
-  }[tone];
-
-  return (
-    <div className={`panel border-l-2 px-3.5 py-2.5 ${edge}`}>
-      <div className="flex items-center gap-1.5">
-        <span className="label-xs">{label}</span>
-        {tip && <InfoTip for={tip} />}
-      </div>
-      <div className={`mt-1 text-lg font-bold tabular-nums ${colour}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-2xs text-term-faint">{sub}</div>}
-    </div>
-  );
-}
-
 function Decision({
   data,
-  breadth,
-  retests,
+  band,
   methodology,
-  stale,
   positioningRecord,
   tracksLog,
 }: {
   data: DecisionResult;
-  breadth: BreadthReading | null;
-  retests: RetestFeedData | null;
+  /** The whole context band, assembled on the server — see lib/decision/contextBand. */
+  band: ContextBandData;
   /*
    * The settled record for the tracked symbol, or null on any other ticker —
    * and null also when the log could not be read, which `tracksLog`
@@ -177,8 +137,6 @@ function Decision({
   positioningRecord: PositioningRecord | null;
   /** True when this page is showing the one symbol the log records. */
   tracksLog: boolean;
-  /** Graded by the caller, so this and the banner cannot disagree. */
-  stale: boolean;
   /*
    * Null when the chain snapshot behind the decision could not be re-read.
    * The decision itself survives that — it was built from a cached copy — but
@@ -188,33 +146,6 @@ function Decision({
   methodology: Methodology | null;
 }) {
   const { context: c, walls, conviction, verdict, liquidity } = data;
-
-  /*
-   * Resolved here rather than inside the breadth card, which is a client
-   * component: a clock read during hydration disagrees with the server's and
-   * costs the subtree. See the same note in `ContextRow`.
-   */
-  const market = currentMarketStatus();
-
-  /*
-   * The regime tile, decided in one place.
-   *
-   * Two sources feed it: the option chain says where spot sits relative to the
-   * flip right now, and the level feed says which crossing of it was last
-   * confirmed on one-minute bars. They are normally the same; when the chain
-   * has just been re-solved they can disagree for a refresh or two.
-   *
-   * Nothing is composed here. `regimeDisplay` owns the wording, the colour and
-   * the disagreement case together, so this tile cannot drift from the way
-   * every other surface says the same thing — see lib/regime.ts.
-   *
-   * The feed reports a mood, so it is converted to a regime before comparison;
-   * that keeps a single vocabulary crossing the boundary.
-   */
-  const regime = regimeDisplay(
-    c.regime,
-    retests?.regime ? regimeOfMood(retests.regime) : null,
-  );
 
   /*
    * Every dollar exposure figure is open interest times a modelled greek, so
@@ -227,130 +158,15 @@ function Decision({
   return (
     <>
       {/*
-        1 — CONTEXT, as one row.
+        1 — CONTEXT, as one band.
 
-        Five readings that only mean anything together: the regime says how the
-        tape behaves, the flip says where that changes, the magnets say where
-        price stalls, and the last tile says which side of the boundary we are
-        currently on. Spot moved up into the heading — it is the one number
-        nobody needs a tile to find.
+        The old six-tile row became one bordered band of four zones: the levels
+        and how often they have held, the gamma regime and where it flips, and
+        the wider-market reads. Spot moved into the band's own header — it is
+        the one number nobody needs a tile to find. Everything the band shows is
+        computed on the server; see lib/decision/contextBand.
       */}
-      <Section
-        step={1}
-        title="Context"
-        tip={
-          /*
-            The price carries its own stamp. Every other figure on the page
-            says how old it is; the one number people actually read was the
-            exception, which quietly implied it was live. It is not.
-          */
-          <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-2xs text-term-faint">
-            <span className="text-sm font-bold tabular-nums text-term-text">
-              {formatPrice(c.spot)}
-            </span>
-            <span>{c.symbol} spot · from the positioning book</span>
-            <span className="text-term-dim">
-              as of {c.quoteDateLabel}
-              {/*
-                Only on a book that is actually current. "Delayed 15 min" is a
-                claim about the feed's lag behind the market, and it is true
-                only while the feed is keeping up: on a thin name whose chain
-                the provider has not rewritten since the weekend, the same
-                words assert a quarter-hour of lag over a book that is days
-                old. The banner above already says how old — this line must
-                not quietly contradict it.
-              */}
-              {!stale && ' · delayed 15 min'}
-            </span>
-          </span>
-        }
-      >
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
-          <Tile
-            label="Gamma regime"
-            value={regime.value}
-            sub={regime.sub}
-            tone={regime.tone}
-            tip="regime"
-          />
-          <Tile
-            label="Gamma flip"
-            tip="flip"
-            value={c.flipLevel === null ? '—' : formatPrice(c.flipLevel)}
-            sub={c.flipLevel === null ? 'no crossing nearby' : 'calm above, wild below'}
-            tone="flip"
-          />
-          <Tile
-            label="Magnet above"
-            tip="magnetAbove"
-            value={c.magnetAbove ? formatStrike(c.magnetAbove.strike) : '—'}
-            sub={
-              !c.magnetAbove
-                ? 'none nearby'
-                : showExposure
-                  ? formatUsd(c.magnetAbove.gex)
-                  : 'exposure suppressed'
-            }
-            tone={
-              c.magnetAbove && showExposure
-                ? c.magnetAbove.gex >= 0
-                  ? 'pos'
-                  : 'neg'
-                : 'neutral'
-            }
-          />
-          <Tile
-            label="Magnet below"
-            tip="magnetBelow"
-            value={c.magnetBelow ? formatStrike(c.magnetBelow.strike) : '—'}
-            sub={
-              !c.magnetBelow
-                ? 'none nearby'
-                : showExposure
-                  ? formatUsd(c.magnetBelow.gex)
-                  : 'exposure suppressed'
-            }
-            tone={
-              c.magnetBelow && showExposure
-                ? c.magnetBelow.gex >= 0
-                  ? 'pos'
-                  : 'neg'
-                : 'neutral'
-            }
-          />
-          {/*
-            Its own tile now rather than a subtitle under the flip level. Which
-            side of the flip price sits on is the single most consequential
-            reading in the row, and it was set in the smallest type on screen.
-          */}
-          <Tile
-            label="Above / below flip"
-            tip="flip"
-            value={
-              c.aboveFlip === null ? '—' : c.aboveFlip ? 'ABOVE' : 'BELOW'
-            }
-            sub={
-              c.flipDistancePct === null
-                ? 'no flip level to measure from'
-                : `${c.flipDistancePct >= 0 ? '+' : ''}${c.flipDistancePct.toFixed(2)}% from the flip`
-            }
-            tone={c.aboveFlip === null ? 'neutral' : c.aboveFlip ? 'pos' : 'neg'}
-          />
-
-          {/*
-            Market-wide context, so it belongs beside the regime rather than
-            down with the levels: everything else in this row is about this one
-            ticker, and this is the reading that says whether the rest of the
-            market is doing the same thing.
-          */}
-          {breadth && (
-            <BreadthCard
-              reading={breadth}
-              closedNote={market.open ? undefined : market.nextUpdateLine}
-            />
-          )}
-        </div>
-      </Section>
+      <ContextBand band={band} />
 
       {/*
         2 — LEVELS and CONVICTION, side by side.
@@ -593,7 +409,7 @@ export default async function DecisionPage({ searchParams }: PageProps) {
    * are allowed to fail on their own: a name with a readable chain but no
    * simulation still gets everything else.
    */
-  const [forecast, positioning, breadth, retests] = symbol
+  const [forecast, positioning, breadth, retests, dailyBars] = symbol
     ? await Promise.all([
         getForecast(symbol).catch((): ForecastResult | null => null),
         getPositioningView(symbol).catch((): PositioningData | null => null),
@@ -604,8 +420,18 @@ export default async function DecisionPage({ searchParams }: PageProps) {
          */
         getBreadth().catch((): BreadthReading | null => null),
         getRetests(symbol).catch((): RetestFeedData | null => null),
+        /*
+         * Daily bars, for the context band's per-level hold-rate backtest.
+         * Cached at 15 minutes like the chart's, so this shares a read with
+         * anything else that has asked for this ticker's dailies. Failure is
+         * an empty series, not a lost page — the band simply shows em dashes
+         * and says why.
+         */
+        getBars(symbol, '1D')
+          .then((s) => s.bars)
+          .catch((): { t: number; h: number; l: number; c: number }[] => []),
       ])
-    : [null, null, null, null];
+    : [null, null, null, null, []];
 
   /*
    * The accuracy log holds one symbol and has no field to hold another, so it
@@ -613,13 +439,23 @@ export default async function DecisionPage({ searchParams }: PageProps) {
    * there is nothing to fetch and nothing to compare against — see
    * `lib/log/positioningRecord.ts`, and `app/page.tsx`, which withholds its
    * log line on the same grounds.
+   *
+   * Read once here and used twice: the settled record below, and the
+   * session-over-session flip side the band's "unchanged since" line needs.
    */
   const tracksLog = symbol === config.symbol;
-  const positioningRecord: PositioningRecord | null = tracksLog
-    ? await readLog()
-        .then(summarisePositioningRecord)
-        .catch((): PositioningRecord | null => null)
-    : null;
+  const logEntries: LogEntry[] = tracksLog
+    ? await readLog().catch((): LogEntry[] => [])
+    : [];
+
+  let positioningRecord: PositioningRecord | null = null;
+  if (tracksLog) {
+    try {
+      positioningRecord = summarisePositioningRecord(logEntries);
+    } catch {
+      positioningRecord = null;
+    }
+  }
 
   const forecastPanel = forecast ? (
     <ForecastChart data={forecast} />
@@ -642,6 +478,94 @@ export default async function DecisionPage({ searchParams }: PageProps) {
    * lists the inputs to this view rather than restating the general case.
    */
   const methodology = positioning ? positioningMethodology(positioning) : null;
+
+  /*
+   * The context band, assembled once on the server from everything above so
+   * its 5-day / 20-day switch can be an instant client toggle over two
+   * pre-computed answers. Built only when the decision itself resolved — with
+   * no chain there is no spot, no levels and no regime to describe.
+   */
+  /*
+   * The four gamma levels the chart draws as flat lines, from today's book:
+   * the flip, the two nearest walls, and the single heaviest strike (HVL). One
+   * value each for the whole window — these are the current snapshot, not a
+   * per-bar history, which the chart states beneath itself. Nothing here is
+   * phrased as a place to buy or sell.
+   */
+  const hvl = data?.levelMap.rungs.find((r) => r.labels.includes('heaviest')) ?? null;
+  const chartLevels: ChartLevel[] = data
+    ? [
+        data.context.flipLevel !== null && {
+          key: 'flip',
+          name: 'Gamma flip',
+          price: data.context.flipLevel,
+          kind: 'flip' as const,
+          plain:
+            'The price where dealer hedging switches from calming moves to amplifying them. Above it tends calmer, below it wilder.',
+        },
+        data.context.magnetAbove && {
+          key: 'callWall',
+          name: 'Call wall',
+          price: data.context.magnetAbove.strike,
+          kind: 'wall' as const,
+          plain:
+            'A price above, where a heavy bank of call options tends to slow moves higher.',
+        },
+        data.context.magnetBelow && {
+          key: 'putWall',
+          name: 'Put wall',
+          price: data.context.magnetBelow.strike,
+          kind: 'wall' as const,
+          plain:
+            'A price below, where a heavy bank of put options tends to slow moves lower.',
+        },
+        hvl && {
+          key: 'hvl',
+          name: 'HVL',
+          price: hvl.price,
+          kind: 'wall' as const,
+          plain:
+            'The strike carrying the most options overall — the level price tends to be drawn toward most strongly.',
+        },
+      ].filter((l): l is ChartLevel => Boolean(l))
+    : [];
+
+  const band: ContextBandData | null = data
+    ? buildContextBand({
+        symbol: data.context.symbol,
+        spot: data.context.spot,
+        quoteDateLabel: data.context.quoteDateLabel,
+        stale: Boolean(staleness?.stale),
+        regime: data.context.regime,
+        observedRegime: retests?.regime ? regimeOfMood(retests.regime) : null,
+        flipLevel: data.context.flipLevel,
+        flipDistancePct: data.context.flipDistancePct,
+        magnetAbove: data.context.magnetAbove
+          ? { strike: data.context.magnetAbove.strike, distancePct: data.context.magnetAbove.distancePct }
+          : null,
+        magnetBelow: data.context.magnetBelow
+          ? { strike: data.context.magnetBelow.strike, distancePct: data.context.magnetBelow.distancePct }
+          : null,
+        dailyBars,
+        breadthPct: breadth?.computed?.pctAbovePriorClose ?? null,
+        atmIv: positioning?.summary.atmIv ?? null,
+        realisedVol: forecast?.volatility ?? null,
+        regimeTracked: tracksLog,
+        regimeSides: logEntries.map((e) => ({
+          date: e.date,
+          side:
+            e.flipLevel !== null && Number.isFinite(e.flipLevel)
+              ? e.spotAtSnapshot >= e.flipLevel
+                ? 'above'
+                : 'below'
+              : null,
+        })),
+        eventsInWindow: (from, to) => {
+          const events = eventsBetween(from, to);
+          return { count: events.length, names: events.map((ev) => ev.name) };
+        },
+      })
+    : null;
 
   return (
     <>
@@ -704,15 +628,15 @@ export default async function DecisionPage({ searchParams }: PageProps) {
               </div>
             }
             advanced={
-              <Decision
-                data={data}
-                breadth={breadth}
-                retests={retests}
-                methodology={methodology}
-                stale={Boolean(staleness?.stale)}
-                positioningRecord={positioningRecord}
-                tracksLog={tracksLog}
-              />
+              band && (
+                <Decision
+                  data={data}
+                  band={band}
+                  methodology={methodology}
+                  positioningRecord={positioningRecord}
+                  tracksLog={tracksLog}
+                />
+              )
             }
           />
           </div>
@@ -728,7 +652,12 @@ export default async function DecisionPage({ searchParams }: PageProps) {
         */}
         {symbol && (
           <Section step={5} title="Chart / Forecast">
-            <ChartForecastSwitch symbol={symbol} forecast={forecastPanel} />
+            <ChartForecastSwitch
+              symbol={symbol}
+              forecast={forecastPanel}
+              levels={chartLevels}
+              spot={data?.context.spot ?? null}
+            />
 
             {/*
               Directly beneath the chart, in the same column, because it is a
