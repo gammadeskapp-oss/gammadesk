@@ -180,6 +180,48 @@ export interface BuildOptions extends GreekParams {
   meta: Omit<DataMeta, 'contractsUsed' | 'ivSources'>;
 }
 
+/** A month, as the fraction of a year the option `T` is measured in. */
+const ONE_MONTH_YEARS = 30 / 365;
+
+/**
+ * The at-the-money implied volatility roughly a month out.
+ *
+ * Picks the contract whose time to expiry is closest to a month, then the
+ * strike closest to spot within that expiration, and reads its quoted IV. This
+ * is the one place the market's own volatility number survives — the greeks
+ * that everything else here is built from have already folded it away — so it
+ * is read as directly as possible rather than reconstructed.
+ *
+ * Null when nothing usable is in scope: no contract with a positive IV, which
+ * is the honest answer rather than a zero that would read as "the market
+ * expects no movement".
+ */
+function atmImpliedVol(contracts: NormalisedContract[], spot: number): number | null {
+  const usable = contracts.filter(
+    (c) => Number.isFinite(c.iv) && c.iv > 0 && Number.isFinite(c.T) && c.T > 0,
+  );
+  if (usable.length === 0 || !(spot > 0)) return null;
+
+  // Nearest expiry to a month, breaking ties toward the strike nearest spot so
+  // one clear contract is chosen rather than an average across a fan of them.
+  let best: NormalisedContract | null = null;
+  for (const c of usable) {
+    if (best === null) {
+      best = c;
+      continue;
+    }
+    const dT = Math.abs(c.T - ONE_MONTH_YEARS);
+    const dTBest = Math.abs(best.T - ONE_MONTH_YEARS);
+    if (dT < dTBest) {
+      best = c;
+    } else if (dT === dTBest && Math.abs(c.strike - spot) < Math.abs(best.strike - spot)) {
+      best = c;
+    }
+  }
+
+  return best ? best.iv : null;
+}
+
 /**
  * Assemble the full dashboard payload: pick the expirations and strikes to
  * display, aggregate every contract into its cell, and derive the summary.
@@ -307,6 +349,7 @@ export function buildPositioning(
     totalPutOi: grandTotal.putOi,
     putCallOiRatio:
       grandTotal.callOi > 0 ? grandTotal.putOi / grandTotal.callOi : null,
+    atmIv: atmImpliedVol(inScope, spot),
   };
 
   return {

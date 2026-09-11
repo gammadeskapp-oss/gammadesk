@@ -87,6 +87,19 @@ export interface Summary {
   totalCallOi: number;
   totalPutOi: number;
   putCallOiRatio: number | null;
+  /**
+   * Implied volatility of the roughly one-month, at-the-money contract, as an
+   * annualised decimal (0.18 = 18%). Null when the chain in scope carries no
+   * contract near a month out to read one from.
+   *
+   * This is the market's own price for the next month's volatility, and the
+   * only place the raw per-contract IV survives the aggregation — every other
+   * figure here is open interest times a modelled greek, and the IV that went
+   * into that greek is gone by the time the contracts are summed. Kept so the
+   * variance-risk-premium reading has an implied side to subtract realised
+   * volatility from, rather than inventing one.
+   */
+  atmIv: number | null;
 }
 
 export interface DataMeta {
