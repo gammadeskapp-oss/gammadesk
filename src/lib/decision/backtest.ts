@@ -59,6 +59,19 @@ export interface HoldResult {
 export type LevelSide = 'above' | 'below';
 
 /**
+ * Fewest sessions a window may span and still state a hold rate.
+ *
+ * A rate is a fraction of tested sessions, and over a handful of sessions that
+ * fraction is noise wearing a percent sign: a wall touched twice and respected
+ * both times reads "100%", which claims a reliability the sample cannot carry.
+ * The 5-session window is always below this floor, so its rate is withheld
+ * rather than shown — the honest state of a week of data is "not enough history
+ * yet", and only the 20-session window earns a number. Shorter histories on the
+ * long window (a recent listing) fall the same way.
+ */
+export const MIN_HOLD_SESSIONS = 20;
+
+/**
  * How often price respected `level` over the last `horizon` sessions.
  *
  * `horizon` is a session count. When fewer sessions are available the window is
@@ -85,6 +98,15 @@ export function holdRate(
     tested += 1;
     const respected = side === 'above' ? bar.c <= level : bar.c >= level;
     if (respected) held += 1;
+  }
+
+  // Minimum-sample rule. A window shorter than the floor cannot support a rate,
+  // so none is stated — the tested/held counts are still returned so a caller
+  // can show how short the window was, but `rate` stays null and the reason
+  // says why. This is checked before the "never reached" case so a five-session
+  // window reads as thin history, which it is, rather than as an untested level.
+  if (window.length < MIN_HOLD_SESSIONS) {
+    return { rate: null, tested, held, reason: 'not enough history yet' };
   }
 
   if (tested === 0) {

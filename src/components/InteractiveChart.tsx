@@ -1,7 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { isTimeframe, TIMEFRAMES, type Timeframe } from '@/lib/bars/types';
+import {
+  DEFAULT_TIMEFRAME,
+  resolveTimeframe,
+  TIMEFRAMES,
+  type Timeframe,
+} from '@/lib/bars/types';
+import { toEtChartTime } from '@/lib/bars/etTime';
 import { ema, rsi } from '@/lib/ticker/indicators';
 import { InfoTip } from './InfoTip';
 import {
@@ -185,8 +191,9 @@ function writeOverlays(value: OverlayState): void {
  */
 function readStoredTimeframe(fallback: Timeframe): Timeframe {
   try {
-    const raw = window.localStorage.getItem(TF_KEY);
-    return isTimeframe(raw) ? raw : fallback;
+    // Persisted preference first, default second — the precedence lives in the
+    // pure `resolveTimeframe` so it is the same rule the verify script pins.
+    return resolveTimeframe(window.localStorage.getItem(TF_KEY), fallback);
   } catch {
     return fallback;
   }
@@ -365,7 +372,7 @@ export interface ChartLevel {
 
 export function InteractiveChart({
   symbol,
-  initialTimeframe = '15m',
+  initialTimeframe = DEFAULT_TIMEFRAME,
   levels = [],
   spot = null,
   profileBuckets = DEFAULT_BUCKET_COUNT,
@@ -536,6 +543,17 @@ export function InteractiveChart({
           .sort((a, b) => a.t - b.t)
           .filter((bar, i, all) => i === 0 || bar.t !== all[i - 1].t);
 
+        /*
+         * The same bars with New York wall-clock timestamps — the only ones the
+         * library ever sees, so its axis and crosshair read ET like the footer
+         * and the context band do rather than UTC. Everything drawn on the time
+         * axis (candles, the profile, every overlay line, the visible window)
+         * uses these. The maths that must key off the real calendar date —
+         * VWAP's session reset and the opening-window helper — keeps using
+         * `bars`, since each still formats the true instant in ET itself.
+         */
+        const chartBars = bars.map((b) => ({ ...b, t: toEtChartTime(b.t) }));
+
         const candles = chart.addSeries(CandlestickSeries, {
           upColor: COLOR.up,
           downColor: COLOR.down,
@@ -546,7 +564,7 @@ export function InteractiveChart({
           priceLineVisible: false,
         });
         candles.setData(
-          bars.map((b) => ({
+          chartBars.map((b) => ({
             time: b.t as never,
             open: b.o,
             high: b.h,
@@ -572,7 +590,9 @@ export function InteractiveChart({
          * runs on this `data` before the browser paints.
          */
         const profile = new VolumeProfilePrimitive(PROFILE_COLOURS);
-        profile.setBars(bars);
+        // Chart-time bars: the profile filters itself against the time scale's
+        // visible range, which is in the same shifted zone as the candles.
+        profile.setBars(chartBars);
         profile.setEnabled(readProfileEnabled());
         candles.attachPrimitive(profile);
         profileRef.current = profile;
@@ -601,7 +621,7 @@ export function InteractiveChart({
             : vwapSeries(bars);
 
           const points = values
-            .map((value, i) => ({ time: bars[i].t as never, value }))
+            .map((value, i) => ({ time: chartBars[i].t as never, value }))
             .filter((p): p is { time: never; value: number } => p.value !== null);
 
           // A moving average with no defined point is one the history is too
@@ -636,7 +656,7 @@ export function InteractiveChart({
         if (current.rsi) {
           const rsiValues = rsi(closes, 14);
           const rsiPoints = rsiValues
-            .map((value, i) => ({ time: bars[i].t as never, value }))
+            .map((value, i) => ({ time: chartBars[i].t as never, value }))
             .filter((p): p is { time: never; value: number } => p.value !== null);
 
           if (rsiPoints.length > 0) {
@@ -718,11 +738,14 @@ export function InteractiveChart({
         if (restore) {
           timeScale.setVisibleRange({ from: restore.from as never, to: restore.to as never });
         } else {
+          // `lastSessionsFrom` walks the true instants to find the session
+          // boundary, so it is given `bars`; the range handed to the axis is in
+          // chart time, like everything else the scale sees.
           const from = lastSessionsFrom(bars, INITIAL_SESSIONS);
           if (from !== null) {
             timeScale.setVisibleRange({
-              from: from as never,
-              to: bars[bars.length - 1].t as never,
+              from: toEtChartTime(from) as never,
+              to: chartBars[chartBars.length - 1].t as never,
             });
           } else {
             timeScale.fitContent();
