@@ -5,14 +5,23 @@
  * Navigation moved to the sidebar; this keeps the provenance — the "data as
  * of" stamp — attached to the page it describes.
  */
+import type { ReactNode } from 'react';
+
 export function PageBar({
   title,
+  titleAccessory,
   description,
   meta,
   asOfLabel,
   titleLevel = 1,
 }: {
   title: string;
+  /**
+   * Rendered inline, immediately to the right of the title on the same line —
+   * e.g. the /scanner tabs. Kept beside the heading rather than on its own row
+   * so a page with more than one view says so at the title, not below it.
+   */
+  titleAccessory?: ReactNode;
   /**
    * One line saying what the page is for. Always rendered, never hover-only —
    * see `lib/pageMeta.ts`.
@@ -35,9 +44,12 @@ export function PageBar({
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
       <div className="min-w-0">
-        <Title className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
-          {title}
-        </Title>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Title className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
+            {title}
+          </Title>
+          {titleAccessory}
+        </div>
         {description && (
           <p className="mt-1 max-w-2xl text-xs leading-relaxed text-term-dim">
             {description}

@@ -4,6 +4,8 @@ import { PageBar } from '@/components/PageBar';
 import { RefreshStatus } from '@/components/RefreshStatus';
 import { ScannerBoard } from '@/components/ScannerBoard';
 import { ScannerRunRate } from '@/components/ScannerRunRate';
+import { ScannerTabs } from '@/components/ScannerTabs';
+import { TosTrendTab } from '@/components/TosTrendTab';
 import { InfoTip } from '@/components/InfoTip';
 import { getBreadth } from '@/lib/breadth';
 import { breadthSentence } from '@/lib/breadth/wording';
@@ -22,7 +24,32 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function ScannerPage() {
+interface ScannerPageProps {
+  searchParams: Promise<{ tab?: string }>;
+}
+
+export default async function ScannerPage({ searchParams }: ScannerPageProps) {
+  const { tab } = await searchParams;
+
+  /*
+    The TOS Trend tab is a separate, owner-only view. Branch before touching any
+    scanner data: this tab does none of the scanner's work, and its list is
+    fetched client-side behind a cookie so no tickers are ever server-rendered
+    without a valid session. The S&P 500 path below is unchanged apart from the
+    tabs now sitting beside the title.
+  */
+  if (tab === 'tos') {
+    return (
+      <>
+        <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+          <PageBar title="Scanner" titleAccessory={<ScannerTabs />} />
+          <TosTrendTab />
+        </main>
+        <Footer />
+      </>
+    );
+  }
+
   const view = await getScannerView();
   // Reads a stored document, so it costs the scan nothing.
   const breadth = await getBreadth().catch(() => null);
@@ -44,6 +71,7 @@ export default async function ScannerPage() {
         */}
         <PageBar
           title="Scanner"
+          titleAccessory={<ScannerTabs />}
           description={
             scan
               ? `${scan.scored} S&P 500 names scored 0-100 and ranked this morning` +
