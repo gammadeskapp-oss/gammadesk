@@ -20,8 +20,22 @@ export const SESSION_COOKIE = 'tos_session';
 export const SESSION_MAX_AGE_S = 30 * 24 * 60 * 60;
 const SESSION_MAX_AGE_MS = SESSION_MAX_AGE_S * 1000;
 
+/**
+ * Read an env var at request time, defeating any build-time inlining.
+ *
+ * Bundlers (webpack's DefinePlugin, and others) statically replace the exact
+ * member expression `process.env.FOO` with the value seen at build time. Bracket
+ * access with a variable key is not a match for that substitution, so this
+ * always reads the live runtime environment — which is what a serverless
+ * function needs, since the value is only injected at request time on Vercel.
+ */
+function readEnv(name: string): string | undefined {
+  const key = name;
+  return process.env[key];
+}
+
 function cookieSecret(): string | null {
-  const secret = process.env.TOS_COOKIE_SECRET?.trim();
+  const secret = readEnv('TOS_COOKIE_SECRET')?.trim();
   return secret ? secret : null;
 }
 
@@ -46,7 +60,7 @@ function stripWrappingQuotes(s: string): string {
  * secret — and "the password is right but doesn't work" is exactly that.
  */
 function tabPassword(): string | null {
-  const raw = process.env.TOS_TAB_PASSWORD;
+  const raw = readEnv('TOS_TAB_PASSWORD');
   if (raw == null) return null;
   const cleaned = stripWrappingQuotes(raw.trim());
   return cleaned ? cleaned : null;
@@ -67,11 +81,19 @@ export function safeEqual(a: string, b: string): boolean {
  * Whether the submitted password is correct. False (never throwing) when
  * TOS_TAB_PASSWORD is unset, so a misconfigured deploy stays locked rather than
  * open.
+ *
+ * Both sides are trimmed before comparison: the configured value routinely
+ * gains a trailing newline in a Vercel env var or a `.env` file, and a password
+ * manager or a mobile keyboard can append a space to what is typed. A password
+ * with meaningful leading/trailing whitespace is a mistake this deliberately
+ * forgives — "the password is right but doesn't work" is almost always this.
  */
 export function checkPassword(submitted: string): boolean {
   const expected = tabPassword();
   if (!expected) return false;
-  return safeEqual(submitted, expected);
+  const given = typeof submitted === 'string' ? submitted.trim() : '';
+  if (!given) return false;
+  return safeEqual(given, expected);
 }
 
 function sign(payload: string, secret: string): string {

@@ -29,14 +29,56 @@ function clientIp(request: NextRequest): string {
   return request.headers.get('x-real-ip')?.trim() || 'unknown';
 }
 
+/**
+ * Pull the password out of the request body, tolerating both JSON and
+ * form-encoded bodies and never throwing on an empty or malformed one.
+ *
+ * Reading the raw text once and parsing it ourselves avoids `request.json()`
+ * throwing (which silently became an empty password) when a proxy, a form post
+ * or a different content-type is in play.
+ */
+async function readSubmittedPassword(request: NextRequest): Promise<string> {
+  let raw: string;
+  try {
+    raw = await request.text();
+  } catch {
+    return '';
+  }
+  if (!raw) return '';
+
+  // JSON body: { "password": "..." }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      const value = (parsed as { password?: unknown }).password;
+      if (typeof value === 'string') return value;
+    }
+  } catch {
+    // Not JSON — fall through to form parsing.
+  }
+
+  // Form-encoded body: password=...
+  try {
+    const value = new URLSearchParams(raw).get('password');
+    if (value != null) return value;
+  } catch {
+    // Neither shape — treated as empty below.
+  }
+
+  return '';
+}
+
 export async function POST(request: NextRequest) {
   // Log configuration presence only — never the values — so a "wrong password"
   // that is really a missing env var is diagnosable from the server logs.
+  // Bracket access so the value is read at request time, not inlined at build.
   console.log(
     '[tos-unlock] TOS_TAB_PASSWORD defined:',
-    Boolean(process.env.TOS_TAB_PASSWORD),
+    Boolean(process.env['TOS_TAB_PASSWORD']),
     '| TOS_COOKIE_SECRET defined:',
-    Boolean(process.env.TOS_COOKIE_SECRET),
+    Boolean(process.env['TOS_COOKIE_SECRET']),
+    '| runtime:',
+    process.env['NEXT_RUNTIME'] ?? 'nodejs',
   );
 
   const key = `tos-unlock:${clientIp(request)}`;
@@ -50,15 +92,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let password = '';
-  try {
-    const body: unknown = await request.json();
-    if (body && typeof body === 'object' && typeof (body as { password?: unknown }).password === 'string') {
-      password = (body as { password: string }).password;
-    }
-  } catch {
-    // No/!JSON body — treated as an empty, wrong password below.
-  }
+  const password = await readSubmittedPassword(request);
 
   if (!checkPassword(password)) {
     recordFailure(key);
