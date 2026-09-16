@@ -30,7 +30,8 @@ registerTsImports();
 
 const { checkPassword, safeEqual, createSession, verifySession, SESSION_MAX_AGE_S } =
   await import('../src/lib/tos/auth.ts');
-const { rateLimit, resetRateLimit } = await import('../src/lib/tos/rateLimit.ts');
+const { isRateLimited, recordFailure, clearFailures, resetRateLimit } =
+  await import('../src/lib/tos/rateLimit.ts');
 
 let failures = 0;
 let checks = 0;
@@ -63,6 +64,21 @@ ok('the right password passes', checkPassword('correct horse battery staple'));
 ok('a wrong password fails', checkPassword('nope') === false);
 ok('an empty password fails', checkPassword('') === false);
 ok('a near miss fails', checkPassword('correct horse battery staplE') === false);
+
+section('The configured password is trimmed of stray whitespace and wrapping quotes');
+
+// A value copied into an env var often gains a trailing newline/space or quotes.
+// The expected value is cleaned so the real password still matches.
+process.env.TOS_TAB_PASSWORD = '  hunter2\n';
+ok('surrounding whitespace is trimmed', checkPassword('hunter2'));
+process.env.TOS_TAB_PASSWORD = '"hunter2"';
+ok('double-quotes are stripped', checkPassword('hunter2'));
+process.env.TOS_TAB_PASSWORD = "'hunter2'";
+ok('single-quotes are stripped', checkPassword('hunter2'));
+process.env.TOS_TAB_PASSWORD = '   ';
+ok('an all-whitespace value is treated as unset', checkPassword('') === false && checkPassword('   ') === false);
+// Restore for later sections.
+process.env.TOS_TAB_PASSWORD = 'correct horse battery staple';
 
 // --- session cookie: mint and verify ----------------------------------------
 
@@ -101,25 +117,39 @@ ok('a valid cookie → verified (this is the data path)', verifySession(token) =
 
 // --- rate limiter ------------------------------------------------------------
 
-section('The unlock limiter allows 5 attempts per window, then refuses');
+section('The limiter counts only failures, and a correct password never blocks');
 
 resetRateLimit();
 {
   const key = 'ip:test';
   const start = 1_000_000;
   const window = 15 * 60 * 1000;
-  for (let i = 1; i <= 5; i += 1) {
-    ok(`attempt ${i} allowed`, rateLimit(key, 5, window, start).allowed === true);
+
+  // Peeking does not itself count: check it many times, still allowed.
+  for (let i = 0; i < 10; i += 1) {
+    ok(`peek ${i} does not count`, isRateLimited(key, 5, start).blocked === false);
   }
-  const sixth = rateLimit(key, 5, window, start);
-  ok('6th attempt refused', sixth.allowed === false);
-  ok('refusal carries a retry-after', sixth.retryAfterS > 0, String(sixth.retryAfterS));
+
+  // Five wrong guesses are allowed; the sixth is blocked.
+  for (let i = 1; i <= 5; i += 1) {
+    ok(`before failure ${i}, still allowed`, isRateLimited(key, 5, start).blocked === false);
+    recordFailure(key, window, start);
+  }
+  const sixth = isRateLimited(key, 5, start);
+  ok('after 5 failures, the 6th is blocked', sixth.blocked === true);
+  ok('the block carries a retry-after', sixth.retryAfterS > 0, String(sixth.retryAfterS));
+
+  // A correct password clears the failures — the owner is not locked out.
+  clearFailures(key);
+  ok('a correct password (clearFailures) unblocks immediately', isRateLimited(key, 5, start).blocked === false);
 
   // A different IP has its own budget.
-  ok('another IP is unaffected', rateLimit('ip:other', 5, window, start).allowed === true);
+  ok('another IP is unaffected', isRateLimited('ip:other', 5, start).blocked === false);
 
-  // Once the window elapses, the first IP is allowed again.
-  ok('window reset re-allows', rateLimit(key, 5, window, start + window + 1).allowed === true);
+  // Once the window elapses, an over-limit IP is allowed again.
+  for (let i = 0; i < 6; i += 1) recordFailure(key, window, start);
+  ok('blocked within the window', isRateLimited(key, 5, start).blocked === true);
+  ok('window reset re-allows', isRateLimited(key, 5, start + window + 1).blocked === false);
 }
 
 // --- result ------------------------------------------------------------------

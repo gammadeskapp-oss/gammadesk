@@ -25,9 +25,31 @@ function cookieSecret(): string | null {
   return secret ? secret : null;
 }
 
+/** Strip one pair of matching wrapping quotes, e.g. a `.env` value quoted by hand. */
+function stripWrappingQuotes(s: string): string {
+  if (s.length >= 2) {
+    const first = s[0];
+    const last = s[s.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return s.slice(1, -1);
+    }
+  }
+  return s;
+}
+
+/**
+ * The configured password, or null when unset.
+ *
+ * Trimmed of surrounding whitespace and a single pair of wrapping quotes,
+ * because a value copied into `.env.local` or a Vercel env var commonly picks
+ * up a trailing newline/space or quotes that were never meant to be part of the
+ * secret — and "the password is right but doesn't work" is exactly that.
+ */
 function tabPassword(): string | null {
-  const pw = process.env.TOS_TAB_PASSWORD;
-  return pw ? pw : null;
+  const raw = process.env.TOS_TAB_PASSWORD;
+  if (raw == null) return null;
+  const cleaned = stripWrappingQuotes(raw.trim());
+  return cleaned ? cleaned : null;
 }
 
 /** Constant-time string compare that does not leak length through early return. */
