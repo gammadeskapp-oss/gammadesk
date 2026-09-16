@@ -77,6 +77,28 @@ process.env.TOS_TAB_PASSWORD = "'hunter2'";
 ok('single-quotes are stripped', checkPassword('hunter2'));
 process.env.TOS_TAB_PASSWORD = '   ';
 ok('an all-whitespace value is treated as unset', checkPassword('') === false && checkPassword('   ') === false);
+
+section('The SUBMITTED password is also trimmed — the production "wrong password" bug');
+
+// The reported failure: the Vercel value and the typed password differ only by
+// whitespace/newline on one side. Both sides are now trimmed, so it matches.
+process.env.TOS_TAB_PASSWORD = 'hunter2';
+ok('a trailing newline on the env value still matches a clean input', (() => {
+  process.env.TOS_TAB_PASSWORD = 'hunter2\n';
+  return checkPassword('hunter2');
+})());
+ok('a trailing space on the typed password still matches a clean env value', (() => {
+  process.env.TOS_TAB_PASSWORD = 'hunter2';
+  return checkPassword('hunter2 ');
+})());
+ok('leading/trailing whitespace on both sides still matches', (() => {
+  process.env.TOS_TAB_PASSWORD = '  hunter2  ';
+  return checkPassword('\thunter2\n');
+})());
+ok('a genuinely different password still fails after trimming', (() => {
+  process.env.TOS_TAB_PASSWORD = 'hunter2';
+  return checkPassword('hunter3') === false;
+})());
 // Restore for later sections.
 process.env.TOS_TAB_PASSWORD = 'correct horse battery staple';
 
