@@ -100,7 +100,7 @@ export function TosTrendTab() {
 
   const loadTrend = useCallback(async () => {
     try {
-      const res = await fetch('/api/tos/trend', { cache: 'no-store' });
+      const res = await fetch('/api/tos/trend', { cache: 'no-store', credentials: 'same-origin' });
       if (res.status === 401) {
         setStatus('locked');
         setData(null);
@@ -144,6 +144,8 @@ export function TosTrendTab() {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ password }),
+          // Ensure the browser stores the Set-Cookie from this response.
+          credentials: 'same-origin',
         });
         if (res.ok) {
           setPassword('');
@@ -166,7 +168,7 @@ export function TosTrendTab() {
 
   const lock = useCallback(async () => {
     try {
-      await fetch('/api/tos/lock', { method: 'POST' });
+      await fetch('/api/tos/lock', { method: 'POST', credentials: 'same-origin' });
     } catch {
       // Even if the call fails, drop the client view; the cookie is httpOnly so
       // there is nothing to clear here beyond what the server does.

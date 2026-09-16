@@ -19,7 +19,8 @@ export async function POST() {
     name: SESSION_COOKIE,
     value: '',
     httpOnly: true,
-    secure: true,
+    // Match the unlock cookie's attributes so the browser overwrites/expires it.
+    secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
     path: '/',
     maxAge: 0,
