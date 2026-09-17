@@ -1,29 +1,32 @@
 /**
- * Parsing thinkorswim scan-alert email subjects.
+ * Parsing thinkorswim scan-alert email text (subject or body).
  *
- * thinkorswim emails one line per event, in the subject, and nothing this
- * feature needs is in the body. Two shapes, both seen from
- * alerts@thinkorswim.com:
+ * thinkorswim describes each event in one clause, and a single email can carry
+ * MORE THAN ONE — an addition and a removal together:
  *
  *   Alert: New symbols: BBWI, MRNA, TEM were added to Trend.
  *   Alert: Symbols: XYZ were removed from Trend.
+ *   Alert: New symbols: AMD, TSLA were added to Trend. Symbols: MRVL, NOK were removed from Trend.
  *
- * The wording is not stable enough to match literally. It varies by:
- *   - was / were, for one symbol vs several
- *   - added to / removed from
- *   - symbol / symbols, likewise
- *   - an optional trailing period
- *   - tickers that carry a dot or a slash — BRK.B, /ES
- *   - a leading "New " before "symbols", present on additions only
+ * So this does NOT match one clause anchored to the end of the string — that
+ * read the scan name of the first clause as "Trend. Symbols: … removed from
+ * Trend" and dropped the whole email. Instead it finds EVERY
+ * "(New) symbol(s): <list> was/were added to|removed from <scan>" clause in the
+ * text, in order, and returns them all. The caller keeps the ones whose scan is
+ * exactly "Trend" and applies each in turn.
  *
- * So the subject is matched with one tolerant expression, and every token in
- * the captured list is validated as a ticker rather than trusted. Anything
- * that does not match at all returns null; the caller logs those, because a
- * subject from thinkorswim that this cannot read is the signal that the format
- * moved and this file needs revisiting.
+ * Robustness:
+ *   - `was`/`were`, `added to`/`removed from`, `symbol`/`symbols`, optional
+ *     leading `New`, optional trailing period — all tolerated.
+ *   - tickers with a dot or slash (BRK.B, /ES) are kept intact; every token in
+ *     a list is validated as a ticker rather than trusted.
+ *   - the scan name is read up to the clause's period/newline/end, so it is
+ *     isolated even when another clause follows on the same line.
+ *   - matching runs over the whole text, so a multi-line body works as well as
+ *     a subject.
  *
- * This module is deliberately pure — no I/O, no `server-only` — so the poller
- * and the unit test can both import it.
+ * Pure — no I/O, no `server-only` — so the poller and the unit tests can both
+ * import it.
  */
 
 /** The scan whose alerts this feature acts on. Every other scan is ignored. */
@@ -31,34 +34,39 @@ export const TREND_SCAN = 'Trend';
 
 export type TrendAction = 'added' | 'removed';
 
-export interface AlertSubject {
-  /** Which scan the alert belongs to, exactly as written in the subject. */
+export interface AlertClause {
+  /** Which scan the clause belongs to, exactly as written. */
   scan: string;
   action: TrendAction;
   /** Uppercased, de-duplicated, in the order they appeared. */
   symbols: string[];
 }
 
+/** Back-compat alias — one clause looks the same as it used to. */
+export type AlertSubject = AlertClause;
+
 /**
- * The whole grammar, in one expression.
+ * One clause. Global + case-insensitive so `parseAlertClauses` can iterate over
+ * every clause in the text.
  *
- * Not anchored at the start, so the leading "Alert:" and an optional "New "
- * are simply skipped — matching begins at "symbol(s):". The list is captured
- * up to the "was/were" hinge, and the scan name is whatever follows the
- * action verb, minus an optional trailing period.
+ *   (New )?symbol(s): <list> was/were added to|removed from <scan>[.|\n|EOL]
+ *
+ * `list` is lazy so it stops at the first `was/were`; `scan` excludes `.` and
+ * newlines so it ends at the clause boundary rather than swallowing the next
+ * clause.
  */
-const SUBJECT_RE =
-  /\bsymbols?:\s*(?<list>[^:]+?)\s+(?:was|were)\s+(?<action>added\s+to|removed\s+from)\s+(?<scan>.+?)\.?\s*$/i;
+const CLAUSE_RE =
+  /(?:new\s+)?symbols?\s*:\s*(?<list>[\s\S]+?)\s+(?:was|were)\s+(?<action>added\s+to|removed\s+from)\s+(?<scan>[^.\r\n]+?)\s*(?:\.|\r|\n|$)/gi;
 
 /**
  * A single ticker. Letters to start (optionally behind a `/` for a futures
  * root like /ES), then letters or digits, with dot- or slash-joined suffixes
- * for names like BRK.B. Kept strict so a stray word between the colon and the
- * verb is dropped rather than stored as a symbol.
+ * for names like BRK.B. Strict, so a stray word in a list is dropped rather
+ * than stored as a symbol.
  */
 const TICKER_RE = /^\/?[A-Za-z][A-Za-z0-9]*(?:[.\/][A-Za-z0-9]+)*$/;
 
-/** Split the captured list on commas, the word "and", and whitespace. */
+/** Split a captured list on commas, the word "and", and whitespace. */
 function tickersFrom(list: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -74,42 +82,61 @@ function tickersFrom(list: string): string[] {
 }
 
 /**
- * Parse one alert subject into its scan, action and symbols, or null when the
- * subject is not a recognised add/remove alert. Says nothing about which scan
- * it is — that judgement is left to the caller via {@link isTrendScan}.
+ * Every add/remove clause found in the text, in order. Empty when the text is
+ * not a recognisable alert at all.
  */
-export function parseAlertSubject(subject: string | null | undefined): AlertSubject | null {
-  if (!subject) return null;
+export function parseAlertClauses(text: string | null | undefined): AlertClause[] {
+  if (!text) return [];
 
-  const match = SUBJECT_RE.exec(subject);
-  if (!match?.groups) return null;
-
-  const symbols = tickersFrom(match.groups.list);
-  if (symbols.length === 0) return null;
-
-  return {
-    scan: match.groups.scan.trim(),
-    action: match.groups.action.toLowerCase().startsWith('added') ? 'added' : 'removed',
-    symbols,
-  };
+  const out: AlertClause[] = [];
+  // A global regex is stateful; reset before iterating in case a prior throw
+  // left lastIndex advanced.
+  CLAUSE_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = CLAUSE_RE.exec(text)) !== null) {
+    if (!match.groups) continue;
+    const symbols = tickersFrom(match.groups.list);
+    if (symbols.length === 0) continue; // e.g. "symbols: were added" — no tickers
+    out.push({
+      scan: match.groups.scan.trim(),
+      action: match.groups.action.toLowerCase().startsWith('added') ? 'added' : 'removed',
+      symbols,
+    });
+  }
+  return out;
 }
 
-/** True when a parsed scan name is the Trend scan, case- and space-insensitive. */
+/** True when a scan name is the Trend scan, case- and space-insensitive. */
 export function isTrendScan(scan: string): boolean {
   return scan.trim().toLowerCase() === TREND_SCAN.toLowerCase();
 }
 
+export interface TrendOp {
+  action: TrendAction;
+  symbols: string[];
+}
+
 /**
- * Parse a subject and keep it only if it belongs to the Trend scan. Returns
- * null for junk, and for alerts about any other scan — the single call the
- * poller makes per email.
+ * The Trend-scan add/remove operations in the text, in the order they appear —
+ * the sequence the poller applies. Clauses for any other scan are dropped.
  */
-export function parseTrendAlert(
-  subject: string | null | undefined,
-): Omit<AlertSubject, 'scan'> | null {
-  const parsed = parseAlertSubject(subject);
-  if (!parsed || !isTrendScan(parsed.scan)) return null;
-  return { action: parsed.action, symbols: parsed.symbols };
+export function parseTrendOps(text: string | null | undefined): TrendOp[] {
+  return parseAlertClauses(text)
+    .filter((c) => isTrendScan(c.scan))
+    .map((c) => ({ action: c.action, symbols: c.symbols }));
+}
+
+/**
+ * The FIRST clause in the text, or null. Retained for callers and tests that
+ * treat one email as one clause; new code should prefer {@link parseAlertClauses}.
+ */
+export function parseAlertSubject(text: string | null | undefined): AlertClause | null {
+  return parseAlertClauses(text)[0] ?? null;
+}
+
+/** The first Trend-scan operation in the text, or null. Back-compat helper. */
+export function parseTrendAlert(text: string | null | undefined): TrendOp | null {
+  return parseTrendOps(text)[0] ?? null;
 }
 
 /**
@@ -130,4 +157,13 @@ export function applyTrendChange(
     else set.delete(symbol);
   }
   return [...set].sort();
+}
+
+/** Apply a whole sequence of operations in order. */
+export function applyTrendOps(current: readonly string[], ops: readonly TrendOp[]): string[] {
+  let symbols = [...current];
+  for (const op of ops) {
+    symbols = applyTrendChange(symbols, op.action, op.symbols);
+  }
+  return symbols;
 }
