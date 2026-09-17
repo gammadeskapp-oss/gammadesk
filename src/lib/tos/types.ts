@@ -23,4 +23,13 @@ export interface TrendList {
    * text.
    */
   lastError: string | null;
+  /**
+   * IDs (RFC822 Message-ID, or a uid fallback) of emails already handled.
+   *
+   * This — not the IMAP \Seen flag — is what makes processing idempotent, so
+   * opening or re-reading an alert in Gmail never causes it to be reprocessed
+   * or skipped. Bounded to the most recent entries; older alerts fall outside
+   * the poll's lookback window and never come back.
+   */
+  processedIds: string[];
 }

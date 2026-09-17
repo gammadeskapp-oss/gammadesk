@@ -23,8 +23,15 @@ import { registerTsImports } from './ts-imports.mjs';
 
 registerTsImports();
 
-const { parseAlertSubject, parseTrendAlert, isTrendScan, applyTrendChange } =
-  await import('../src/lib/tos/parse.ts');
+const {
+  parseAlertSubject,
+  parseTrendAlert,
+  parseAlertClauses,
+  parseTrendOps,
+  applyTrendOps,
+  isTrendScan,
+  applyTrendChange,
+} = await import('../src/lib/tos/parse.ts');
 
 let failures = 0;
 let checks = 0;
@@ -143,6 +150,75 @@ ok(
 ok(
   'removing an absent symbol is a no-op',
   eq(applyTrendChange(['AAPL'], 'removed', ['ZZZZ']), ['AAPL']),
+);
+
+// --- multi-clause emails: the production bug ---------------------------------
+
+section('One email carrying BOTH an add and a remove (the real failure)');
+
+// The exact subject that was being dropped whole: the scan of the first clause
+// used to read "Trend. Symbols: MRVL, NOK were removed from Trend", failing the
+// Trend check and discarding all 13 additions.
+const REAL_COMBINED =
+  'Alert: New symbols: AMD, BMNR, HYG, IONQ, MRNA, MSTR, ON, RIVN, RKLB, SKHY, SLV, TEM, TSLA were added to Trend. Symbols: MRVL, NOK were removed from Trend.';
+
+{
+  const ops = parseTrendOps(REAL_COMBINED);
+  ok('finds two Trend operations', ops.length === 2, String(ops.length));
+  ok('first is the 13-symbol add', ops[0]?.action === 'added' && ops[0]?.symbols.length === 13);
+  ok(
+    'the add carries every symbol',
+    eq(ops[0]?.symbols, ['AMD', 'BMNR', 'HYG', 'IONQ', 'MRNA', 'MSTR', 'ON', 'RIVN', 'RKLB', 'SKHY', 'SLV', 'TEM', 'TSLA']),
+    JSON.stringify(ops[0]?.symbols),
+  );
+  ok('second is the remove of MRVL, NOK', ops[1]?.action === 'removed' && eq(ops[1]?.symbols, ['MRVL', 'NOK']));
+
+  // Applied onto a list that already holds MRVL and NOK (and something older).
+  const result = applyTrendOps(['MRVL', 'NOK', 'ZZZ'], ops);
+  ok('MRVL and NOK end up removed', !result.includes('MRVL') && !result.includes('NOK'));
+  ok('all 13 additions are present', ['AMD', 'BMNR', 'HYG', 'IONQ', 'MRNA', 'MSTR', 'ON', 'RIVN', 'RKLB', 'SKHY', 'SLV', 'TEM', 'TSLA'].every((s) => result.includes(s)));
+  ok('the pre-existing unrelated symbol is untouched', result.includes('ZZZ'));
+}
+
+section('Added-only and removed-only emails still parse');
+
+ok(
+  'added-only yields one add op',
+  eq(parseTrendOps('Alert: New symbols: BBWI, MRNA, TEM were added to Trend.'), [
+    { action: 'added', symbols: ['BBWI', 'MRNA', 'TEM'] },
+  ]),
+);
+ok(
+  'removed-only yields one remove op',
+  eq(parseTrendOps('Alert: Symbols: XYZ were removed from Trend.'), [
+    { action: 'removed', symbols: ['XYZ'] },
+  ]),
+);
+
+section('Mixed-scan emails apply only the Trend clause');
+
+// An add to Trend and a remove from another scan in one email: only Trend acts.
+ok(
+  'only the Trend clause survives',
+  eq(
+    parseTrendOps('Alert: New symbols: AAA were added to Trend. Symbols: BBB were removed from Premarket Movers.'),
+    [{ action: 'added', symbols: ['AAA'] }],
+  ),
+);
+// parseAlertClauses still sees both, so nothing is silently lost.
+ok('both clauses are visible to the parser', parseAlertClauses('Alert: New symbols: AAA were added to Trend. Symbols: BBB were removed from Premarket Movers.').length === 2);
+
+section('Multi-line / body text parses the same as a subject');
+
+ok(
+  'a two-line body yields both ops',
+  eq(
+    parseTrendOps('New symbols: AMD were added to Trend.\nSymbols: NOK were removed from Trend.'),
+    [
+      { action: 'added', symbols: ['AMD'] },
+      { action: 'removed', symbols: ['NOK'] },
+    ],
+  ),
 );
 
 // --- result ------------------------------------------------------------------

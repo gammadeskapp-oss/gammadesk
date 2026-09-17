@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { createJsonStore, storeStatus } from '../jsonStore';
-import { applyTrendChange, type TrendAction } from './parse';
+import { applyTrendOps, type TrendOp } from './parse';
 import type { TrendList } from './types';
 
 export { storeStatus };
@@ -18,8 +18,19 @@ export { storeStatus };
  * list is not fetchable by anyone who guesses the path, which matters because
  * this is owner-only data.
  */
+
+/** How many processed-email IDs to remember. Far more than a day of alerts. */
+const MAX_PROCESSED_IDS = 500;
+
 function emptyList(): TrendList {
-  return { symbols: [], addedAt: {}, updatedAt: null, lastCheckedAt: null, lastError: null };
+  return {
+    symbols: [],
+    addedAt: {},
+    updatedAt: null,
+    lastCheckedAt: null,
+    lastError: null,
+    processedIds: [],
+  };
 }
 
 const store = createJsonStore<TrendList>(
@@ -42,12 +53,17 @@ const store = createJsonStore<TrendList>(
       }
     }
 
+    const processedIds = Array.isArray(doc.processedIds)
+      ? doc.processedIds.filter((id): id is string => typeof id === 'string')
+      : [];
+
     return {
       symbols,
       addedAt,
       updatedAt: typeof doc.updatedAt === 'string' ? doc.updatedAt : null,
       lastCheckedAt: typeof doc.lastCheckedAt === 'string' ? doc.lastCheckedAt : null,
       lastError: typeof doc.lastError === 'string' ? doc.lastError : null,
+      processedIds,
     };
   },
 );
@@ -56,33 +72,59 @@ export async function readTrend(): Promise<TrendList> {
   return store.read();
 }
 
+export interface ApplyEmailResult {
+  list: TrendList;
+  /** Whether the set of symbols actually changed. */
+  changed: boolean;
+}
+
 /**
- * Apply one add/remove and persist it, maintaining `addedAt` and stamping
- * `updatedAt` only when the set of symbols actually changed. Returns the list
- * after the write plus whether it moved — the poll logs only real changes, so
- * a re-delivered alert stays quiet.
+ * Handle one email atomically: record its ID as processed, apply its Trend
+ * operations in order, and — because it was a Trend alert — stamp `updatedAt`
+ * even if the resulting list is identical.
+ *
+ * This is one Blob write. The caller marks the email read (and treats it as
+ * done) only after this resolves, so a failed write leaves the email to be
+ * retried on the next run rather than silently lost.
+ *
+ * @param id   The email's stable identifier (Message-ID, or a uid fallback).
+ * @param ops  The Trend add/remove operations, in document order. May be empty
+ *             for an alert about another scan — the ID is still recorded so it
+ *             is not re-examined, but the list and `updatedAt` are untouched.
  */
-export async function applyChange(
-  action: TrendAction,
-  symbols: readonly string[],
+export async function applyEmail(
+  id: string,
+  ops: readonly TrendOp[],
   now: Date = new Date(),
-): Promise<{ list: TrendList; changed: boolean }> {
+): Promise<ApplyEmailResult> {
   let changed = false;
   const list = await store.update((current) => {
-    const nextSymbols = applyTrendChange(current.symbols, action, symbols);
+    const nextSymbols = applyTrendOps(current.symbols, ops);
     changed =
       nextSymbols.length !== current.symbols.length ||
       nextSymbols.some((s, i) => s !== current.symbols[i]);
-    if (!changed) return current;
 
     const stamp = now.toISOString();
+
     const addedAt: Record<string, string> = {};
     for (const symbol of nextSymbols) {
-      // Preserve an existing first-seen time; stamp genuinely new symbols now.
       addedAt[symbol] = current.addedAt[symbol] ?? stamp;
     }
 
-    return { ...current, symbols: nextSymbols, addedAt, updatedAt: stamp };
+    // Record the ID (dedupe, bound to the most recent MAX_PROCESSED_IDS).
+    const processedIds = current.processedIds.includes(id)
+      ? current.processedIds
+      : [...current.processedIds, id].slice(-MAX_PROCESSED_IDS);
+
+    return {
+      ...current,
+      symbols: nextSymbols,
+      addedAt,
+      // A Trend alert (ops present) always freshens "Last updated", even when
+      // the list is unchanged. An other-scan alert (no ops) does not.
+      updatedAt: ops.length > 0 ? stamp : current.updatedAt,
+      processedIds,
+    };
   });
   return { list, changed };
 }
