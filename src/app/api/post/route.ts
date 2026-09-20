@@ -8,9 +8,18 @@ import {
   storeStatus,
 } from '@/lib/post';
 import { marketNow, marketToday } from '@/lib/time';
+import { runSlot } from '@/lib/x/run';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+/**
+ * The morning X post rides on this existing task rather than a new cron — the
+ * brief asks the 8:25 CT snapshot to hook in here. It composes and posts on its
+ * own once-a-day ledger and self-checks, and never throws, so it can never take
+ * down the Discord morning post it runs beside.
+ */
+const MORNING_X_SLOT = { kind: 'morning' as const, key: 'morning', label: 'Morning snapshot' };
 
 /**
  * Builds the morning X post, stores it, and sends it to Discord.
@@ -46,6 +55,10 @@ export async function GET(request: Request) {
     });
   }
 
+  // The X morning post runs on its own ledger and guards, independent of the
+  // Discord idempotency below. Never throws.
+  const xPost = await runSlot(MORNING_X_SLOT, { dry, force });
+
   try {
     // Idempotent by date: a second firing on the same morning stores nothing
     // new and posts nothing.
@@ -57,6 +70,7 @@ export async function GET(request: Request) {
           date: today,
           generatedAt: existing.generatedAt,
           message: await buildDiscordMessage(existing),
+          xPost,
         });
       }
     }
@@ -75,6 +89,7 @@ export async function GET(request: Request) {
       // Exactly what was, or would have been, sent.
       text: post.text,
       message: await buildDiscordMessage(post),
+      xPost,
       store: storeStatus(),
     });
   } catch (error) {

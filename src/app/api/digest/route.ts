@@ -6,9 +6,17 @@ import {
   toDiscordMessage,
 } from '@/lib/digest';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
+import { runSlot } from '@/lib/x/run';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+/**
+ * The closing X post rides on this existing task rather than a new cron — the
+ * brief asks the closing snapshot to hook into the digest job. Its own ledger,
+ * self-checks and guards apply; it never throws.
+ */
+const CLOSING_X_SLOT = { kind: 'closing' as const, key: 'closing', label: 'Closing snapshot' };
 
 /**
  * Builds the daily digest, stores it, and posts it to Discord.
@@ -21,7 +29,12 @@ export async function GET(request: Request) {
   const denied = denyUnauthorisedCron(request);
   if (denied) return denied;
 
-  const dry = new URL(request.url).searchParams.get('dry') === '1';
+  const params = new URL(request.url).searchParams;
+  const dry = params.get('dry') === '1';
+  const force = params.get('force') === '1';
+
+  // Independent of the Discord digest below; own ledger and guards. Never throws.
+  const xPost = await runSlot(CLOSING_X_SLOT, { dry, force });
 
   try {
     const digest = await generateAndStoreDigest();
@@ -34,6 +47,7 @@ export async function GET(request: Request) {
       date: digest.date,
       generatedAt: digest.generatedAt,
       discord: delivery,
+      xPost,
       // Exactly what was, or would have been, posted — so the wording can be
       // reviewed before it reaches a channel.
       message: toDiscordMessage(digest),
