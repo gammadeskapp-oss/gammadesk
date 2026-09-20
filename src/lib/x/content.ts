@@ -18,6 +18,10 @@ import {
   type ComposedPost,
 } from './text';
 import type { PostSlotKind } from './types';
+import { X_LIMIT } from './text';
+import { readScanForDate } from '../news/store';
+import { xLine } from '../news/view';
+import type { PickedStory } from '../news/types';
 
 /**
  * The data-fetching side of composition: pull the dealer-positioning book and
@@ -34,6 +38,35 @@ export type { ComposedPost } from './text';
 export const PULSE_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'VIX'] as const;
 
 /**
+ * The day's top scanned story, if the news scanner has one for `date`. Used to
+ * feed the morning and closing posts from the scanner rather than leaving them
+ * to rely only on the Cowork brief. Never throws — the post always goes out even
+ * if the scan store is unreachable.
+ */
+async function topNewsStory(date: string): Promise<PickedStory | null> {
+  const scan = await readScanForDate(date).catch(() => null);
+  return scan?.top?.[0] ?? null;
+}
+
+/**
+ * Splice a "Top story" line into an already-composed post, just before its final
+ * footer line, but only when it still fits under the X limit. If it would
+ * overrun, the post is returned unchanged — a market update is never dropped or
+ * truncated for the sake of a news line.
+ */
+export function withNewsLine(composed: ComposedPost, story: PickedStory | null): ComposedPost {
+  if (!story) return composed;
+  const line = `📰 ${xLine(story)}`;
+  const lines = composed.text.split('\n');
+  if (lines.length < 1) return composed;
+  const footer = lines[lines.length - 1];
+  const body = lines.slice(0, -1);
+  const text = [...body, line, footer].join('\n');
+  if ([...text].length > X_LIMIT) return composed;
+  return { ...composed, text, length: [...text].length };
+}
+
+/**
  * The 8:25 CT morning post now leads with the Cowork "Morning Desk" brief.
  *
  * If today's brief has arrived it drives the post (SPY/QQQ/VIX, top story,
@@ -44,9 +77,13 @@ export const PULSE_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'VIX'] as const;
  */
 export async function buildMorning(now: Date = new Date()): Promise<ComposedPost> {
   const asOf = formatClockCt(now);
-  const brief = await readBriefForDate(marketToday(now)).catch(() => null);
+  const date = marketToday(now);
+  const [brief, story] = await Promise.all([
+    readBriefForDate(date).catch(() => null),
+    topNewsStory(date),
+  ]);
   if (brief) {
-    return composeBriefMorning(brief, asOf);
+    return withNewsLine(composeBriefMorning(brief, asOf), story);
   }
 
   // Fallback: a plain SPY/QQQ/VIX snapshot from live Cboe quotes.
@@ -56,14 +93,17 @@ export async function buildMorning(now: Date = new Date()): Promise<ComposedPost
   const vix = quotes.get('VIX');
   const isos = [spy, qqq, vix].filter(Boolean).map((q) => q!.quoteIso).sort();
   const dataIso = isos.slice(-1)[0] ?? now.toISOString();
-  return composeFallbackMorning(
-    {
-      spy: spy && { price: spy.price, changePct: spy.changePct, quoteIso: spy.quoteIso },
-      qqq: qqq && { price: qqq.price, changePct: qqq.changePct, quoteIso: qqq.quoteIso },
-      vix: vix && { price: vix.price, changePct: vix.changePct, quoteIso: vix.quoteIso },
-    },
-    asOf,
-    dataIso,
+  return withNewsLine(
+    composeFallbackMorning(
+      {
+        spy: spy && { price: spy.price, changePct: spy.changePct, quoteIso: spy.quoteIso },
+        qqq: qqq && { price: qqq.price, changePct: qqq.changePct, quoteIso: qqq.quoteIso },
+        vix: vix && { price: vix.price, changePct: vix.changePct, quoteIso: vix.quoteIso },
+      },
+      asOf,
+      dataIso,
+    ),
+    story,
   );
 }
 
@@ -116,9 +156,13 @@ export async function buildPulse(): Promise<ComposedPost> {
  * No link either way.
  */
 export async function buildClosing(now: Date = new Date()): Promise<ComposedPost> {
-  const brief = await readClosingBriefForDate(marketToday(now)).catch(() => null);
+  const date = marketToday(now);
+  const [brief, story] = await Promise.all([
+    readClosingBriefForDate(date).catch(() => null),
+    topNewsStory(date),
+  ]);
   if (brief) {
-    return composeClosingBrief(brief);
+    return withNewsLine(composeClosingBrief(brief), story);
   }
 
   const data = await getPositioning();
@@ -150,7 +194,7 @@ export async function buildClosing(now: Date = new Date()): Promise<ComposedPost
     spyChangePct,
     spyPrice,
   });
-  return { ...composed, note: 'closing brief missing' };
+  return withNewsLine({ ...composed, note: 'closing brief missing' }, story);
 }
 
 /**
