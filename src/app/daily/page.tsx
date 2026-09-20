@@ -1,347 +1,258 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
-import { PageBar } from '@/components/PageBar';
-import { regimeLabel, regimeTone } from '@/lib/regime';
-import { PostActions } from '@/components/PostActions';
-import { TickerLink } from '@/components/TickerLink';
-import { getDigest, storeStatus as digestStoreStatus } from '@/lib/digest';
-import { formatPrice, formatUsd } from '@/lib/format';
-import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
-import {
-  buildDiscordMessage,
-  getMorningPost,
-  storeStatus as postStoreStatus,
-  X_LIMIT,
-} from '@/lib/post';
+import { getPositioning } from '@/lib/positioning';
+import { buildSimpleRead } from '@/lib/simple/translate';
+import { fetchCboeQuotes } from '@/lib/x/cboeQuote';
+import { readBriefForDate } from '@/lib/x/brief';
+import { marketToday } from '@/lib/time';
+import { formatPrice } from '@/lib/format';
 import { formatAsOf } from '@/lib/time';
-import { dailySnapshotStaleness } from '@/lib/events';
-import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
+import { snapshotStaleness } from '@/lib/events';
+import {
+  buildLevelScale,
+  changeTone,
+  dailyHighlights,
+  formatChangePct,
+  moodHeadline,
+  type LevelMarker,
+} from '@/lib/daily/view';
 
 /**
- * Digest and Morning Post, on one page.
+ * The public landing page for the @GammadeskHQ posts.
  *
- * They were always the same day written twice — the digest is the readable
- * version, the post is the same numbers cut to fit a single message. Splitting
- * them over two routes meant checking that they agreed by navigating between
- * them. Both halves still read from their own libraries, unchanged; this file
- * only puts them one above the other.
+ * Most visitors arrive from X on a phone, having tapped a link in a post, and
+ * have never traded options. So this page is deliberately small: today's SPY
+ * map in plain English with a simple level picture, the four index moves, and
+ * the morning brief's highlights when they are in. No jargon, no owner tooling,
+ * nothing that only makes sense to someone already inside the app.
+ *
+ * Every number here comes from public, keyless sources — the Cboe delayed
+ * chain (positioning) and Cboe's compact quote file (the index cards). Nothing
+ * owner-only and nothing from Tradier is read here, so the page is safe to be
+ * public.
  */
 
 export const metadata: Metadata = {
-  title: 'Daily',
-  description:
-    'The day summarised in a few sentences, followed by the same numbers as a six-line post ready to copy or send.',
+  title: 'GammaDesk — Today',
+  description: "Today's market map in plain English: where the calm and choppy zones are, and how the major indexes are moving.",
 };
 
 export const dynamic = 'force-dynamic';
 
-function Chip({
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  label: string;
-  value: string;
-  tone?: 'neutral' | 'pos' | 'neg' | 'bull' | 'bear' | 'flip';
-}) {
-  const colour = {
-    neutral: 'text-term-text',
-    pos: 'text-pos',
-    neg: 'text-neg',
-    bull: 'text-bull',
-    bear: 'text-bear',
-    flip: 'text-flip',
-  }[tone];
+const INDEX_LABELS: Record<string, string> = {
+  SPY: 'S&P 500 (SPY)',
+  QQQ: 'Nasdaq 100 (QQQ)',
+  IWM: 'Small caps (IWM)',
+  VIX: 'Volatility (VIX)',
+};
 
+function Updating({ asOf }: { asOf: string | null }) {
   return (
-    <div className="border border-term-line px-3 py-1.5">
-      <div className="label-xs">{label}</div>
-      <div className={`mt-0.5 text-sm font-bold tabular-nums ${colour}`}>{value}</div>
+    <div className="panel border-l-2 border-l-flip/60 p-5 sm:p-6">
+      <h2 className="text-base font-bold text-term-text">We&rsquo;re updating today&rsquo;s numbers</h2>
+      <p className="mt-2 text-sm leading-relaxed text-term-dim">
+        The market map is being refreshed. Check back in a few minutes and it will be here.
+      </p>
+      {asOf && <p className="mt-3 text-2xs text-term-faint">Last good update: {asOf}</p>}
     </div>
   );
 }
 
-/** Section heading shared by the two halves. */
-function Heading({ title, meta }: { title: string; meta: string }) {
+function toneClass(tone: 'pos' | 'neg' | 'neutral'): string {
+  return tone === 'pos' ? 'text-pos' : tone === 'neg' ? 'text-neg' : 'text-term-dim';
+}
+
+/** The little horizontal level picture: floor, balance point, now, ceiling. */
+function LevelBar({ markers }: { markers: LevelMarker[] }) {
+  const colour: Record<LevelMarker['key'], string> = {
+    floor: 'text-pos',
+    ceiling: 'text-neg',
+    flip: 'text-flip',
+    spot: 'text-term-text',
+  };
+  const dot: Record<LevelMarker['key'], string> = {
+    floor: 'bg-pos',
+    ceiling: 'bg-neg',
+    flip: 'bg-flip',
+    spot: 'bg-term-text',
+  };
+  // Sort so overlapping labels alternate above/below the track by position.
+  const sorted = [...markers].sort((a, b) => a.pct - b.pct);
+
   return (
-    <div className="flex flex-wrap items-baseline justify-between gap-2">
-      <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-pos">
-        {title}
-      </h2>
-      <p className="text-2xs text-term-faint">{meta}</p>
+    <div className="mt-5 pt-8 pb-10">
+      <div className="relative h-1.5 rounded-full bg-term-line">
+        {sorted.map((m, i) => {
+          const above = i % 2 === 0;
+          return (
+            <div
+              key={m.key}
+              className="absolute -translate-x-1/2"
+              style={{ left: `${m.pct}%`, top: '50%', transform: `translate(-50%, -50%)` }}
+            >
+              <div className={`h-3 w-3 rounded-full ${dot[m.key]} ring-2 ring-term-bg`} />
+              <div
+                className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-center ${
+                  above ? 'bottom-5' : 'top-5'
+                }`}
+              >
+                <div className={`text-2xs font-bold uppercase tracking-[0.12em] ${colour[m.key]}`}>{m.label}</div>
+                <div className={`text-xs font-bold tabular-nums ${colour[m.key]}`}>{m.text}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 export default async function DailyPage() {
-  const [{ digest, stored: digestStored }, { post, stored: postStored }] =
-    await Promise.all([getDigest(), getMorningPost()]);
+  const now = new Date();
 
-  const digestStore = digestStoreStatus();
-  const postStore = postStoreStatus();
-  const over = post.length > X_LIMIT;
-  // Shown so the exact text reaching the channel is checkable before it does.
-  const discord = await buildDiscordMessage(post);
+  // Positioning drives the SPY map; the compact Cboe quotes drive the index
+  // cards; the morning brief supplies the highlights. Each is allowed to fail
+  // on its own — a dead quote feed must not blank the whole page.
+  const [positioning, quotes, brief] = await Promise.all([
+    getPositioning().catch(() => null),
+    fetchCboeQuotes(['SPY', 'QQQ', 'IWM', 'VIX']).catch(() => new Map()),
+    readBriefForDate(marketToday(now)).catch(() => null),
+  ]);
 
-  /*
-   * Graded by session rather than by the clock. This post is written once at
-   * 09:00 ET and never updated, so an hours-old stamp is normal and expected —
-   * what would be wrong is the post describing yesterday.
-   */
-  const staleness = dailySnapshotStaleness(post.date, post.generatedAt);
+  const staleness = positioning ? snapshotStaleness(positioning.meta.quoteDateIso, now) : null;
+  const mapReady = Boolean(positioning) && !(staleness?.stale ?? true);
+
+  const summary = positioning?.summary;
+  const read = summary
+    ? buildSimpleRead({
+        symbol: 'SPY',
+        regime: summary.regime,
+        flipLevel: summary.flipLevel,
+        aboveFlip: summary.flipLevel === null ? null : summary.spot > summary.flipLevel,
+        magnetAbove: summary.magnetAbove?.strike ?? null,
+        magnetBelow: summary.magnetBelow?.strike ?? null,
+      })
+    : null;
+
+  const scale = summary
+    ? buildLevelScale({
+        floor: summary.magnetBelow?.strike ?? null,
+        flip: summary.flipLevel,
+        spot: summary.spot,
+        ceiling: summary.magnetAbove?.strike ?? null,
+      })
+    : null;
+
+  const mood = read ? moodHeadline(read.mood) : null;
+  const highlights = dailyHighlights(brief);
+
+  // The freshest "as of" we can show, preferring the map's own timestamp.
+  const quoteIsos = [...quotes.values()].map((q) => q.quoteIso).filter(Boolean).sort();
+  const asOfIso = positioning?.meta.quoteDateIso ?? quoteIsos.slice(-1)[0] ?? null;
+  const asOfLabel = asOfIso ? formatAsOf(new Date(asOfIso)) : null;
+
+  const cards = ['SPY', 'QQQ', 'IWM', 'VIX']
+    .map((sym) => ({ sym, q: quotes.get(sym) }))
+    .filter((c) => c.q);
 
   return (
     <>
-      <main className="mx-auto w-full max-w-[900px] flex-1 space-y-5 px-4 py-5 sm:px-6">
-        <StaleDataBanner staleness={staleness} />
+      <main className="mx-auto w-full max-w-[640px] flex-1 space-y-6 px-4 py-8 sm:px-6 sm:py-10">
+        {/* Header */}
+        <header className="space-y-1.5">
+          <p className="text-2xs font-bold uppercase tracking-[0.24em] text-pos">GammaDesk</p>
+          <h1 className="text-2xl font-bold leading-tight text-term-text sm:text-3xl">Today&rsquo;s market map</h1>
+          <p className="text-sm leading-relaxed text-term-dim">
+            Where the market tends to steady and where it can get bumpy — in plain English.
+          </p>
+          {asOfLabel && <p className="pt-1 text-2xs text-term-faint">as of {asOfLabel}</p>}
+        </header>
 
-        <PageBar title="Daily" description={PAGE_DESCRIPTIONS['/daily']} />
-
-        {/* --- the digest --- */}
-        <section className="space-y-2">
-          <Heading
-            title="The day"
-            meta={`${digest.dateLabel} · generated ${formatAsOf(new Date(digest.generatedAt))}${
-              digestStored ? '' : ' · live, not yet posted'
-            }`}
-          />
-
-          <article className="panel border-l-2 border-l-pos/50 p-4 sm:p-5">
-            <div className="flex flex-wrap gap-2">
-              <Chip label="Spot" value={formatPrice(digest.spot)} />
-              <Chip
-                label="Gamma regime"
-                value={regimeLabel(digest.regime)}
-                tone={regimeTone(digest.regime)}
-              />
-              <Chip
-                label="Net GEX"
-                value={formatUsd(digest.netGex)}
-                tone={digest.netGex >= 0 ? 'pos' : 'neg'}
-              />
-              <Chip
-                label="Gamma flip"
-                value={digest.flipLevel === null ? '—' : formatPrice(digest.flipLevel)}
-                tone="flip"
-              />
-              {digest.odds3d !== null && (
-                <Chip
-                  label="3D higher"
-                  value={`${digest.odds3d.toFixed(0)}%`}
-                  tone={digest.odds3d >= 50 ? 'bull' : 'bear'}
-                />
-              )}
-              {digest.odds10d !== null && (
-                <Chip
-                  label="10D higher"
-                  value={`${digest.odds10d.toFixed(0)}%`}
-                  tone={digest.odds10d >= 50 ? 'bull' : 'bear'}
-                />
-              )}
-              {digest.riskLabel && (
-                <Chip
-                  label="Downturn"
-                  value={digest.riskLabel}
-                  tone={
-                    digest.riskLabel === 'CALM'
-                      ? 'bull'
-                      : digest.riskLabel === 'CAUTIOUS'
-                        ? 'flip'
-                        : 'bear'
-                  }
-                />
-              )}
-            </div>
-
-            <div className="mt-4 space-y-2.5 border-t border-term-line pt-4 text-sm leading-relaxed text-term-text">
-              {digest.lines.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-            </div>
-
-            {(digest.leaders.length > 0 || digest.laggards.length > 0) && (
-              <div className="mt-4 grid gap-3 border-t border-term-line pt-3 sm:grid-cols-2">
-                <div>
-                  <div className="label-xs text-bull">Leaders</div>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums">
-                    {digest.leaders.map((l) => (
-                      <span key={l.symbol}>
-                        <TickerLink symbol={l.symbol} className="font-bold text-term-text" />{' '}
-                        <span className="text-bull">{l.score}</span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div className="label-xs text-bear">Laggards</div>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums">
-                    {digest.laggards.map((l) => (
-                      <span key={l.symbol}>
-                        <TickerLink symbol={l.symbol} className="font-bold text-term-text" />{' '}
-                        <span className="text-bear">{l.score}</span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {digest.notes.length > 0 && (
-              <ul className="mt-4 space-y-1 border-t border-term-line pt-3 text-2xs text-flip/80">
-                {digest.notes.map((n) => (
-                  <li key={n}>! {n}</li>
-                ))}
-              </ul>
-            )}
-          </article>
-        </section>
-
-        {/* --- the post --- */}
-        <section className="space-y-2">
-          <Heading
-            title="Ready to post"
-            meta={`${post.date} · generated ${formatAsOf(new Date(post.generatedAt))}`}
-          />
-
-          {/* Monospaced and pre-wrapped so what is on screen is
-              character-for-character what gets copied. */}
-          <div
-            className={`panel border-l-2 border-l-pos/60 p-4 sm:p-5 ${mutedIf(staleness.stale)}`}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="label-xs">Six lines, for X</span>
-              <span
-                className={`text-2xs tabular-nums ${over ? 'text-bear' : 'text-term-faint'}`}
-              >
-                {post.length} / {X_LIMIT}
+        {/* SPY map */}
+        {mapReady && read && mood && scale ? (
+          <section className="panel border-l-2 border-l-pos/60 p-5 sm:p-6">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl" aria-hidden>
+                {mood.emoji}
               </span>
+              <div>
+                <h2 className="text-xl font-bold text-term-text">SPY looks {mood.word.toLowerCase()} today</h2>
+                <p className="text-2xs uppercase tracking-[0.14em] text-term-faint">
+                  Now near {formatPrice(summary!.spot)}
+                </p>
+              </div>
             </div>
 
-            <pre className="mt-3 whitespace-pre-wrap break-words border border-term-line bg-term-bg/60 p-4 text-sm leading-relaxed text-term-text">
-{post.text}
-            </pre>
+            <p className="mt-4 text-sm leading-relaxed text-term-text">{read.sentence}</p>
 
-            {over && (
-              <p className="mt-2 text-2xs text-bear">
-                ! Over the limit for a single post. Shorten the “What this means”
-                line before sending.
+            {scale.drawable && <LevelBar markers={scale.markers} />}
+
+            <div className="mt-1 border-t border-term-line pt-4">
+              <p className="text-sm leading-relaxed text-term-dim">{read.watch}</p>
+            </div>
+
+            {read.conflict && (
+              <p className="mt-3 rounded border border-flip/40 bg-flip/[0.08] px-3 py-2 text-xs leading-relaxed text-flip">
+                {read.conflict}
               </p>
             )}
-
-            <div className="mt-4">
-              <PostActions text={post.text} />
-            </div>
-          </div>
-
-          {/* What Discord actually receives. Collapsed, because the X text
-              above is the thing most visits are here for. */}
-          <details className="panel group">
-            <summary className="flex cursor-pointer list-none items-center gap-2 px-3.5 py-3 text-xs text-term-dim transition-colors hover:text-term-text [&::-webkit-details-marker]:hidden">
-              <span aria-hidden className="text-pos transition-transform group-open:rotate-90">
-                &#9656;
-              </span>
-              <span className="font-bold uppercase tracking-[0.14em] text-pos">
-                What Discord gets
-              </span>
-              <span className="text-term-faint">same numbers, formatted for reading</span>
-            </summary>
-            <pre className="scroll-term overflow-x-auto border-t border-term-line bg-term-bg/60 px-4 py-3 text-2xs leading-relaxed text-term-dim">
-{discord}
-            </pre>
-          </details>
-
-          {/* Where each line came from, so a wrong number is traceable. */}
-          <section className={`panel px-3.5 py-3 ${mutedIf(staleness.stale)}`}>
-            <h3 className="label-xs">Where these numbers come from</h3>
-            <dl className="mt-2 grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2">
-              <div className="flex justify-between gap-3">
-                <dt className="text-term-faint">Spot</dt>
-                <dd className="tabular-nums text-term-text">{formatPrice(post.spot)}</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-term-faint">Gamma regime</dt>
-                <dd className={post.regime === 'positive' ? 'text-pos' : 'text-neg'}>
-                  {regimeLabel(post.regime)}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-term-faint">Wall above</dt>
-                <dd className="tabular-nums text-term-text">{post.wallAbove ?? '—'}</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-term-faint">Floor below</dt>
-                <dd className="tabular-nums text-term-text">{post.floorBelow ?? '—'}</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-term-faint">Gamma flip</dt>
-                <dd className="tabular-nums text-flip">
-                  {post.flipLevel === null ? '—' : formatPrice(post.flipLevel)}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-term-faint">Chain as of</dt>
-                <dd className="tabular-nums text-term-dim">{post.asOfLabel}</dd>
-              </div>
-            </dl>
           </section>
+        ) : (
+          <Updating asOf={staleness?.asOfLabel ?? null} />
+        )}
+
+        {/* Index cards */}
+        {cards.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-faint">The majors today</h2>
+            <div className="grid grid-cols-2 gap-3">
+              {cards.map(({ sym, q }) => {
+                const tone = changeTone(q!.changePct);
+                return (
+                  <div key={sym} className="panel p-4">
+                    <div className="text-2xs font-bold uppercase tracking-[0.1em] text-term-faint">
+                      {INDEX_LABELS[sym] ?? sym}
+                    </div>
+                    <div className="mt-2 text-lg font-bold tabular-nums text-term-text">{formatPrice(q!.price)}</div>
+                    <div className={`text-sm font-bold tabular-nums ${toneClass(tone)}`}>
+                      {formatChangePct(q!.changePct)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Brief highlights */}
+        {(highlights.topStory || highlights.earnings.length > 0) && (
+          <section className="panel p-5 sm:p-6">
+            <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-faint">Today&rsquo;s brief</h2>
+            {highlights.topStory && (
+              <p className="mt-3 text-sm leading-relaxed text-term-text">{highlights.topStory}</p>
+            )}
+            {highlights.earnings.length > 0 && (
+              <p className="mt-3 text-sm text-term-dim">
+                <span className="font-bold text-term-text">Reporting today: </span>
+                {highlights.earnings.join(', ')}
+              </p>
+            )}
+          </section>
+        )}
+
+        {/* One clear way onward */}
+        <section className="pt-1">
+          <Link
+            href="/"
+            className="flex items-center justify-center gap-2 rounded border border-pos/50 bg-pos/[0.06] px-4 py-3.5 text-sm font-bold text-pos transition-colors hover:bg-pos/[0.12]"
+          >
+            See the full dashboard →
+          </Link>
         </section>
 
-        {/* --- the notes for both halves --- */}
-        <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
-          <p>
-            <span className="text-term-dim">What this is. </span>
-            A summary of what the rest of the site already shows — the{' '}
-            <Link href="/" className="text-term-dim underline decoration-dotted">
-              positioning
-            </Link>{' '}
-            table, the{' '}
-            <Link href="/forecast" className="text-term-dim underline decoration-dotted">
-              simulation
-            </Link>{' '}
-            and the{' '}
-            <Link href="/strength" className="text-term-dim underline decoration-dotted">
-              strength ranking
-            </Link>
-            . It adds no new information and no judgement of its own, and the
-            post is the same numbers a second time, cut to fit one message.
-          </p>
-          <p className="mt-2">
-            <span className="text-term-dim">Everything here is modelled. </span>
-            The odds come from a simulation that holds volatility constant and
-            assumes log-normal returns, so they understate the tails. The gamma
-            regime rests on an assumption about who is on the other side of each
-            option trade. None of it accounts for earnings, data or news.
-          </p>
-          <p className="mt-2">
-            <span className="text-term-dim">Discord gets the post automatically. </span>
-            The same text is sent to the configured webhook each weekday
-            morning. This page never posts anything on its own — opening it
-            cannot send to a channel, and the Copy and Post buttons only act
-            when you press them.
-          </p>
-          <p className="mt-2">
-            {postStored
-              ? 'The post above is the stored copy that went out this morning.'
-              : 'The morning run has not happened yet, so the post was built live from the current chain. It will be re-generated at the scheduled time.'}
-          </p>
-          <p className="mt-2">
-            <span className="text-term-dim">A note on the fourth line. </span>
-            &ldquo;A sustained move below&rdquo; describes the crossing, not the
-            current state, so it reads correctly whichever side of the flip
-            price is on. When price is already below it, the mood line says
-            jumpy and the &ldquo;What this means&rdquo; line explains it — the
-            level is the boundary either way.
-          </p>
-          {!digestStore.durable && digestStore.note && (
-            <p className="mt-2 text-flip/80">! {digestStore.note}</p>
-          )}
-          {!postStore.durable &&
-            postStore.note &&
-            postStore.note !== digestStore.note && (
-              <p className="mt-2 text-flip/80">! {postStore.note}</p>
-            )}
-        </section>
+        {/* Footer disclaimer, on the page itself so it is never missed. */}
+        <p className="pt-2 text-center text-2xs text-term-faint">Not financial advice.</p>
       </main>
 
       <Footer />

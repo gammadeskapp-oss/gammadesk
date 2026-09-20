@@ -13,6 +13,12 @@ import type { PostNumbers } from './types';
 export const X_LIMIT = 280;
 export const DISCLAIMER = 'Not financial advice.';
 export const LINK = 'gammadesk.app';
+/**
+ * The gamma post links to the public landing page rather than the app root, so
+ * a first-time reader arriving from X lands on the plain-English map that the
+ * post is about — not the full dashboard.
+ */
+export const DAILY_LINK = 'gammadesk.app/daily';
 
 export interface ComposedPost {
   slot: 'morning' | 'gamma' | 'pulse' | 'closing';
@@ -35,9 +41,12 @@ export interface ComposedPost {
 export function assemble(
   bodyLines: string[],
   asOfLabel: string,
-  opts: { link?: boolean } = {},
+  opts: { link?: boolean | string } = {},
 ): string {
-  const provenance = opts.link ? `as of ${asOfLabel} · ${LINK}` : `as of ${asOfLabel}`;
+  // `link: true` uses the default site link; a string overrides it with a
+  // specific destination (the gamma post points at the /daily landing page).
+  const url = typeof opts.link === 'string' ? opts.link : opts.link ? LINK : null;
+  const provenance = url ? `as of ${asOfLabel} · ${url}` : `as of ${asOfLabel}`;
   return [...bodyLines, provenance, DISCLAIMER].join('\n');
 }
 
@@ -114,7 +123,7 @@ export function composeGamma(input: LevelInput): ComposedPost {
   if (input.wallAbove !== null) numbers.above = input.wallAbove;
   if (input.floorBelow !== null) numbers.below = input.floorBelow;
 
-  const text = assemble(lines, input.asOfLabel, { link: true });
+  const text = assemble(lines, input.asOfLabel, { link: DAILY_LINK });
   return { slot: 'gamma', text, length: [...text].length, numbers, dataIso: input.dataIso, asOfLabel: input.asOfLabel };
 }
 

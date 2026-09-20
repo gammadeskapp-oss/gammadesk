@@ -248,6 +248,7 @@ ok('morning has NO link', !morning.text.includes('gammadesk.app'));
 const gamma = composeGamma(level);
 assertClean('gamma', gamma);
 ok('gamma HAS the link', gamma.text.includes('gammadesk.app'));
+ok('gamma link points at the /daily landing page', gamma.text.includes('gammadesk.app/daily'), gamma.text);
 
 const closing = composeClosing({ ...level, spyChangePct: 0.006, spyPrice: 610.25 });
 assertClean('closing', closing);
