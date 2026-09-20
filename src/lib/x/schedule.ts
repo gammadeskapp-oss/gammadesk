@@ -35,6 +35,23 @@ const chicagoParts = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 });
 
+/**
+ * The Chicago wall clock as a short label, e.g. `8:25 CT` — no leading zero on
+ * the hour, matching how the morning post states its time.
+ */
+export function formatClockCt(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: CHICAGO_TZ,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+  const get = (t: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === t)?.value ?? '';
+  let hour = Number(get('hour')) % 24;
+  if (Number.isNaN(hour)) hour = 0;
+  return `${hour}:${get('minute')} CT`;
+}
+
 export interface ChicagoClock {
   /** `YYYY-MM-DD` in Chicago. */
   date: string;

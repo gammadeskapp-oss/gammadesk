@@ -1,12 +1,15 @@
 import 'server-only';
 
 import { getPositioning } from '../positioning';
-import { formatClockEt } from '../time';
+import { formatClockEt, marketToday } from '../time';
 import { fetchCboeQuote, fetchCboeQuotes } from './cboeQuote';
+import { readBriefForDate } from './brief';
+import { formatClockCt } from './schedule';
 import {
+  composeBriefMorning,
   composeClosing,
+  composeFallbackMorning,
   composeGamma,
-  composeMorning,
   composePulse,
   type ComposedPost,
 } from './text';
@@ -26,18 +29,38 @@ export type { ComposedPost } from './text';
 
 export const PULSE_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'VIX'] as const;
 
-export async function buildMorning(): Promise<ComposedPost> {
-  const data = await getPositioning();
-  const s = data.summary;
-  return composeMorning({
-    spot: s.spot,
-    regime: s.regime,
-    flipLevel: s.flipLevel,
-    wallAbove: s.magnetAbove?.strike ?? null,
-    floorBelow: s.magnetBelow?.strike ?? null,
-    asOfLabel: formatClockEt(new Date(data.meta.quoteDateIso)),
-    dataIso: data.meta.quoteDateIso,
-  });
+/**
+ * The 8:25 CT morning post now leads with the Cowork "Morning Desk" brief.
+ *
+ * If today's brief has arrived it drives the post (SPY/QQQ/VIX, top story,
+ * earnings). If not, it falls back to a simple live SPY/QQQ/VIX snapshot and
+ * carries a "brief missing" note so the log records the miss. Either way the
+ * post is stamped in Central time, carries no gamma levels and no link — those
+ * belong to the 8:30 post.
+ */
+export async function buildMorning(now: Date = new Date()): Promise<ComposedPost> {
+  const asOf = formatClockCt(now);
+  const brief = await readBriefForDate(marketToday(now)).catch(() => null);
+  if (brief) {
+    return composeBriefMorning(brief, asOf);
+  }
+
+  // Fallback: a plain SPY/QQQ/VIX snapshot from live Cboe quotes.
+  const quotes = await fetchCboeQuotes(['SPY', 'QQQ', 'VIX']);
+  const spy = quotes.get('SPY');
+  const qqq = quotes.get('QQQ');
+  const vix = quotes.get('VIX');
+  const isos = [spy, qqq, vix].filter(Boolean).map((q) => q!.quoteIso).sort();
+  const dataIso = isos.slice(-1)[0] ?? now.toISOString();
+  return composeFallbackMorning(
+    {
+      spy: spy && { price: spy.price, changePct: spy.changePct, quoteIso: spy.quoteIso },
+      qqq: qqq && { price: qqq.price, changePct: qqq.changePct, quoteIso: qqq.quoteIso },
+      vix: vix && { price: vix.price, changePct: vix.changePct, quoteIso: vix.quoteIso },
+    },
+    asOf,
+    dataIso,
+  );
 }
 
 export async function buildGamma(): Promise<ComposedPost> {
@@ -112,10 +135,10 @@ export async function buildClosing(): Promise<ComposedPost> {
   });
 }
 
-export function buildForSlot(slot: PostSlotKind): Promise<ComposedPost> {
+export function buildForSlot(slot: PostSlotKind, now: Date = new Date()): Promise<ComposedPost> {
   switch (slot) {
     case 'morning':
-      return buildMorning();
+      return buildMorning(now);
     case 'gamma':
       return buildGamma();
     case 'pulse':

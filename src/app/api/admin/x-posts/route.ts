@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE, verifySession } from '@/lib/tos/auth';
 import { postingEnabled, runSlot } from '@/lib/x/run';
 import { readLog, readPause, storeStatus } from '@/lib/x/store';
+import { readBrief } from '@/lib/x/brief';
 import type { PostSlot } from '@/lib/x/types';
 
 /**
@@ -34,9 +35,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Locked.' }, { status: 401, headers: NO_STORE });
   }
 
-  const [log, pause] = await Promise.all([
+  const [log, pause, brief] = await Promise.all([
     readLog().catch(() => []),
     readPause().catch(() => ({ paused: false })),
+    readBrief().catch(() => null),
   ]);
 
   // Previews are dry runs — compose and self-check, never post or log.
@@ -60,6 +62,7 @@ export async function GET(request: NextRequest) {
       postingEnabled: postingEnabled(),
       pause,
       store: storeStatus(),
+      brief,
       recent: log.slice(0, 40),
       previews,
     },

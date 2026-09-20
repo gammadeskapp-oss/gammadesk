@@ -42,10 +42,22 @@ interface PauseState {
   at?: string;
 }
 
+interface Brief {
+  date: string;
+  spy: number;
+  qqq: number;
+  iwm: number;
+  vix: number;
+  topStory: string;
+  earningsToday: string[];
+  receivedAt?: string;
+}
+
 interface AdminData {
   postingEnabled: boolean;
   pause: PauseState;
   store: { kind: string; durable: boolean; note?: string };
+  brief: Brief | null;
   recent: LogEntry[];
   previews: Preview[];
 }
@@ -211,7 +223,8 @@ export function XPostsAdmin() {
     );
   }
 
-  const { postingEnabled, pause, store, recent, previews } = data;
+  const { postingEnabled, pause, store, brief, recent, previews } = data;
+  const signed = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 
   return (
     <div className="space-y-4">
@@ -273,6 +286,31 @@ export function XPostsAdmin() {
             Lock
           </button>
         </div>
+      </section>
+
+      {/* Latest Morning Desk brief */}
+      <section className="space-y-2">
+        <h2 className="label-xs">Latest Morning Desk brief (from Cowork)</h2>
+        {brief ? (
+          <div className="panel px-3.5 py-3 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold text-term-text">{brief.date}</span>
+              <span className="text-2xs text-term-faint">received {clock(brief.receivedAt)}</span>
+            </div>
+            <p className="mt-1.5 tabular-nums text-term-dim">
+              SPY {signed(brief.spy)} · QQQ {signed(brief.qqq)} · IWM {signed(brief.iwm)} · VIX {brief.vix.toFixed(1)}
+            </p>
+            <p className="mt-1 text-term-text">{brief.topStory}</p>
+            <p className="mt-1 text-2xs text-term-faint">
+              Earnings: {brief.earningsToday.length ? brief.earningsToday.join(', ') : '—'}
+            </p>
+          </div>
+        ) : (
+          <div className="panel px-4 py-6 text-center text-xs text-term-dim">
+            No brief received yet. The morning post will fall back to a live
+            SPY/QQQ/VIX snapshot until one arrives.
+          </div>
+        )}
       </section>
 
       {/* Previews */}

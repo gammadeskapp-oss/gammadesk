@@ -23,6 +23,7 @@ const {
   isTradingDay,
   dueGammaSlot,
   duePulseSlot,
+  formatClockCt,
 } = await import('../src/lib/x/schedule.ts');
 const { checkText, checkNumbers } = await import('../src/lib/x/guard.ts');
 const {
@@ -30,6 +31,11 @@ const {
   composeGamma,
   composePulse,
   composeClosing,
+  composeBriefMorning,
+  composeFallbackMorning,
+  validateBrief,
+  signedPoints,
+  vixWord,
   X_LIMIT,
   DISCLAIMER,
 } = await import('../src/lib/x/text.ts');
@@ -270,6 +276,87 @@ ok('pulse without IWM throws', (() => {
     return true;
   }
 })());
+
+// --- Morning Desk brief ------------------------------------------------------
+
+section('formatClockCt renders the Central clock without a leading zero');
+ok('winter 14:30 UTC → 8:30 CT', formatClockCt(new Date('2026-01-05T14:30:00Z')) === '8:30 CT', formatClockCt(new Date('2026-01-05T14:30:00Z')));
+ok('summer 13:30 UTC → 8:30 CT', formatClockCt(new Date('2026-07-01T13:30:00Z')) === '8:30 CT', formatClockCt(new Date('2026-07-01T13:30:00Z')));
+
+section('signedPoints and vixWord');
+ok('+0.4%', signedPoints(0.4) === '+0.4%');
+ok('-1.5%', signedPoints(-1.5) === '-1.5%');
+ok('0 → +0.0%', signedPoints(0) === '+0.0%');
+ok('vix 14 → calm', vixWord(14) === 'calm');
+ok('vix 25 → choppy', vixWord(25) === 'choppy');
+
+section('validateBrief is strict about untrusted input');
+const RX = '2026-09-21';
+const goodBrief = { date: RX, spy: 0.4, qqq: 0.6, iwm: -0.2, vix: 14.8, topStory: 'Futures firm ahead of jobs data', earningsToday: ['AAPL', 'MSFT', 'NVDA', 'AMD'] };
+{
+  const r = validateBrief(goodBrief, '2026-09-21T13:00:00Z');
+  ok('a valid brief passes', r.ok === true, r.error);
+  ok('receivedAt is stamped', r.brief.receivedAt === '2026-09-21T13:00:00Z');
+  ok('earnings kept in order', r.brief.earningsToday.join(',') === 'AAPL,MSFT,NVDA,AMD');
+}
+ok('bad date rejected', validateBrief({ ...goodBrief, date: '9/21/2026' }, 'x').ok === false);
+ok('missing date rejected', validateBrief({ ...goodBrief, date: undefined }, 'x').ok === false);
+ok('non-number spy rejected', validateBrief({ ...goodBrief, spy: 'up' }, 'x').ok === false);
+ok('NaN qqq rejected', validateBrief({ ...goodBrief, qqq: NaN }, 'x').ok === false);
+ok('implausible move rejected', validateBrief({ ...goodBrief, spy: 40 }, 'x').ok === false);
+ok('vix 0 rejected', validateBrief({ ...goodBrief, vix: 0 }, 'x').ok === false);
+ok('vix 300 rejected', validateBrief({ ...goodBrief, vix: 300 }, 'x').ok === false);
+ok('empty topStory rejected', validateBrief({ ...goodBrief, topStory: '   ' }, 'x').ok === false);
+ok('earnings not-array rejected', validateBrief({ ...goodBrief, earningsToday: 'AAPL' }, 'x').ok === false);
+ok('earnings with non-string rejected', validateBrief({ ...goodBrief, earningsToday: ['AAPL', 3] }, 'x').ok === false);
+ok('non-object rejected', validateBrief('nope', 'x').ok === false);
+ok('null rejected', validateBrief(null, 'x').ok === false);
+{
+  const r = validateBrief({ ...goodBrief, earningsToday: [' AAPL ', '', 'MSFT'] }, 'x');
+  ok('earnings trimmed and blanks dropped', r.brief.earningsToday.join(',') === 'AAPL,MSFT');
+}
+
+section('composeBriefMorning is rule-clean and CT-stamped');
+{
+  const brief = validateBrief(goodBrief, '2026-09-21T13:25:00Z').brief;
+  const p = composeBriefMorning(brief, '8:25 CT');
+  const problems = checkText(p.text);
+  ok('passes checkText (CT accepted)', problems.length === 0, problems.join(' | '));
+  ok('within 280', p.length <= X_LIMIT, String(p.length));
+  ok('opens with the greeting', p.text.startsWith('Good morning ☕ Before the open:'));
+  ok('shows SPY/QQQ/VIX with a calm word', /SPY \+0\.4% · QQQ \+0\.6% · VIX 14\.8 \(calm\)/.test(p.text));
+  ok('shows the top story', p.text.includes('Futures firm ahead of jobs data'));
+  ok('caps earnings at 3', /Earnings today: AAPL, MSFT, NVDA/.test(p.text) && !p.text.includes('AMD'));
+  ok('has NO link', !p.text.includes('gammadesk.app'));
+  ok('stamped in CT', p.text.includes('as of 8:25 CT'));
+  ok('sanity number is vix only', JSON.stringify(p.numbers) === '{"vix":14.8}');
+}
+{
+  // A very long story must be trimmed to fit rather than overrun.
+  const long = validateBrief({ ...goodBrief, topStory: 'x'.repeat(500) }, 'x').brief;
+  const p = composeBriefMorning(long, '8:25 CT');
+  ok('long story trimmed to fit 280', p.length <= X_LIMIT, String(p.length));
+  ok('trim leaves the disclaimer intact', p.text.includes(DISCLAIMER));
+  ok('trim leaves the CT stamp intact', p.text.includes('as of 8:25 CT'));
+}
+{
+  // No earnings → the line is omitted, still clean.
+  const noe = validateBrief({ ...goodBrief, earningsToday: [] }, 'x').brief;
+  const p = composeBriefMorning(noe, '8:25 CT');
+  ok('no-earnings brief still clean', checkText(p.text).length === 0);
+  ok('no-earnings omits the earnings line', !p.text.includes('Earnings today'));
+}
+
+section('composeFallbackMorning covers the missing-brief path');
+{
+  const q = { price: 761.7, changePct: 0.004, quoteIso: '2026-09-21T13:20:00Z' };
+  const p = composeFallbackMorning({ spy: q, qqq: { ...q, changePct: 0.006 }, vix: { ...q, price: 14.8 } }, '8:25 CT', q.quoteIso);
+  ok('fallback passes checkText', checkText(p.text).length === 0, checkText(p.text).join(' | '));
+  ok('fallback within 280', p.length <= X_LIMIT);
+  ok('fallback carries the brief-missing note', p.note === 'brief missing');
+  ok('fallback has NO link', !p.text.includes('gammadesk.app'));
+  ok('fallback needs SPY/QQQ/VIX', (() => { try { composeFallbackMorning({ spy: q }, '8:25 CT', 'x'); return false; } catch { return true; } })());
+}
 
 // --- result ------------------------------------------------------------------
 

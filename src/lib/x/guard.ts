@@ -46,8 +46,8 @@ export function checkText(text: string): string[] {
   if (!text.includes(DISCLAIMER)) {
     failures.push(`Missing the "${DISCLAIMER}" disclaimer.`);
   }
-  if (!/\bas of\b/i.test(text) || !/\bET\b/.test(text)) {
-    failures.push('Missing the "as of … ET" data time.');
+  if (!/\bas of\b/i.test(text) || !/\b(ET|CT)\b/.test(text)) {
+    failures.push('Missing the "as of … ET/CT" data time.');
   }
   for (const { re, label } of BANNED) {
     if (re.test(text)) failures.push(`Contains banned wording (${label}).`);

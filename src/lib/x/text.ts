@@ -23,6 +23,12 @@ export interface ComposedPost {
   dataIso: string;
   /** Human "as of" clock, e.g. `10:15 ET`. */
   asOfLabel: string;
+  /**
+   * An operational note to fold into the log even on a successful post — used
+   * to record "brief missing" when the morning post falls back to a live
+   * snapshot. Not part of the posted text.
+   */
+  note?: string;
 }
 
 /** Assemble the final text: body, the "as of" line, then the disclaimer. */
@@ -184,4 +190,180 @@ export function composeClosing(input: ClosingInput): ComposedPost {
 
   const text = assemble(lines, input.asOfLabel);
   return { slot: 'closing', text, length: [...text].length, numbers, dataIso: input.dataIso, asOfLabel: input.asOfLabel };
+}
+
+// --- Morning "Desk brief" (Cowork-supplied) ----------------------------------
+
+/**
+ * The daily "Morning Desk" brief, supplied by an external Cowork task via
+ * POST /api/brief. It is untrusted input from off-platform, so `validateBrief`
+ * below is strict and every field is checked before anything is stored or
+ * posted.
+ *
+ * `spy`, `qqq`, `iwm` are percent changes in points (e.g. 0.4 = +0.4%); `vix`
+ * is the index level (e.g. 14.8). This is the contract the Cowork task must
+ * follow, and it is what the ingestion validator enforces.
+ */
+export interface Brief {
+  /** Market date the brief describes, `YYYY-MM-DD`. */
+  date: string;
+  spy: number;
+  qqq: number;
+  iwm: number;
+  vix: number;
+  topStory: string;
+  earningsToday: string[];
+  /** Server-set when the brief was received. */
+  receivedAt?: string;
+}
+
+/** Signed percent from points already in percent (0.4 -> "+0.4%"). */
+export function signedPoints(points: number): string {
+  const sign = points >= 0 ? '+' : '';
+  return `${sign}${points.toFixed(1)}%`;
+}
+
+/** Plain calm/choppy word from a VIX level. */
+export function vixWord(vix: number): string {
+  return vix < 20 ? 'calm' : 'choppy';
+}
+
+export interface BriefValidation {
+  ok: boolean;
+  brief?: Brief;
+  error?: string;
+}
+
+const MAX_MOVE_POINTS = 25; // a pre-open % move beyond this is almost certainly bad input
+const MAX_STORY = 180;
+const MAX_EARNINGS_STORED = 25;
+
+/**
+ * Validate an incoming brief. Pure, so it is unit-tested directly; returns a
+ * cleaned `Brief` (trimmed strings, bounded arrays) or a reason it was rejected.
+ * Never throws on malformed input.
+ */
+export function validateBrief(raw: unknown, receivedAt: string): BriefValidation {
+  if (!raw || typeof raw !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
+  const b = raw as Record<string, unknown>;
+
+  if (typeof b.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b.date)) {
+    return { ok: false, error: 'date must be a YYYY-MM-DD string.' };
+  }
+
+  const nums: Array<['spy' | 'qqq' | 'iwm', number]> = [];
+  for (const key of ['spy', 'qqq', 'iwm'] as const) {
+    const v = b[key];
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      return { ok: false, error: `${key} must be a finite number (percent change in points).` };
+    }
+    if (Math.abs(v) > MAX_MOVE_POINTS) {
+      return { ok: false, error: `${key} of ${v}% is implausible for a pre-open move.` };
+    }
+    nums.push([key, v]);
+  }
+
+  const vix = b.vix;
+  if (typeof vix !== 'number' || !Number.isFinite(vix) || vix <= 0 || vix > 200) {
+    return { ok: false, error: 'vix must be a number in (0, 200].' };
+  }
+
+  if (typeof b.topStory !== 'string' || b.topStory.trim().length === 0) {
+    return { ok: false, error: 'topStory must be a non-empty string.' };
+  }
+
+  if (!Array.isArray(b.earningsToday) || b.earningsToday.some((e) => typeof e !== 'string')) {
+    return { ok: false, error: 'earningsToday must be an array of strings.' };
+  }
+  const earnings = (b.earningsToday as string[])
+    .map((e) => e.trim())
+    .filter(Boolean)
+    .slice(0, MAX_EARNINGS_STORED);
+
+  return {
+    ok: true,
+    brief: {
+      date: b.date,
+      spy: nums[0][1],
+      qqq: nums[1][1],
+      iwm: nums[2][1],
+      vix,
+      topStory: b.topStory.trim().slice(0, MAX_STORY),
+      earningsToday: earnings,
+      receivedAt,
+    },
+  };
+}
+
+/**
+ * Compose the morning post from a brief.
+ *
+ * Plain English, under 280, no gamma levels and no link (those belong to the
+ * 8:30 post). The top story is trimmed only as far as needed to fit — the fixed
+ * lines are short, so it almost never is.
+ */
+export function composeBriefMorning(brief: Brief, asOfLabel: string): ComposedPost {
+  const marketLine = `SPY ${signedPoints(brief.spy)} · QQQ ${signedPoints(brief.qqq)} · VIX ${brief.vix.toFixed(1)} (${vixWord(brief.vix)})`;
+  const earnings = brief.earningsToday.slice(0, 3);
+  const earningsLine = earnings.length > 0 ? `Earnings today: ${earnings.join(', ')}` : null;
+  const footer = `as of ${asOfLabel} · ${DISCLAIMER}`;
+
+  const build = (story: string): string =>
+    [
+      'Good morning ☕ Before the open:',
+      marketLine,
+      story,
+      ...(earningsLine ? [earningsLine] : []),
+      footer,
+    ].join('\n');
+
+  let story = brief.topStory;
+  let text = build(story);
+  // Trim the story if the whole thing overruns, keeping a trailing ellipsis.
+  while ([...text].length > X_LIMIT && story.length > 1) {
+    const cut = Math.max(1, story.length - ([...text].length - X_LIMIT) - 1);
+    story = `${story.slice(0, cut).trimEnd()}…`;
+    text = build(story);
+  }
+
+  // VIX is the one strictly-positive figure; spy/qqq are signed changes that
+  // may legitimately be zero, so they are validated at ingestion, not here.
+  const numbers: PostNumbers = { vix: brief.vix };
+
+  return {
+    slot: 'morning',
+    text,
+    length: [...text].length,
+    numbers,
+    dataIso: brief.receivedAt ?? new Date().toISOString(),
+    asOfLabel,
+  };
+}
+
+/**
+ * The fallback morning post when no brief arrived: a simple SPY/QQQ/VIX
+ * snapshot from live quotes. Carries the "brief missing" note so the log records
+ * why the brief format was not used.
+ */
+export function composeFallbackMorning(
+  quotes: { spy?: PulseQuote; qqq?: PulseQuote; vix?: PulseQuote },
+  asOfLabel: string,
+  dataIso: string,
+): ComposedPost {
+  const { spy, qqq, vix } = quotes;
+  if (!spy || !qqq || !vix) {
+    throw new Error('Fallback morning needs SPY, QQQ and VIX quotes.');
+  }
+  const marketLine = `SPY ${pct(spy.changePct)} · QQQ ${pct(qqq.changePct)} · VIX ${vix.price.toFixed(1)} (${vixWord(vix.price)})`;
+  const text = ['Good morning ☕ Before the open:', marketLine, `as of ${asOfLabel} · ${DISCLAIMER}`].join('\n');
+
+  return {
+    slot: 'morning',
+    text,
+    length: [...text].length,
+    numbers: { spy: spy.price, qqq: qqq.price, vix: vix.price },
+    dataIso,
+    asOfLabel,
+    note: 'brief missing',
+  };
 }

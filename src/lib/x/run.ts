@@ -89,7 +89,7 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
 
   let composed: ComposedPost;
   try {
-    composed = await buildForSlot(slot.kind);
+    composed = await buildForSlot(slot.kind, now);
   } catch (error) {
     const reason = `Could not build the post: ${error instanceof Error ? error.message : String(error)}`;
     if (!dry) await log({ at: now.toISOString(), date, slot: slot.kind, slotKey: slot.key, text: '', length: 0, outcome: 'skipped', reason });
@@ -157,11 +157,12 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
       text: composed.text,
       length: composed.length,
       outcome: 'sent',
+      reason: composed.note,
       tweetId: result.tweetId,
       asOfLabel: composed.asOfLabel,
       numbers: composed.numbers,
     });
-    return { ...base, status: 'sent', text: composed.text, length: composed.length, tweetId: result.tweetId, asOfLabel: composed.asOfLabel };
+    return { ...base, status: 'sent', reason: composed.note, text: composed.text, length: composed.length, tweetId: result.tweetId, asOfLabel: composed.asOfLabel };
   }
 
   // Auth or billing errors auto-pause: retrying just burns attempts against a
