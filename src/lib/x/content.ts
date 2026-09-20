@@ -3,15 +3,18 @@ import 'server-only';
 import { getPositioning } from '../positioning';
 import { formatClockEt, marketToday } from '../time';
 import { fetchCboeQuote, fetchCboeQuotes } from './cboeQuote';
-import { readBriefForDate, readClosingBriefForDate } from './brief';
-import { formatClockCt } from './schedule';
+import { readBriefForDate, readClosingBriefForDate, readWeeklyBriefForWeek } from './brief';
+import { formatClockCt, mostRecentFriday } from './schedule';
 import {
   composeBriefMorning,
   composeClosing,
   composeClosingBrief,
+  composeEarningsPost,
   composeFallbackMorning,
   composeGamma,
   composePulse,
+  composeWeeklyBrief,
+  selectEarningsNames,
   type ComposedPost,
 } from './text';
 import type { PostSlotKind } from './types';
@@ -150,6 +153,44 @@ export async function buildClosing(now: Date = new Date()): Promise<ComposedPost
   return { ...composed, note: 'closing brief missing' };
 }
 
+/**
+ * The Sunday 5:00 CT weekly recap, driven entirely by the Cowork "Week in
+ * review" brief. There is no live fallback: if this week's brief has not
+ * arrived, the build throws and `runSlot` logs a skip — exactly the required
+ * "no weekly brief by 5:00 PM CT → skip and log it" behaviour.
+ */
+export async function buildWeekly(now: Date = new Date()): Promise<ComposedPost> {
+  const weekEnding = mostRecentFriday(now);
+  const brief = await readWeeklyBriefForWeek(weekEnding).catch(() => null);
+  if (!brief) {
+    throw new Error(`No weekly brief for the week ending ${weekEnding} has arrived.`);
+  }
+  return composeWeeklyBrief(brief);
+}
+
+/**
+ * The 7:30 CT earnings-day post, built from the morning brief's earnings list
+ * filtered to well-known large companies. Throws (→ silent skip) when no morning
+ * brief has arrived yet, or when nobody the broad market cares about reports.
+ */
+export async function buildEarnings(now: Date = new Date()): Promise<ComposedPost> {
+  const date = marketToday(now);
+  const brief = await readBriefForDate(date).catch(() => null);
+  if (!brief) {
+    throw new Error('No morning brief yet, so no earnings names to post.');
+  }
+  const picks = selectEarningsNames(brief.earningsToday, 3);
+  if (picks.length === 0) {
+    throw new Error('No well-known large company reports today.');
+  }
+  return composeEarningsPost(
+    picks.map((p) => p.display),
+    formatClockEt(new Date(brief.receivedAt ?? now.toISOString())),
+    brief.receivedAt ?? now.toISOString(),
+    { date, type: 'earnings' },
+  );
+}
+
 export function buildForSlot(slot: PostSlotKind, now: Date = new Date()): Promise<ComposedPost> {
   switch (slot) {
     case 'morning':
@@ -160,5 +201,9 @@ export function buildForSlot(slot: PostSlotKind, now: Date = new Date()): Promis
       return buildPulse();
     case 'closing':
       return buildClosing(now);
+    case 'weekly':
+      return buildWeekly(now);
+    case 'earnings':
+      return buildEarnings(now);
   }
 }

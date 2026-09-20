@@ -13,7 +13,7 @@
  * carries the Chicago hour — `pulse-09` … `pulse-14` — which is what makes the
  * "not already posted today" guard count six distinct posts rather than one.
  */
-export type PostSlotKind = 'morning' | 'gamma' | 'pulse' | 'closing';
+export type PostSlotKind = 'morning' | 'gamma' | 'pulse' | 'closing' | 'weekly' | 'earnings';
 
 export interface PostSlot {
   kind: PostSlotKind;

@@ -106,7 +106,9 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     if (!postingEnabled()) {
       return { ...base, status: 'skipped', reason: 'Posting is disabled (X_POSTING_ENABLED is not true).' };
     }
-    if (!isTradingDay(date, rules)) {
+    // The weekly recap fires on a Sunday by design, so it is exempt from the
+    // trading-day gate; every other slot requires a live session.
+    if (slot.kind !== 'weekly' && !isTradingDay(date, rules)) {
       return { ...base, status: 'skipped', reason: 'Not a trading day (weekend or market holiday).' };
     }
     if (!force && (await isPaused())) {
@@ -130,11 +132,19 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
 
   // --- quality gates (force does not override these) --------------------------
 
+  // The weekly recap and the earnings heads-up are editorial: they carry no
+  // "as of" clock (they link to /daily instead), and the earnings post carries
+  // no figures at all. Exempt them from the stamp and empty-figure checks — the
+  // wording and length rules still apply, as does the jump check on any figure
+  // they do carry (the weekly's VIX).
+  const editorial = slot.kind === 'weekly' || slot.kind === 'earnings';
   const checks: string[] = [];
-  checks.push(...checkText(composed.text));
+  checks.push(...checkText(composed.text, { requireStamp: !editorial }));
 
   const last = await lastSentForSlot(slot.kind).catch(() => null);
-  checks.push(...checkNumbers(composed.numbers, last?.numbers ?? null));
+  if (Object.keys(composed.numbers).length > 0 || !editorial) {
+    checks.push(...checkNumbers(composed.numbers, last?.numbers ?? null));
+  }
 
   const staleness = snapshotStaleness(composed.dataIso, now);
   if (staleness.stale) {
@@ -173,14 +183,18 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     return { ...base, status: 'skipped', reason, text: composed.text };
   }
 
-  // --- attach today's poster image, for the morning and closing slots --------
+  // --- attach the poster image, when one was supplied ------------------------
 
-  // Only these two slots carry a Cowork poster; gamma/pulse are text-only.
-  const imageType = slot.kind === 'morning' || slot.kind === 'closing' ? slot.kind : null;
+  // Morning and closing derive their image from the slot + trading date; weekly
+  // and earnings name their own image key (its date is not the trading date), so
+  // the composer supplies it. gamma/pulse never carry one.
+  const imageRef: { date: string; type: 'morning' | 'closing' | 'weekly' | 'earnings' } | null =
+    composed.image ??
+    (slot.kind === 'morning' || slot.kind === 'closing' ? { date, type: slot.kind } : null);
   let mediaId: string | undefined;
   let imageNote: string | undefined;
-  if (imageType) {
-    const bytes = await readImageBytes(date, imageType).catch(() => null);
+  if (imageRef) {
+    const bytes = await readImageBytes(imageRef.date, imageRef.type).catch(() => null);
     if (bytes) {
       const upload = await uploadMedia(bytes);
       if (upload.ok) {
@@ -202,7 +216,7 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
 
   if (result.ok) {
     // A posted image is marked so the daily cleanup may later retire it.
-    if (mediaId && imageType) await markImagePosted(date, imageType);
+    if (mediaId && imageRef) await markImagePosted(imageRef.date, imageRef.type);
     const reason = [composed.note, imageNote].filter(Boolean).join('; ') || undefined;
     await log({
       at: now.toISOString(),

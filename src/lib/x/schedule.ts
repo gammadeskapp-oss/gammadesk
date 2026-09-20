@@ -113,6 +113,54 @@ export const CLOSING_HOUR_CT = 15;
 export const PULSE_FIRST_HOUR_CT = 9;
 export const PULSE_LAST_HOUR_CT = 14;
 
+/** The Chicago hour at which the Sunday weekly-recap post fires (5:00 PM CT). */
+export const WEEKLY_HOUR_CT = 17;
+
+/** The Chicago hour at which the earnings-day post fires (7:30 AM CT). */
+export const EARNINGS_HOUR_CT = 7;
+
+/**
+ * The most recent Friday on or before `now`, as a Chicago `YYYY-MM-DD`. On a
+ * Sunday this is two days back — the Friday the just-ended week closed on, which
+ * is the weekly brief's `weekEnding`.
+ */
+export function mostRecentFriday(now: Date = new Date()): string {
+  const clock = chicagoNow(now);
+  const [y, m, d] = clock.date.split('-').map(Number);
+  const daysSinceFriday = (clock.weekday - 5 + 7) % 7; // Friday = 5
+  const base = Date.UTC(y, m - 1, d) - daysSinceFriday * 86_400_000;
+  const dt = new Date(base);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+}
+
+/**
+ * The weekly slot if this firing is the 5:xx PM CT one on a Sunday, else null.
+ * Gated on Sunday + the hour (17 CT); not tied to a trading day, since it fires
+ * on the weekend and recaps the week that just closed.
+ */
+export function dueWeeklySlot(now: Date = new Date()): PostSlot | null {
+  const clock = chicagoNow(now);
+  if (clock.weekday !== 0) return null; // Sunday only
+  if (clock.hour !== WEEKLY_HOUR_CT) return null;
+  return { kind: 'weekly', key: 'weekly', label: 'Weekly recap (Sun 5:00 CT)' };
+}
+
+/**
+ * The earnings slot if this firing is the 7:xx AM CT one on a trading day, else
+ * null. Whether anything is actually posted then depends on who reports — the
+ * composer skips silently when no well-known name is on the calendar.
+ */
+export function dueEarningsSlot(
+  now: Date = new Date(),
+  rules: ClosedCheck = NEVER_CLOSED,
+): PostSlot | null {
+  const clock = chicagoNow(now);
+  if (!isTradingDay(clock.date, rules)) return null;
+  if (clock.hour !== EARNINGS_HOUR_CT) return null;
+  return { kind: 'earnings', key: 'earnings', label: 'Earnings today (7:30 CT)' };
+}
+
 /**
  * The gamma slot if this firing is the 8:xx CT one on a trading day, else null.
  *

@@ -24,6 +24,9 @@ const {
   dueGammaSlot,
   duePulseSlot,
   dueClosingSlot,
+  dueWeeklySlot,
+  dueEarningsSlot,
+  mostRecentFriday,
   formatClockCt,
 } = await import('../src/lib/x/schedule.ts');
 const { checkText, checkNumbers } = await import('../src/lib/x/guard.ts');
@@ -37,12 +40,18 @@ const {
   composeBriefMorning,
   composeFallbackMorning,
   composeClosingBrief,
+  composeWeeklyBrief,
+  validateWeeklyBrief,
+  composeEarningsPost,
+  selectEarningsNames,
+  extractTicker,
   validateBrief,
   validateClosingBrief,
   signedPoints,
   vixWord,
   X_LIMIT,
   DISCLAIMER,
+  DAILY_LINK,
 } = await import('../src/lib/x/text.ts');
 
 let failures = 0;
@@ -512,6 +521,104 @@ section('selectImagesToDelete retires only posted images past the age limit');
   ok('an old UNPOSTED image is never deleted', !del.includes('b'));
   ok('a recent posted image is kept', !del.includes('c'));
   ok('a bad-timestamp image is kept', !del.includes('e'));
+}
+
+// --- Weekly "Week in review" brief -------------------------------------------
+
+section('The weekly slot fires only at 5:00 PM CT on a Sunday');
+// Summer (CDT, UTC-5): 22:00 UTC Sunday is 17:00 CT Sunday.
+ok('summer 22:00 UTC Sun → weekly', dueWeeklySlot(new Date('2026-07-05T22:00:00Z'))?.key === 'weekly');
+ok('summer 23:00 UTC Sun → null (6 PM CT)', dueWeeklySlot(new Date('2026-07-05T23:00:00Z')) === null);
+// Winter (CST, UTC-6): 23:00 UTC Sunday is 17:00 CT Sunday.
+ok('winter 23:00 UTC Sun → weekly', dueWeeklySlot(new Date('2026-01-04T23:00:00Z'))?.key === 'weekly');
+ok('winter 22:00 UTC Sun → null (4 PM CT)', dueWeeklySlot(new Date('2026-01-04T22:00:00Z')) === null);
+ok('Saturday 5 PM CT → no weekly', dueWeeklySlot(new Date('2026-07-04T22:00:00Z')) === null);
+ok('a weekday 5 PM CT → no weekly', dueWeeklySlot(new Date('2026-07-01T22:00:00Z')) === null);
+
+section('mostRecentFriday returns the Friday the week closed on');
+ok('Sunday → the Friday two days back', mostRecentFriday(new Date('2026-07-05T22:00:00Z')) === '2026-07-03', mostRecentFriday(new Date('2026-07-05T22:00:00Z')));
+ok('the Friday itself → that Friday', mostRecentFriday(new Date('2026-07-03T18:00:00Z')) === '2026-07-03');
+
+section('validateWeeklyBrief is strict about untrusted input');
+const goodWeekly = {
+  type: 'weekly', weekEnding: '2026-09-18', spyWeekPct: 1.2, qqqWeekPct: 0.8, iwmWeekPct: -0.4,
+  vix: 15.2, weekStory: 'Stocks ground higher on cooling inflation.',
+  nextWeek: ['Fed minutes', 'NVDA earnings', 'PMIs', 'Jobless claims'],
+};
+{
+  const r = validateWeeklyBrief(goodWeekly, '2026-09-20T22:00:00Z');
+  ok('a valid weekly brief passes', r.ok === true, r.error);
+  ok('receivedAt stamped', r.brief.receivedAt === '2026-09-20T22:00:00Z');
+  ok('nextWeek kept in order', r.brief.nextWeek.join(',') === 'Fed minutes,NVDA earnings,PMIs,Jobless claims');
+}
+ok('bad weekEnding rejected', validateWeeklyBrief({ ...goodWeekly, weekEnding: '9/18/26' }, 'x').ok === false);
+ok('non-number spyWeekPct rejected', validateWeeklyBrief({ ...goodWeekly, spyWeekPct: 'up' }, 'x').ok === false);
+ok('negative week change is fine', validateWeeklyBrief({ ...goodWeekly, iwmWeekPct: -3.1 }, 'x').ok === true);
+ok('implausible week move rejected', validateWeeklyBrief({ ...goodWeekly, spyWeekPct: 60 }, 'x').ok === false);
+ok('vix out of range rejected', validateWeeklyBrief({ ...goodWeekly, vix: 0 }, 'x').ok === false);
+ok('empty weekStory rejected', validateWeeklyBrief({ ...goodWeekly, weekStory: '  ' }, 'x').ok === false);
+ok('nextWeek not-array rejected', validateWeeklyBrief({ ...goodWeekly, nextWeek: 'Fed' }, 'x').ok === false);
+
+section('composeWeeklyBrief matches the required shape and links to /daily');
+{
+  const brief = validateWeeklyBrief(goodWeekly, '2026-09-20T22:00:00Z').brief;
+  const p = composeWeeklyBrief(brief);
+  // Editorial post: no "as of" stamp required, but every other rule applies.
+  const problems = checkText(p.text, { requireStamp: false });
+  ok('passes checkText (no-stamp mode)', problems.length === 0, problems.join(' | '));
+  ok('within 280', p.length <= X_LIMIT, String(p.length));
+  ok('opens with "Week in review 📅"', p.text.startsWith('Week in review 📅'));
+  ok('shows the three week changes', /SPY \+1\.2% · QQQ \+0\.8% · IWM -0\.4%/.test(p.text));
+  ok('shows the week story', p.text.includes('Stocks ground higher on cooling inflation.'));
+  ok('caps next-week watch items at 3', /Next week: Fed minutes, NVDA earnings, PMIs/.test(p.text) && !p.text.includes('Jobless claims'));
+  ok('ends with the /daily link + disclaimer', p.text.endsWith(`${DAILY_LINK} · ${DISCLAIMER}`), p.text);
+  ok('has NO clock stamp', !/\bas of\b/i.test(p.text));
+  ok('sanity number is vix only', JSON.stringify(p.numbers) === '{"vix":15.2}');
+  ok('image key is the week-ending date', p.image && p.image.date === '2026-09-18' && p.image.type === 'weekly');
+}
+{
+  const long = validateWeeklyBrief({ ...goodWeekly, weekStory: 'z'.repeat(500) }, 'x').brief;
+  const p = composeWeeklyBrief(long);
+  ok('long week story trimmed to fit 280', p.length <= X_LIMIT, String(p.length));
+  ok('trim keeps the disclaimer', p.text.includes(DISCLAIMER));
+}
+
+// --- Earnings-day post -------------------------------------------------------
+
+section('The earnings slot fires at 7:30 AM CT on a trading day');
+// Summer (CDT, UTC-5): 12:30 UTC is 7:30 CT.
+ok('summer 12:30 UTC → earnings', dueEarningsSlot(new Date('2026-07-01T12:30:00Z'))?.key === 'earnings');
+ok('summer 13:30 UTC → null (8:30 CT)', dueEarningsSlot(new Date('2026-07-01T13:30:00Z')) === null);
+// Winter (CST, UTC-6): 13:30 UTC is 7:30 CT.
+ok('winter 13:30 UTC → earnings', dueEarningsSlot(new Date('2026-01-05T13:30:00Z'))?.key === 'earnings');
+ok('winter 12:30 UTC → null (6:30 CT)', dueEarningsSlot(new Date('2026-01-05T12:30:00Z')) === null);
+ok('weekend → no earnings', dueEarningsSlot(new Date('2026-07-04T12:30:00Z')) === null);
+ok('holiday → no earnings', dueEarningsSlot(new Date('2026-07-03T12:30:00Z'), closedRules) === null);
+
+section('extractTicker and selectEarningsNames pick well-known names only');
+ok('bare ticker', extractTicker('AAPL') === 'AAPL');
+ok('ticker with a note', extractTicker('AAPL (after the bell)') === 'AAPL');
+ok('name with ticker in parens', extractTicker('Apple (AAPL)') === 'AAPL');
+ok('unknown shape → null-ish', extractTicker('') === null);
+{
+  const picks = selectEarningsNames(['AAPL (after the bell)', 'ZZZZ Corp', 'MSFT', 'AAPL', 'NVDA', 'TSLA'], 3);
+  ok('keeps only megacaps, deduped, capped at 3', picks.map((p) => p.ticker).join(',') === 'AAPL,MSFT,NVDA', picks.map((p) => p.ticker).join(','));
+  ok('preserves the original display (with the bell note)', picks[0].display === 'AAPL (after the bell)');
+}
+ok('a small-cap-only list yields nothing', selectEarningsNames(['SMALLCO (SMCX)', 'Tiny Inc (TNY)']).length === 0);
+
+section('composeEarningsPost is rule-clean, prediction-free and links to /daily');
+{
+  const p = composeEarningsPost(['AAPL (after the bell)', 'MSFT', 'NVDA'], 'Wed 7:30 ET', '2026-09-16T12:25:00Z', { date: '2026-09-16', type: 'earnings' });
+  const problems = checkText(p.text, { requireStamp: false });
+  ok('passes checkText (no-stamp mode)', problems.length === 0, problems.join(' | '));
+  ok('within 280', p.length <= X_LIMIT, String(p.length));
+  ok('opens with "Earnings today 📊"', p.text.startsWith('Earnings today 📊'));
+  ok('names the three companies', /AAPL/.test(p.text) && /MSFT/.test(p.text) && /NVDA/.test(p.text));
+  ok('ends with the /daily link + disclaimer', p.text.endsWith(`${DAILY_LINK} · ${DISCLAIMER}`));
+  ok('carries no figures', JSON.stringify(p.numbers) === '{}');
+  ok('no banned wording (no buy/sell/expected-move)', checkText(p.text, { requireStamp: false }).every((f) => !/banned/i.test(f)));
+  ok('image key is the trading date', p.image && p.image.date === '2026-09-16' && p.image.type === 'earnings');
 }
 
 // --- result ------------------------------------------------------------------

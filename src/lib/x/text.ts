@@ -21,7 +21,7 @@ export const LINK = 'gammadesk.app';
 export const DAILY_LINK = 'gammadesk.app/daily';
 
 export interface ComposedPost {
-  slot: 'morning' | 'gamma' | 'pulse' | 'closing';
+  slot: 'morning' | 'gamma' | 'pulse' | 'closing' | 'weekly' | 'earnings';
   text: string;
   length: number;
   numbers: PostNumbers;
@@ -35,6 +35,14 @@ export interface ComposedPost {
    * snapshot. Not part of the posted text.
    */
   note?: string;
+  /**
+   * Which stored poster image to try to attach, when this post carries one.
+   * The runner reads the bytes for `{date, type}` and posts text-only if none
+   * is stored. Morning and closing derive their image from the slot + trading
+   * date instead; this is for slots (weekly, earnings) whose image key is not
+   * the trading date.
+   */
+  image?: { date: string; type: 'morning' | 'closing' | 'weekly' | 'earnings' };
 }
 
 /** Assemble the final text: body, the "as of" line, then the disclaimer. */
@@ -509,5 +517,210 @@ export function composeClosingBrief(brief: ClosingBrief): ComposedPost {
     numbers,
     dataIso: brief.receivedAt ?? new Date().toISOString(),
     asOfLabel: 'market close',
+  };
+}
+
+// --- Weekly "Week in review" brief (Cowork-supplied) -------------------------
+
+/**
+ * The Sunday "Week in review" brief, supplied by the Cowork task via
+ * POST /api/brief with `type: "weekly"`. Untrusted off-platform input, so
+ * `validateWeeklyBrief` is strict.
+ *
+ * `spyWeekPct` / `qqqWeekPct` / `iwmWeekPct` are the week's percent changes in
+ * points (e.g. 1.2 = +1.2%), `vix` is the index level, `weekEnding` is the
+ * Friday the week closed on.
+ */
+export interface WeeklyBrief {
+  type: 'weekly';
+  /** The Friday the week ended, `YYYY-MM-DD`. */
+  weekEnding: string;
+  spyWeekPct: number;
+  qqqWeekPct: number;
+  iwmWeekPct: number;
+  vix: number;
+  weekStory: string;
+  nextWeek: string[];
+  receivedAt?: string;
+}
+
+/** A weekly index move beyond this many percent is almost certainly bad input. */
+const MAX_WEEK_POINTS = 40;
+
+export function validateWeeklyBrief(raw: unknown, receivedAt: string): { ok: boolean; brief?: WeeklyBrief; error?: string } {
+  if (!raw || typeof raw !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
+  const b = raw as Record<string, unknown>;
+
+  if (typeof b.weekEnding !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b.weekEnding)) {
+    return { ok: false, error: 'weekEnding must be a YYYY-MM-DD string.' };
+  }
+
+  const changes: Record<'spyWeekPct' | 'qqqWeekPct' | 'iwmWeekPct', number> = {
+    spyWeekPct: 0, qqqWeekPct: 0, iwmWeekPct: 0,
+  };
+  for (const key of ['spyWeekPct', 'qqqWeekPct', 'iwmWeekPct'] as const) {
+    const v = b[key];
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      return { ok: false, error: `${key} must be a finite number (percent change in points).` };
+    }
+    if (Math.abs(v) > MAX_WEEK_POINTS) {
+      return { ok: false, error: `${key} of ${v}% is implausible for a weekly move.` };
+    }
+    changes[key] = v;
+  }
+
+  const vix = b.vix;
+  if (typeof vix !== 'number' || !Number.isFinite(vix) || vix <= 0 || vix > 200) {
+    return { ok: false, error: 'vix must be a number in (0, 200].' };
+  }
+
+  if (typeof b.weekStory !== 'string' || b.weekStory.trim().length === 0) {
+    return { ok: false, error: 'weekStory must be a non-empty string.' };
+  }
+
+  if (!Array.isArray(b.nextWeek) || b.nextWeek.some((e) => typeof e !== 'string')) {
+    return { ok: false, error: 'nextWeek must be an array of strings.' };
+  }
+  const nextWeek = (b.nextWeek as string[]).map((e) => e.trim()).filter(Boolean).slice(0, MAX_EARNINGS_STORED);
+
+  return {
+    ok: true,
+    brief: {
+      type: 'weekly',
+      weekEnding: b.weekEnding,
+      spyWeekPct: changes.spyWeekPct,
+      qqqWeekPct: changes.qqqWeekPct,
+      iwmWeekPct: changes.iwmWeekPct,
+      vix,
+      weekStory: b.weekStory.trim().slice(0, MAX_STORY),
+      nextWeek,
+      receivedAt,
+    },
+  };
+}
+
+/**
+ * Compose the Sunday weekly-recap post from a weekly brief.
+ *
+ * Plain English, under 280, links to /daily (no clock stamp — a weekly recap
+ * has no "as of" moment). The week story is trimmed only as far as needed.
+ */
+export function composeWeeklyBrief(brief: WeeklyBrief): ComposedPost {
+  const marketLine = `SPY ${signedPoints(brief.spyWeekPct)} · QQQ ${signedPoints(brief.qqqWeekPct)} · IWM ${signedPoints(brief.iwmWeekPct)}`;
+  const next = brief.nextWeek.slice(0, 3);
+  const nextLine = next.length > 0 ? `Next week: ${next.join(', ')}` : null;
+  const footer = `${DAILY_LINK} · ${DISCLAIMER}`;
+
+  const build = (story: string): string =>
+    ['Week in review 📅', marketLine, story, ...(nextLine ? [nextLine] : []), footer].join('\n');
+
+  let story = brief.weekStory;
+  let text = build(story);
+  while ([...text].length > X_LIMIT && story.length > 1) {
+    const cut = Math.max(1, story.length - ([...text].length - X_LIMIT) - 1);
+    story = `${story.slice(0, cut).trimEnd()}…`;
+    text = build(story);
+  }
+
+  // VIX is the one strictly-positive figure; the week changes are signed and may
+  // be zero or negative, so they are validated at ingestion, not here.
+  const numbers: PostNumbers = { vix: brief.vix };
+
+  return {
+    slot: 'weekly',
+    text,
+    length: [...text].length,
+    numbers,
+    dataIso: brief.receivedAt ?? new Date().toISOString(),
+    asOfLabel: `week ending ${brief.weekEnding}`,
+    image: { date: brief.weekEnding, type: 'weekly' },
+  };
+}
+
+// --- Earnings-day post (from the morning brief's earnings list) --------------
+
+/**
+ * A curated set of well-known, large companies. The earnings post fires only
+ * when at least one of these reports today — a small-cap on the calendar is not
+ * something the general market cares about, and this keeps the post to names a
+ * non-specialist recognises. Symbols, matched case-insensitively.
+ */
+export const EARNINGS_MEGACAPS = new Set(
+  [
+    'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'GOOG', 'AMZN', 'META', 'TSLA', 'AVGO', 'BRK.B',
+    'JPM', 'V', 'MA', 'LLY', 'WMT', 'XOM', 'UNH', 'ORCL', 'HD', 'COST',
+    'NFLX', 'AMD', 'CRM', 'BAC', 'KO', 'PEP', 'ADBE', 'DIS', 'CSCO', 'MCD',
+    'ABBV', 'WFC', 'GE', 'CVX', 'INTC', 'QCOM', 'IBM', 'GS', 'NKE', 'PM',
+    'TXN', 'CAT', 'BA', 'C', 'PFE', 'T', 'VZ', 'PYPL', 'SBUX', 'MU', 'UBER',
+    'BABA', 'F', 'GM', 'DAL', 'JNJ', 'PG', 'MS', 'AXP', 'BLK', 'SCHW',
+  ].map((s) => s.toUpperCase()),
+);
+
+/**
+ * Pull a ticker out of a brief earnings string. Accepts a bare ticker
+ * (`AAPL`, `AAPL (after the bell)`) or a name with the ticker in parentheses
+ * (`Apple (AAPL)`). Returns the uppercased ticker, or null when none is found.
+ */
+export function extractTicker(entry: string): string | null {
+  const paren = entry.match(/\(([A-Za-z.]{1,6})\)/);
+  if (paren && /[A-Za-z]/.test(paren[1])) return paren[1].toUpperCase();
+  const lead = entry.trim().match(/^([A-Za-z]{1,5}(?:\.[A-Za-z])?)\b/);
+  return lead ? lead[1].toUpperCase() : null;
+}
+
+/**
+ * From the morning brief's earnings names, keep those that are well-known large
+ * companies, de-duplicated by ticker, in order, up to `max`. Each kept entry
+ * carries the original display string (so any "before/after the bell" note the
+ * brief included is preserved) alongside the ticker.
+ */
+export function selectEarningsNames(
+  entries: string[],
+  max = 3,
+): Array<{ display: string; ticker: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ display: string; ticker: string }> = [];
+  for (const raw of entries) {
+    if (typeof raw !== 'string') continue;
+    const display = raw.trim();
+    if (!display) continue;
+    const ticker = extractTicker(display);
+    if (!ticker || !EARNINGS_MEGACAPS.has(ticker) || seen.has(ticker)) continue;
+    seen.add(ticker);
+    out.push({ display, ticker });
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
+ * Compose the 7:30 CT earnings-day post from the selected names.
+ *
+ * Plain English, under 280, links to /daily. No predictions, no expected-move
+ * numbers, no buy/sell wording — it names who reports and one neutral line on
+ * why a heavyweight's report matters to the broad market. Carries no figures;
+ * the runner is told to skip the number self-check for this slot.
+ */
+export function composeEarningsPost(
+  names: string[],
+  weekdayLabel: string,
+  dataIso: string,
+  image?: { date: string; type: 'earnings' },
+): ComposedPost {
+  const namesLine = names.join(' · ');
+  const why = 'Reports from companies this large tend to set the tone for the broad market.';
+  const footer = `${DAILY_LINK} · ${DISCLAIMER}`;
+  const text = ['Earnings today 📊', namesLine, why, footer].join('\n');
+
+  return {
+    slot: 'earnings',
+    text,
+    length: [...text].length,
+    // Deliberately no figures — the runner exempts this slot from the "no
+    // figures" check rather than inventing a number to satisfy it.
+    numbers: {},
+    dataIso,
+    asOfLabel: weekdayLabel,
+    ...(image ? { image } : {}),
   };
 }

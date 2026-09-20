@@ -30,6 +30,8 @@ const PREVIEW_SLOTS: PostSlot[] = [
   { kind: 'gamma', key: 'gamma', label: 'SPY gamma levels (8:30 CT)' },
   { kind: 'pulse', key: 'pulse-preview', label: 'Market pulse (hourly 9:30–2:30 CT)' },
   { kind: 'closing', key: 'closing', label: 'Closing snapshot' },
+  { kind: 'earnings', key: 'earnings', label: 'Earnings today (7:30 CT, trading days)' },
+  { kind: 'weekly', key: 'weekly', label: 'Weekly recap (Sun 5:00 CT)' },
 ];
 
 export async function GET(request: NextRequest) {

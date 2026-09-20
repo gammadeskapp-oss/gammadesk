@@ -50,7 +50,7 @@ export function decodeImageField(raw: unknown): DecodedImage {
 
 export interface StoredImageMeta {
   date: string;
-  type: 'morning' | 'closing';
+  type: 'morning' | 'closing' | 'weekly' | 'earnings';
   receivedAt: string;
   size: number;
   posted: boolean;

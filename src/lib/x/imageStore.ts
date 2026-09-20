@@ -15,7 +15,7 @@ import { selectImagesToDelete, type StoredImageMeta } from './media';
  * deleted.
  */
 
-type ImageType = 'morning' | 'closing';
+type ImageType = 'morning' | 'closing' | 'weekly' | 'earnings';
 type ImageIndex = Record<string, StoredImageMeta>;
 
 const indexKey = (date: string, type: ImageType) => `${date}-${type}`;

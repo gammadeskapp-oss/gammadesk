@@ -112,6 +112,14 @@
     {
       "path": "/api/cron/health",
       "schedule": "0 2,3 * * *"
+    },
+    {
+      "path": "/api/x/earnings",
+      "schedule": "30 12,13 * * 1-5"
+    },
+    {
+      "path": "/api/x/weekly",
+      "schedule": "0 22,23 * * 0"
     }
   ]
 }
