@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE, verifySession } from '@/lib/tos/auth';
-import { postingEnabled, runSlot } from '@/lib/x/run';
+import { postingEnabled, postingEnabledDiagnostic, runSlot } from '@/lib/x/run';
 import { readLog, readPause, storeStatus } from '@/lib/x/store';
 import { readBrief } from '@/lib/x/brief';
 import type { PostSlot } from '@/lib/x/types';
@@ -60,6 +60,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(
     {
       postingEnabled: postingEnabled(),
+      postingEnv: postingEnabledDiagnostic(),
       pause,
       store: storeStatus(),
       brief,

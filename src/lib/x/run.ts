@@ -4,6 +4,7 @@ import { marketSessionRules, snapshotStaleness } from '../events';
 import { marketToday } from '../time';
 import { readCredentials, postTweet } from './client';
 import { buildForSlot, type ComposedPost } from './content';
+import { postingEnabledFromValue } from './flags';
 import { checkNumbers, checkText } from './guard';
 import { isTradingDay } from './schedule';
 import {
@@ -50,9 +51,39 @@ export interface RunOptions {
   now?: Date;
 }
 
-/** The env kill switch: posting is off unless X_POSTING_ENABLED is exactly true. */
+/**
+ * The env kill switch: posting is off unless X_POSTING_ENABLED is set to a
+ * truthy value.
+ *
+ * Forgiving on purpose, the same way the unlock password is (see
+ * `lib/tos/auth.ts`): a value pasted into a Vercel env var routinely arrives
+ * wrapped in quotes or with a trailing newline, and "I set it to true but it
+ * says disabled" is almost always that. Wrapping quotes and surrounding
+ * whitespace are stripped, and the common truthy spellings are accepted, so a
+ * correct intent is not defeated by formatting. Anything else — unset, empty,
+ * `false`, `0`, `no`, `off` — leaves posting off, which is the safe default.
+ */
 export function postingEnabled(): boolean {
-  return (process.env['X_POSTING_ENABLED'] ?? '').trim().toLowerCase() === 'true';
+  return postingEnabledFromValue(process.env['X_POSTING_ENABLED']);
+}
+
+/**
+ * Owner-facing diagnostic for why posting is or is not enabled. The value is
+ * non-sensitive config, and this is only ever surfaced on the owner-only admin
+ * page — so it can show the actual value, which is what makes a typo or a
+ * stray-quote mistake obvious rather than a silent "disabled".
+ */
+export function postingEnabledDiagnostic(): {
+  enabled: boolean;
+  present: boolean;
+  rawValue: string | null;
+} {
+  const raw = process.env['X_POSTING_ENABLED'];
+  return {
+    enabled: postingEnabled(),
+    present: typeof raw === 'string' && raw.length > 0,
+    rawValue: typeof raw === 'string' ? raw : null,
+  };
 }
 
 async function log(entry: PostLogEntry): Promise<void> {

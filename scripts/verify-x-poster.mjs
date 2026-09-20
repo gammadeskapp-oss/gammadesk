@@ -26,6 +26,7 @@ const {
   formatClockCt,
 } = await import('../src/lib/x/schedule.ts');
 const { checkText, checkNumbers } = await import('../src/lib/x/guard.ts');
+const { postingEnabledFromValue } = await import('../src/lib/x/flags.ts');
 const {
   composeMorning,
   composeGamma,
@@ -276,6 +277,12 @@ ok('pulse without IWM throws', (() => {
     return true;
   }
 })());
+
+section('The X_POSTING_ENABLED kill switch forgives common formatting mistakes');
+for (const v of ['true', 'TRUE', ' true ', '"true"', "'true'", 'true\n', '1', 'yes', 'on', 'enabled'])
+  ok(`"${v.replace(/\n/g, '\\n')}" enables`, postingEnabledFromValue(v) === true);
+for (const v of ['false', '0', 'no', 'off', '', '  ', 'enable', 'truthy', undefined, null])
+  ok(`"${String(v)}" stays off`, postingEnabledFromValue(v) === false);
 
 // --- Morning Desk brief ------------------------------------------------------
 

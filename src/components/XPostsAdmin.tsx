@@ -55,6 +55,7 @@ interface Brief {
 
 interface AdminData {
   postingEnabled: boolean;
+  postingEnv?: { enabled: boolean; present: boolean; rawValue: string | null };
   pause: PauseState;
   store: { kind: string; durable: boolean; note?: string };
   brief: Brief | null;
@@ -223,7 +224,7 @@ export function XPostsAdmin() {
     );
   }
 
-  const { postingEnabled, pause, store, brief, recent, previews } = data;
+  const { postingEnabled, postingEnv, pause, store, brief, recent, previews } = data;
   const signed = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 
   return (
@@ -256,6 +257,24 @@ export function XPostsAdmin() {
             Log store: {store.kind}
             {store.durable ? '' : ' — not durable'}
           </p>
+          {!postingEnabled && postingEnv && (
+            <p className="text-2xs leading-relaxed text-flip/90">
+              {postingEnv.present ? (
+                <>
+                  X_POSTING_ENABLED is set to{' '}
+                  <code className="text-term-text">{JSON.stringify(postingEnv.rawValue)}</code>, which
+                  does not read as true. Set it to <code className="text-term-text">true</code>{' '}
+                  (no quotes) in Vercel → Production and redeploy.
+                </>
+              ) : (
+                <>
+                  X_POSTING_ENABLED is not set on this deployment. Add it as{' '}
+                  <code className="text-term-text">true</code> in Vercel → Production
+                  (check the scope is Production and the name is exact) and redeploy.
+                </>
+              )}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {pause.paused ? (
