@@ -76,6 +76,21 @@ interface ImageMeta {
   postedAt?: string;
 }
 
+interface HealthCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+interface HealthReport {
+  date: string;
+  ranAt: string;
+  total: number;
+  failed: number;
+  checks: HealthCheck[];
+}
+
 interface AdminData {
   postingEnabled: boolean;
   postingEnv?: { enabled: boolean; present: boolean; rawValue: string | null };
@@ -86,6 +101,7 @@ interface AdminData {
   images: { morning: ImageMeta | null; closing: ImageMeta | null };
   recent: LogEntry[];
   previews: Preview[];
+  health?: HealthReport[];
 }
 
 type Status = 'loading' | 'locked' | 'unlocked' | 'error';
@@ -249,7 +265,7 @@ export function XPostsAdmin() {
     );
   }
 
-  const { postingEnabled, postingEnv, pause, store, brief, closingBrief, images, recent, previews } = data;
+  const { postingEnabled, postingEnv, pause, store, brief, closingBrief, images, recent, previews, health } = data;
   const signed = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
   const kb = (n: number) => `${Math.round(n / 1024)} KB`;
 
@@ -445,6 +461,48 @@ export function XPostsAdmin() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Nightly health check */}
+      <section className="space-y-2">
+        <h2 className="label-xs">Nightly health check (last 30 days)</h2>
+        {!health || health.length === 0 ? (
+          <div className="panel px-4 py-8 text-center text-xs text-term-dim">
+            No health checks recorded yet. Runs nightly at 9:00 PM CT.
+          </div>
+        ) : (
+          <div className="panel divide-y divide-term-line/60">
+            {health.map((r) => (
+              <details key={r.date} className="group px-3.5 py-2.5">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-xs [&::-webkit-details-marker]:hidden">
+                  <span className="flex items-center gap-2">
+                    <span
+                      aria-hidden
+                      className={`inline-block h-2 w-2 rounded-full ${r.failed === 0 ? 'bg-pos' : 'bg-bear'}`}
+                    />
+                    <span className="font-bold tabular-nums text-term-text">{r.date}</span>
+                  </span>
+                  <span className={`tabular-nums ${r.failed === 0 ? 'text-pos' : 'text-bear'}`}>
+                    {r.failed === 0 ? `All ${r.total} passed` : `${r.failed} of ${r.total} failed`}
+                  </span>
+                </summary>
+                <div className="mt-2 space-y-1 border-t border-term-line/60 pt-2">
+                  {r.checks.map((c) => (
+                    <div key={c.id} className="flex gap-2 text-2xs leading-relaxed">
+                      <span aria-hidden className={c.ok ? 'text-pos' : 'text-bear'}>
+                        {c.ok ? '✓' : '✗'}
+                      </span>
+                      <span className="text-term-dim">
+                        <span className="text-term-text">{c.label}</span> — {c.detail}
+                      </span>
+                    </div>
+                  ))}
+                  <p className="pt-1 text-2xs text-term-faint">Ran {clock(r.ranAt)}</p>
+                </div>
+              </details>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Recent log */}
