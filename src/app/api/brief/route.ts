@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { safeEqual } from '@/lib/tos/auth';
 import { saveBrief, saveClosingBrief } from '@/lib/x/brief';
+import { saveImage } from '@/lib/x/imageStore';
+import { decodeImageField } from '@/lib/x/media';
 import { validateBrief, validateClosingBrief } from '@/lib/x/text';
 
 /**
@@ -67,6 +69,13 @@ export async function POST(request: NextRequest) {
 
   const now = new Date().toISOString();
 
+  // The optional poster image rides in the same JSON body as base64. Validated
+  // (PNG, ≤5 MB) before anything is stored; a bad image fails the whole request.
+  const decoded = decodeImageField((raw as { image?: unknown }).image);
+  if (!decoded.ok) {
+    return NextResponse.json({ error: decoded.error ?? 'Invalid image.' }, { status: 400, headers: NO_STORE });
+  }
+
   try {
     if (type === 'closing') {
       const result = validateClosingBrief(raw, now);
@@ -74,8 +83,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: result.error ?? 'Invalid closing brief.' }, { status: 400, headers: NO_STORE });
       }
       await saveClosingBrief(result.brief);
+      if (decoded.bytes) await saveImage(result.brief.date, 'closing', decoded.bytes);
       return NextResponse.json(
-        { ok: true, type: 'closing', date: result.brief.date, movers: result.brief.topMovers.length },
+        { ok: true, type: 'closing', date: result.brief.date, movers: result.brief.topMovers.length, image: decoded.bytes ? { saved: true, bytes: decoded.bytes.length } : { saved: false } },
         { headers: NO_STORE },
       );
     }
@@ -85,8 +95,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: result.error ?? 'Invalid brief.' }, { status: 400, headers: NO_STORE });
     }
     await saveBrief(result.brief);
+    if (decoded.bytes) await saveImage(result.brief.date, 'morning', decoded.bytes);
     return NextResponse.json(
-      { ok: true, type: 'morning', date: result.brief.date, earnings: result.brief.earningsToday.length },
+      { ok: true, type: 'morning', date: result.brief.date, earnings: result.brief.earningsToday.length, image: decoded.bytes ? { saved: true, bytes: decoded.bytes.length } : { saved: false } },
       { headers: NO_STORE },
     );
   } catch (error) {

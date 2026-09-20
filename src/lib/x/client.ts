@@ -15,6 +15,11 @@ import type { PostResult } from './types';
  */
 
 const TWEET_URL = 'https://api.twitter.com/2/tweets';
+// Media upload uses the v1.1 endpoint: it is the stable, universally-used media
+// upload for OAuth 1.0a user context, and the v2 simple-upload endpoint rejects
+// this multipart request outright (verified live: HTTP 400). The returned
+// media id is then attached to a v2 tweet — the standard cross-version pattern.
+const MEDIA_URL = 'https://upload.twitter.com/1.1/media/upload.json';
 
 /** Read at request time via bracket access so a bundler cannot inline it. */
 function env(name: string): string | undefined {
@@ -37,25 +42,82 @@ export function readCredentials(): XCredentials | null {
   return { apiKey, apiSecret, accessToken, accessSecret };
 }
 
+export interface MediaUploadResult {
+  ok: boolean;
+  mediaId?: string;
+  error?: string;
+}
+
 /**
- * Send one tweet. A single attempt — the retry lives in `run.ts` so the log can
- * record each try. Never throws; a network failure comes back as
- * `{ ok: false, kind: 'other' }`.
+ * Upload one image to X (v1.1 media upload, simple non-chunked), signed with
+ * OAuth 1.0a. The multipart body is not part of the signature base string (only
+ * query/form-urlencoded params are), so the header is signed with the oauth
+ * params alone — the same as the JSON tweet POST.
+ *
+ * Returns the media id (`media_id_string`) to attach to a v2 tweet. Never
+ * throws; any failure comes back as `{ ok: false }` so the caller can fall back
+ * to a text-only post.
  */
-export async function postTweet(text: string): Promise<PostResult> {
+export async function uploadMedia(bytes: Uint8Array, mime = 'image/png'): Promise<MediaUploadResult> {
+  const creds = readCredentials();
+  if (!creds) return { ok: false, error: 'X credentials are not configured.' };
+
+  const authHeader = buildAuthHeader('POST', MEDIA_URL, creds);
+  const form = new FormData();
+  // Copy into a fresh ArrayBuffer so the Blob part is a plain ArrayBuffer (not
+  // a possibly-shared/offset view), which the DOM typings require.
+  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  form.append('media', new Blob([ab], { type: mime }), 'poster.png');
+  form.append('media_category', 'tweet_image');
+
+  let response: Response;
+  try {
+    response = await fetch(MEDIA_URL, {
+      method: 'POST',
+      // Content-Type (with boundary) is set by fetch from the FormData body.
+      headers: { Authorization: authHeader },
+      body: form,
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Media upload failed.' };
+  }
+
+  const raw = await response.text().catch(() => '');
+  if (!response.ok) {
+    const detail = raw.slice(0, 200).replace(/\s+/g, ' ').trim();
+    return { ok: false, error: `X media upload HTTP ${response.status}${detail ? `: ${detail}` : ''}.` };
+  }
+  try {
+    const j = JSON.parse(raw) as { data?: { id?: string }; media_id_string?: string; id?: string };
+    const id = j.data?.id ?? j.media_id_string ?? j.id;
+    if (id) return { ok: true, mediaId: String(id) };
+  } catch {
+    // fall through
+  }
+  return { ok: false, error: 'X media upload returned no media id.' };
+}
+
+/**
+ * Send one tweet, optionally with an attached image. A single attempt — the
+ * retry lives in `run.ts` so the log can record each try. Never throws; a
+ * network failure comes back as `{ ok: false, kind: 'other' }`.
+ */
+export async function postTweet(text: string, mediaId?: string): Promise<PostResult> {
   const creds = readCredentials();
   if (!creds) {
     return { ok: false, kind: 'auth', error: 'X credentials are not configured.' };
   }
 
   const authHeader = buildAuthHeader('POST', TWEET_URL, creds);
+  const body = mediaId ? { text, media: { media_ids: [mediaId] } } : { text };
 
   let response: Response;
   try {
     response = await fetch(TWEET_URL, {
       method: 'POST',
       headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     });
   } catch (error) {

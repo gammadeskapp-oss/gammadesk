@@ -4,6 +4,7 @@ import { marketSessionRules } from '@/lib/events';
 import { dueClosingSlot } from '@/lib/x/schedule';
 import { runSlot } from '@/lib/x/run';
 import { storeStatus } from '@/lib/x/store';
+import { cleanupOldImages } from '@/lib/x/imageStore';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -38,5 +39,11 @@ export async function GET(request: Request) {
   }
 
   const outcome = await runSlot(slot, { dry, force, now });
-  return NextResponse.json({ ...outcome, store: storeStatus() });
+
+  // Daily cleanup rides on the once-a-day closing firing: retire posted poster
+  // images older than 7 days. Never touches an unposted image. Non-fatal, and
+  // skipped on a dry run so a preview changes nothing.
+  const cleanup = dry ? null : await cleanupOldImages(now).catch(() => null);
+
+  return NextResponse.json({ ...outcome, cleanup, store: storeStatus() });
 }

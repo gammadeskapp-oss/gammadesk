@@ -28,6 +28,7 @@ const {
 } = await import('../src/lib/x/schedule.ts');
 const { checkText, checkNumbers } = await import('../src/lib/x/guard.ts');
 const { postingEnabledFromValue } = await import('../src/lib/x/flags.ts');
+const { decodeImageField, selectImagesToDelete, MAX_IMAGE_BYTES } = await import('../src/lib/x/media.ts');
 const {
   composeMorning,
   composeGamma,
@@ -435,6 +436,49 @@ section('composeClosingBrief is rule-clean and stamped "as of market close"');
   const p = composeClosingBrief(noMovers);
   ok('no-movers closing still clean', checkText(p.text).length === 0);
   ok('no-movers omits the movers line', !p.text.includes('Top movers'));
+}
+
+// --- poster image handling ---------------------------------------------------
+
+section('decodeImageField validates the optional base64 PNG');
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const validPng = Buffer.concat([PNG_SIG, Buffer.from('some-image-data')]).toString('base64');
+
+ok('omitted image is ok (optional)', decodeImageField(undefined).ok === true && !decodeImageField(undefined).bytes);
+ok('null image is ok', decodeImageField(null).ok === true);
+ok('empty string is ok (no image)', decodeImageField('').ok === true && !decodeImageField('').bytes);
+{
+  const r = decodeImageField(validPng);
+  ok('a valid PNG decodes', r.ok === true && !!r.bytes, r.error);
+  ok('mime is image/png', r.mime === 'image/png');
+  ok('first byte is the PNG signature', r.bytes[0] === 0x89);
+}
+ok('a data: URL prefix is stripped', decodeImageField(`data:image/png;base64,${validPng}`).ok === true);
+ok('a non-string image is rejected', decodeImageField(123).ok === false);
+ok('a non-PNG payload is rejected', decodeImageField(Buffer.from('hello world, not a png').toString('base64')).ok === false);
+{
+  // Over 5 MB is rejected. Build just past the limit with a real PNG signature.
+  const big = Buffer.concat([PNG_SIG, Buffer.alloc(MAX_IMAGE_BYTES)]).toString('base64');
+  const r = decodeImageField(big);
+  ok('an over-5MB image is rejected', r.ok === false && /exceeds 5 MB/.test(r.error ?? ''), r.error);
+}
+
+section('selectImagesToDelete retires only posted images past the age limit');
+{
+  const now = Date.parse('2026-09-20T12:00:00Z');
+  const day = 24 * 60 * 60 * 1000;
+  const entries = [
+    { date: 'a', type: 'morning', receivedAt: new Date(now - 8 * day).toISOString(), size: 1, posted: true },   // old + posted -> delete
+    { date: 'b', type: 'closing', receivedAt: new Date(now - 8 * day).toISOString(), size: 1, posted: false },  // old + UNPOSTED -> keep
+    { date: 'c', type: 'morning', receivedAt: new Date(now - 2 * day).toISOString(), size: 1, posted: true },   // recent + posted -> keep
+    { date: 'd', type: 'closing', receivedAt: new Date(now - 2 * day).toISOString(), size: 1, posted: false },  // recent + unposted -> keep
+    { date: 'e', type: 'morning', receivedAt: 'not-a-date', size: 1, posted: true },                            // bad date -> keep
+  ];
+  const del = selectImagesToDelete(entries, now, 7).map((e) => e.date);
+  ok('only the old posted image is selected', del.length === 1 && del[0] === 'a', del.join(','));
+  ok('an old UNPOSTED image is never deleted', !del.includes('b'));
+  ok('a recent posted image is kept', !del.includes('c'));
+  ok('a bad-timestamp image is kept', !del.includes('e'));
 }
 
 // --- result ------------------------------------------------------------------

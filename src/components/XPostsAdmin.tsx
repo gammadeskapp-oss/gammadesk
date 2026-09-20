@@ -67,6 +67,15 @@ interface ClosingBrief {
   receivedAt?: string;
 }
 
+interface ImageMeta {
+  date: string;
+  type: 'morning' | 'closing';
+  receivedAt: string;
+  size: number;
+  posted: boolean;
+  postedAt?: string;
+}
+
 interface AdminData {
   postingEnabled: boolean;
   postingEnv?: { enabled: boolean; present: boolean; rawValue: string | null };
@@ -74,6 +83,7 @@ interface AdminData {
   store: { kind: string; durable: boolean; note?: string };
   brief: Brief | null;
   closingBrief: ClosingBrief | null;
+  images: { morning: ImageMeta | null; closing: ImageMeta | null };
   recent: LogEntry[];
   previews: Preview[];
 }
@@ -239,8 +249,9 @@ export function XPostsAdmin() {
     );
   }
 
-  const { postingEnabled, postingEnv, pause, store, brief, closingBrief, recent, previews } = data;
+  const { postingEnabled, postingEnv, pause, store, brief, closingBrief, images, recent, previews } = data;
   const signed = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+  const kb = (n: number) => `${Math.round(n / 1024)} KB`;
 
   return (
     <div className="space-y-4">
@@ -368,6 +379,42 @@ export function XPostsAdmin() {
               None yet. The closing post falls back to the positioning close.
             </div>
           )}
+        </div>
+      </section>
+
+      {/* Today's poster images */}
+      <section className="space-y-2">
+        <h2 className="label-xs">Today&rsquo;s poster images (from Cowork)</h2>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {(['morning', 'closing'] as const).map((type) => {
+            const meta = images?.[type] ?? null;
+            return (
+              <div key={type} className="panel px-3.5 py-3">
+                <div className="flex items-center justify-between text-2xs">
+                  <span className="font-bold uppercase tracking-[0.12em] text-term-dim">{type}</span>
+                  {meta ? (
+                    <span className={meta.posted ? 'text-bull' : 'text-term-faint'}>
+                      {meta.posted ? 'posted' : 'received'} · {kb(meta.size)}
+                    </span>
+                  ) : (
+                    <span className="text-term-faint">none today</span>
+                  )}
+                </div>
+                {meta ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- a private, owner-only preview streamed from Blob; next/image would proxy-optimize it and defeat the auth.
+                  <img
+                    src={`/api/admin/x-image?type=${type}&date=${meta.date}&t=${encodeURIComponent(meta.receivedAt)}`}
+                    alt={`${type} poster`}
+                    className="mt-2 w-full rounded border border-term-line"
+                  />
+                ) : (
+                  <p className="mt-2 text-2xs text-term-faint">
+                    No image received. The post will go out text-only.
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       </section>
 

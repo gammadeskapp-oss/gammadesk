@@ -2,10 +2,11 @@ import 'server-only';
 
 import { marketSessionRules, snapshotStaleness } from '../events';
 import { marketToday } from '../time';
-import { readCredentials, postTweet } from './client';
+import { readCredentials, postTweet, uploadMedia } from './client';
 import { buildForSlot, type ComposedPost } from './content';
 import { postingEnabledFromValue } from './flags';
 import { checkNumbers, checkText } from './guard';
+import { markImagePosted, readImageBytes } from './imageStore';
 import { isTradingDay } from './schedule';
 import {
   alreadyPosted,
@@ -172,14 +173,37 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     return { ...base, status: 'skipped', reason, text: composed.text };
   }
 
+  // --- attach today's poster image, for the morning and closing slots --------
+
+  // Only these two slots carry a Cowork poster; gamma/pulse are text-only.
+  const imageType = slot.kind === 'morning' || slot.kind === 'closing' ? slot.kind : null;
+  let mediaId: string | undefined;
+  let imageNote: string | undefined;
+  if (imageType) {
+    const bytes = await readImageBytes(date, imageType).catch(() => null);
+    if (bytes) {
+      const upload = await uploadMedia(bytes);
+      if (upload.ok) {
+        mediaId = upload.mediaId;
+        imageNote = 'with image';
+      } else {
+        imageNote = 'image upload failed, posted text-only';
+      }
+    }
+  }
+
   // --- send, with a single retry on a transient failure ----------------------
 
-  let result = await postTweet(composed.text);
+  // The retry reuses the already-uploaded media id — no re-upload.
+  let result = await postTweet(composed.text, mediaId);
   if (!result.ok && (result.kind === 'rate' || result.kind === 'other')) {
-    result = await postTweet(composed.text);
+    result = await postTweet(composed.text, mediaId);
   }
 
   if (result.ok) {
+    // A posted image is marked so the daily cleanup may later retire it.
+    if (mediaId && imageType) await markImagePosted(date, imageType);
+    const reason = [composed.note, imageNote].filter(Boolean).join('; ') || undefined;
     await log({
       at: now.toISOString(),
       date,
@@ -188,12 +212,12 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
       text: composed.text,
       length: composed.length,
       outcome: 'sent',
-      reason: composed.note,
+      reason,
       tweetId: result.tweetId,
       asOfLabel: composed.asOfLabel,
       numbers: composed.numbers,
     });
-    return { ...base, status: 'sent', reason: composed.note, text: composed.text, length: composed.length, tweetId: result.tweetId, asOfLabel: composed.asOfLabel };
+    return { ...base, status: 'sent', reason, text: composed.text, length: composed.length, tweetId: result.tweetId, asOfLabel: composed.asOfLabel };
   }
 
   // Auth or billing errors auto-pause: retrying just burns attempts against a
