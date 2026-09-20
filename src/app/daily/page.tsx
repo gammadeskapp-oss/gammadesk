@@ -5,6 +5,8 @@ import { getPositioning } from '@/lib/positioning';
 import { buildSimpleRead } from '@/lib/simple/translate';
 import { fetchCboeQuotes } from '@/lib/x/cboeQuote';
 import { readBriefForDate } from '@/lib/x/brief';
+import { readScanForDate, readLatestScan } from '@/lib/news/store';
+import { SOURCE_LABEL, hasMoving, relativeTime, storyLabel } from '@/lib/news/view';
 import { marketToday } from '@/lib/time';
 import { formatPrice } from '@/lib/format';
 import { formatAsOf } from '@/lib/time';
@@ -114,11 +116,17 @@ export default async function DailyPage() {
   // Positioning drives the SPY map; the compact Cboe quotes drive the index
   // cards; the morning brief supplies the highlights. Each is allowed to fail
   // on its own — a dead quote feed must not blank the whole page.
-  const [positioning, quotes, brief] = await Promise.all([
+  const [positioning, quotes, brief, todayScan] = await Promise.all([
     getPositioning().catch(() => null),
     fetchCboeQuotes(['SPY', 'QQQ', 'IWM', 'VIX']).catch(() => new Map()),
     readBriefForDate(marketToday(now)).catch(() => null),
+    readScanForDate(marketToday(now)).catch(() => null),
   ]);
+
+  // Prefer today's scan; on a quiet morning before the first scan, fall back to
+  // the most recent stored one so the section is not empty for no reason.
+  const scan = todayScan ?? (await readLatestScan().catch(() => null));
+  const moving = scan?.top ?? [];
 
   const staleness = positioning ? snapshotStaleness(positioning.meta.quoteDateIso, now) : null;
   const mapReady = Boolean(positioning) && !(staleness?.stale ?? true);
@@ -222,6 +230,41 @@ export default async function DailyPage() {
                 );
               })}
             </div>
+          </section>
+        )}
+
+        {/* What's moving — the day's market-moving stories */}
+        {hasMoving(moving) && (
+          <section className="panel border-l-2 border-l-flip/60 p-5 sm:p-6">
+            <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-faint">What&rsquo;s moving</h2>
+            <p className="mt-1 text-2xs text-term-faint">
+              The biggest company news today, in plain English. Not advice.
+            </p>
+            <ul className="mt-4 space-y-4">
+              {moving.map((story, i) => {
+                const ago = relativeTime(story.timestamp, now);
+                return (
+                  <li key={`${story.url}-${i}`} className="border-t border-term-line pt-4 first:border-t-0 first:pt-0">
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-mono text-sm font-bold text-flip">{storyLabel(story)}</span>
+                      <span className="text-sm font-bold leading-snug text-term-text">{story.headline}</span>
+                    </div>
+                    <p className="mt-1 text-sm leading-relaxed text-term-dim">{story.why}</p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-term-faint">
+                      <a
+                        href={story.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-flip hover:underline"
+                      >
+                        {SOURCE_LABEL[story.source]} ↗
+                      </a>
+                      {ago && <span>{ago}</span>}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           </section>
         )}
 
