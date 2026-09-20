@@ -1,0 +1,42 @@
+import { NextResponse } from 'next/server';
+import { denyUnauthorisedCron } from '@/lib/log/auth';
+import { marketSessionRules } from '@/lib/events';
+import { dueClosingSlot } from '@/lib/x/schedule';
+import { runSlot } from '@/lib/x/run';
+import { storeStatus } from '@/lib/x/store';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
+/**
+ * The 3:20 PM CT closing post to X. New cron — see `vercel.json`.
+ *
+ * Leads with the Cowork "Closing Bell" brief when today's has arrived, else
+ * falls back to the dealer-positioning closing post. Registered at both
+ * candidate UTC times so the 3:20 Central slot is covered in summer and winter;
+ * `dueClosingSlot` reads the Chicago clock and only the intended firing posts.
+ *
+ * `?dry=1` composes and self-checks without posting. `?force=1` runs regardless
+ * of the clock and re-posts a slot already sent.
+ */
+export async function GET(request: Request) {
+  const denied = denyUnauthorisedCron(request);
+  if (denied) return denied;
+
+  const params = new URL(request.url).searchParams;
+  const dry = params.get('dry') === '1';
+  const force = params.get('force') === '1';
+
+  const now = new Date();
+  const slot = force
+    ? { kind: 'closing' as const, key: 'closing', label: 'Closing snapshot (3:20 CT)' }
+    : dueClosingSlot(now, marketSessionRules());
+
+  if (!slot) {
+    return NextResponse.json({ status: 'skipped', reason: 'Not the 3:20 CT closing slot on a trading day.' });
+  }
+
+  const outcome = await runSlot(slot, { dry, force, now });
+  return NextResponse.json({ ...outcome, store: storeStatus() });
+}

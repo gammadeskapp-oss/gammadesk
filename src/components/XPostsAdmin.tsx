@@ -53,12 +53,27 @@ interface Brief {
   receivedAt?: string;
 }
 
+interface ClosingBrief {
+  date: string;
+  spy: number;
+  spyChangePct: number;
+  qqq: number;
+  qqqChangePct: number;
+  iwm: number;
+  iwmChangePct: number;
+  vix: number;
+  dayStory: string;
+  topMovers: string[];
+  receivedAt?: string;
+}
+
 interface AdminData {
   postingEnabled: boolean;
   postingEnv?: { enabled: boolean; present: boolean; rawValue: string | null };
   pause: PauseState;
   store: { kind: string; durable: boolean; note?: string };
   brief: Brief | null;
+  closingBrief: ClosingBrief | null;
   recent: LogEntry[];
   previews: Preview[];
 }
@@ -224,7 +239,7 @@ export function XPostsAdmin() {
     );
   }
 
-  const { postingEnabled, postingEnv, pause, store, brief, recent, previews } = data;
+  const { postingEnabled, postingEnv, pause, store, brief, closingBrief, recent, previews } = data;
   const signed = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 
   return (
@@ -307,29 +322,53 @@ export function XPostsAdmin() {
         </div>
       </section>
 
-      {/* Latest Morning Desk brief */}
-      <section className="space-y-2">
-        <h2 className="label-xs">Latest Morning Desk brief (from Cowork)</h2>
-        {brief ? (
-          <div className="panel px-3.5 py-3 text-xs">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-bold text-term-text">{brief.date}</span>
-              <span className="text-2xs text-term-faint">received {clock(brief.receivedAt)}</span>
+      {/* Latest Cowork briefs */}
+      <section className="grid gap-2 sm:grid-cols-2">
+        <div className="space-y-2">
+          <h2 className="label-xs">Latest Morning Desk brief</h2>
+          {brief ? (
+            <div className="panel px-3.5 py-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-term-text">{brief.date}</span>
+                <span className="text-2xs text-term-faint">received {clock(brief.receivedAt)}</span>
+              </div>
+              <p className="mt-1.5 tabular-nums text-term-dim">
+                SPY {signed(brief.spy)} · QQQ {signed(brief.qqq)} · IWM {signed(brief.iwm)} · VIX {brief.vix.toFixed(1)}
+              </p>
+              <p className="mt-1 text-term-text">{brief.topStory}</p>
+              <p className="mt-1 text-2xs text-term-faint">
+                Earnings: {brief.earningsToday.length ? brief.earningsToday.join(', ') : '—'}
+              </p>
             </div>
-            <p className="mt-1.5 tabular-nums text-term-dim">
-              SPY {signed(brief.spy)} · QQQ {signed(brief.qqq)} · IWM {signed(brief.iwm)} · VIX {brief.vix.toFixed(1)}
-            </p>
-            <p className="mt-1 text-term-text">{brief.topStory}</p>
-            <p className="mt-1 text-2xs text-term-faint">
-              Earnings: {brief.earningsToday.length ? brief.earningsToday.join(', ') : '—'}
-            </p>
-          </div>
-        ) : (
-          <div className="panel px-4 py-6 text-center text-xs text-term-dim">
-            No brief received yet. The morning post will fall back to a live
-            SPY/QQQ/VIX snapshot until one arrives.
-          </div>
-        )}
+          ) : (
+            <div className="panel px-4 py-6 text-center text-xs text-term-dim">
+              None yet. The morning post falls back to a live SPY/QQQ/VIX snapshot.
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <h2 className="label-xs">Latest Closing Bell brief</h2>
+          {closingBrief ? (
+            <div className="panel px-3.5 py-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-term-text">{closingBrief.date}</span>
+                <span className="text-2xs text-term-faint">received {clock(closingBrief.receivedAt)}</span>
+              </div>
+              <p className="mt-1.5 tabular-nums text-term-dim">
+                SPY {signed(closingBrief.spyChangePct)} · QQQ {signed(closingBrief.qqqChangePct)} · IWM {signed(closingBrief.iwmChangePct)} · VIX {closingBrief.vix.toFixed(1)}
+              </p>
+              <p className="mt-1 text-term-text">{closingBrief.dayStory}</p>
+              <p className="mt-1 text-2xs text-term-faint">
+                Movers: {closingBrief.topMovers.length ? closingBrief.topMovers.join(', ') : '—'}
+              </p>
+            </div>
+          ) : (
+            <div className="panel px-4 py-6 text-center text-xs text-term-dim">
+              None yet. The closing post falls back to the positioning close.
+            </div>
+          )}
+        </div>
       </section>
 
       {/* Previews */}

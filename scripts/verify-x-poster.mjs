@@ -23,6 +23,7 @@ const {
   isTradingDay,
   dueGammaSlot,
   duePulseSlot,
+  dueClosingSlot,
   formatClockCt,
 } = await import('../src/lib/x/schedule.ts');
 const { checkText, checkNumbers } = await import('../src/lib/x/guard.ts');
@@ -34,7 +35,9 @@ const {
   composeClosing,
   composeBriefMorning,
   composeFallbackMorning,
+  composeClosingBrief,
   validateBrief,
+  validateClosingBrief,
   signedPoints,
   vixWord,
   X_LIMIT,
@@ -363,6 +366,75 @@ section('composeFallbackMorning covers the missing-brief path');
   ok('fallback carries the brief-missing note', p.note === 'brief missing');
   ok('fallback has NO link', !p.text.includes('gammadesk.app'));
   ok('fallback needs SPY/QQQ/VIX', (() => { try { composeFallbackMorning({ spy: q }, '8:25 CT', 'x'); return false; } catch { return true; } })());
+}
+
+// --- Closing Bell brief ------------------------------------------------------
+
+section('The closing slot fires at 3:20 PM CT in both summer and winter');
+// Summer (CDT, UTC-5): 20:20 UTC is 15:20 CT.
+ok('summer 20:20 UTC → closing', dueClosingSlot(new Date('2026-07-01T20:20:00Z'))?.key === 'closing');
+ok('summer 21:20 UTC → null (4:20 CT)', dueClosingSlot(new Date('2026-07-01T21:20:00Z')) === null);
+// Winter (CST, UTC-6): 21:20 UTC is 15:20 CT.
+ok('winter 21:20 UTC → closing', dueClosingSlot(new Date('2026-01-05T21:20:00Z'))?.key === 'closing');
+ok('winter 20:20 UTC → null (2:20 CT)', dueClosingSlot(new Date('2026-01-05T20:20:00Z')) === null);
+ok('weekend → no closing', dueClosingSlot(new Date('2026-07-04T20:20:00Z')) === null);
+ok('holiday → no closing', dueClosingSlot(new Date('2026-07-03T20:20:00Z'), closedRules) === null);
+
+section('validateClosingBrief is strict about untrusted input');
+const goodClosing = {
+  type: 'closing', date: RX, spy: 761.7, spyChangePct: 0.4, qqq: 722.0, qqqChangePct: 0.6,
+  iwm: 284.1, iwmChangePct: -0.5, vix: 14.8, dayStory: 'Rally into the close on soft PPI',
+  topMovers: ['NVDA', 'AAPL', 'TSLA', 'AMD'],
+};
+{
+  const r = validateClosingBrief(goodClosing, '2026-09-21T20:20:00Z');
+  ok('a valid closing brief passes', r.ok === true, r.error);
+  ok('receivedAt stamped', r.brief.receivedAt === '2026-09-21T20:20:00Z');
+  ok('movers kept in order', r.brief.topMovers.join(',') === 'NVDA,AAPL,TSLA,AMD');
+}
+ok('bad date rejected', validateClosingBrief({ ...goodClosing, date: 'x' }, 'x').ok === false);
+ok('non-positive spy level rejected', validateClosingBrief({ ...goodClosing, spy: 0 }, 'x').ok === false);
+ok('negative iwm level rejected', validateClosingBrief({ ...goodClosing, iwm: -1 }, 'x').ok === false);
+ok('non-number spyChangePct rejected', validateClosingBrief({ ...goodClosing, spyChangePct: 'up' }, 'x').ok === false);
+ok('implausible change rejected', validateClosingBrief({ ...goodClosing, qqqChangePct: 40 }, 'x').ok === false);
+ok('negative change is fine', validateClosingBrief({ ...goodClosing, iwmChangePct: -0.5 }, 'x').ok === true);
+ok('vix out of range rejected', validateClosingBrief({ ...goodClosing, vix: 0 }, 'x').ok === false);
+ok('empty dayStory rejected', validateClosingBrief({ ...goodClosing, dayStory: ' ' }, 'x').ok === false);
+ok('topMovers not-array rejected', validateClosingBrief({ ...goodClosing, topMovers: 'NVDA' }, 'x').ok === false);
+{
+  const r = validateClosingBrief({ ...goodClosing, topMovers: [' NVDA ', '', 'AAPL'] }, 'x');
+  ok('movers trimmed and blanks dropped', r.brief.topMovers.join(',') === 'NVDA,AAPL');
+}
+
+section('composeClosingBrief is rule-clean and stamped "as of market close"');
+{
+  const brief = validateClosingBrief(goodClosing, '2026-09-21T20:20:00Z').brief;
+  const p = composeClosingBrief(brief);
+  const problems = checkText(p.text);
+  ok('passes checkText ("market close" accepted)', problems.length === 0, problems.join(' | '));
+  ok('within 280', p.length <= X_LIMIT, String(p.length));
+  ok('opens with the closing bell', p.text.startsWith('Closing bell 🔔'));
+  ok('shows the three index changes', /SPY \+0\.4% · QQQ \+0\.6% · IWM -0\.5%/.test(p.text));
+  ok('shows VIX with a calm word', /VIX 14\.8 \(calm\)/.test(p.text));
+  ok('shows the day story', p.text.includes('Rally into the close on soft PPI'));
+  ok('caps movers at 3', /Top movers: NVDA, AAPL, TSLA/.test(p.text) && !p.text.includes('AMD'));
+  ok('stamped market close', p.text.includes('as of market close'));
+  ok('has NO link', !p.text.includes('gammadesk.app'));
+  ok('has NO clock stamp', !/\bET\b/.test(p.text) && !/\bCT\b/.test(p.text));
+  ok('sanity numbers are the four positive levels', JSON.stringify(p.numbers) === '{"spy":761.7,"qqq":722,"iwm":284.1,"vix":14.8}');
+}
+{
+  const long = validateClosingBrief({ ...goodClosing, dayStory: 'y'.repeat(500) }, 'x').brief;
+  const p = composeClosingBrief(long);
+  ok('long story trimmed to fit 280', p.length <= X_LIMIT, String(p.length));
+  ok('trim keeps the disclaimer', p.text.includes(DISCLAIMER));
+  ok('trim keeps the market-close stamp', p.text.includes('as of market close'));
+}
+{
+  const noMovers = validateClosingBrief({ ...goodClosing, topMovers: [] }, 'x').brief;
+  const p = composeClosingBrief(noMovers);
+  ok('no-movers closing still clean', checkText(p.text).length === 0);
+  ok('no-movers omits the movers line', !p.text.includes('Top movers'));
 }
 
 // --- result ------------------------------------------------------------------

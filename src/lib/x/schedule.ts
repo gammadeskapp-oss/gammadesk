@@ -106,6 +106,9 @@ export function isTradingDay(
 /** The Chicago hour at which the daily gamma post fires. */
 export const GAMMA_HOUR_CT = 8;
 
+/** The Chicago hour at which the closing post fires (3:20 PM CT). */
+export const CLOSING_HOUR_CT = 15;
+
 /** First and last Chicago hours of the hourly market-pulse window (inclusive). */
 export const PULSE_FIRST_HOUR_CT = 9;
 export const PULSE_LAST_HOUR_CT = 14;
@@ -126,6 +129,21 @@ export function dueGammaSlot(
   if (!isTradingDay(clock.date, rules)) return null;
   if (clock.hour !== GAMMA_HOUR_CT) return null;
   return { kind: 'gamma', key: 'gamma', label: 'SPY daily gamma levels (8:30 CT)' };
+}
+
+/**
+ * The closing slot if this firing is the 3:20 PM CT one on a trading day, else
+ * null. Gated on the hour (15 CT) so a cron delayed a few minutes past 3:20
+ * still posts; the once-a-day ledger stops a second firing in the same hour.
+ */
+export function dueClosingSlot(
+  now: Date = new Date(),
+  rules: ClosedCheck = NEVER_CLOSED,
+): PostSlot | null {
+  const clock = chicagoNow(now);
+  if (!isTradingDay(clock.date, rules)) return null;
+  if (clock.hour !== CLOSING_HOUR_CT) return null;
+  return { kind: 'closing', key: 'closing', label: 'Closing snapshot (3:20 CT)' };
 }
 
 /**

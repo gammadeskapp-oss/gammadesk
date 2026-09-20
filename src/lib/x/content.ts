@@ -3,11 +3,12 @@ import 'server-only';
 import { getPositioning } from '../positioning';
 import { formatClockEt, marketToday } from '../time';
 import { fetchCboeQuote, fetchCboeQuotes } from './cboeQuote';
-import { readBriefForDate } from './brief';
+import { readBriefForDate, readClosingBriefForDate } from './brief';
 import { formatClockCt } from './schedule';
 import {
   composeBriefMorning,
   composeClosing,
+  composeClosingBrief,
   composeFallbackMorning,
   composeGamma,
   composePulse,
@@ -103,7 +104,20 @@ export async function buildPulse(): Promise<ComposedPost> {
   );
 }
 
-export async function buildClosing(): Promise<ComposedPost> {
+/**
+ * The 3:20 CT closing post now leads with the Cowork "Closing Bell" brief.
+ *
+ * If today's closing brief has arrived it drives the post (index changes, VIX,
+ * what drove the day, top movers). If not, it falls back to the original
+ * dealer-positioning closing post and carries a "closing brief missing" note.
+ * No link either way.
+ */
+export async function buildClosing(now: Date = new Date()): Promise<ComposedPost> {
+  const brief = await readClosingBriefForDate(marketToday(now)).catch(() => null);
+  if (brief) {
+    return composeClosingBrief(brief);
+  }
+
   const data = await getPositioning();
   const s = data.summary;
 
@@ -122,7 +136,7 @@ export async function buildClosing(): Promise<ComposedPost> {
   }
 
   const dataIso = quoteIso ?? data.meta.quoteDateIso;
-  return composeClosing({
+  const composed = composeClosing({
     spot: s.spot,
     regime: s.regime,
     flipLevel: s.flipLevel,
@@ -133,6 +147,7 @@ export async function buildClosing(): Promise<ComposedPost> {
     spyChangePct,
     spyPrice,
   });
+  return { ...composed, note: 'closing brief missing' };
 }
 
 export function buildForSlot(slot: PostSlotKind, now: Date = new Date()): Promise<ComposedPost> {
@@ -144,6 +159,6 @@ export function buildForSlot(slot: PostSlotKind, now: Date = new Date()): Promis
     case 'pulse':
       return buildPulse();
     case 'closing':
-      return buildClosing();
+      return buildClosing(now);
   }
 }

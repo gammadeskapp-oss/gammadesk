@@ -1,35 +1,55 @@
 import 'server-only';
 
 import { createJsonStore } from '../jsonStore';
-import type { Brief } from './text';
+import type { Brief, ClosingBrief } from './text';
 
 /**
- * Durable storage for the daily "Morning Desk" brief supplied by the Cowork
- * task (POST /api/brief). One document, overwritten each day; lives in Vercel
- * Blob so it survives redeploys between the morning task's runs.
+ * Durable storage for the daily Cowork briefs — the morning "Desk" brief and
+ * the "Closing Bell" brief — kept as separate documents so a morning update
+ * never clobbers a closing one. Both live in Vercel Blob so they survive
+ * redeploys between the posting tasks' runs.
  */
 
-const store = createJsonStore<Brief | null>(
+const morningStore = createJsonStore<Brief | null>(
   'gammadesk/x-brief.json',
   () => null,
-  (raw) => {
-    if (raw && typeof raw === 'object' && typeof (raw as Brief).date === 'string') {
-      return raw as Brief;
-    }
-    return null;
-  },
+  (raw) => (raw && typeof raw === 'object' && typeof (raw as Brief).date === 'string' ? (raw as Brief) : null),
 );
 
+const closingStore = createJsonStore<ClosingBrief | null>(
+  'gammadesk/x-brief-closing.json',
+  () => null,
+  (raw) => (raw && typeof raw === 'object' && typeof (raw as ClosingBrief).date === 'string' ? (raw as ClosingBrief) : null),
+);
+
+// --- morning -----------------------------------------------------------------
+
 export async function saveBrief(brief: Brief): Promise<void> {
-  await store.write(brief);
+  await morningStore.write(brief);
 }
 
 export async function readBrief(): Promise<Brief | null> {
-  return store.read().catch(() => null);
+  return morningStore.read().catch(() => null);
 }
 
-/** The stored brief only if it is for `date`; otherwise null (stale is unusable). */
+/** The stored morning brief only if it is for `date`; otherwise null. */
 export async function readBriefForDate(date: string): Promise<Brief | null> {
   const brief = await readBrief();
+  return brief && brief.date === date ? brief : null;
+}
+
+// --- closing -----------------------------------------------------------------
+
+export async function saveClosingBrief(brief: ClosingBrief): Promise<void> {
+  await closingStore.write(brief);
+}
+
+export async function readClosingBrief(): Promise<ClosingBrief | null> {
+  return closingStore.read().catch(() => null);
+}
+
+/** The stored closing brief only if it is for `date`; otherwise null. */
+export async function readClosingBriefForDate(date: string): Promise<ClosingBrief | null> {
+  const brief = await readClosingBrief();
   return brief && brief.date === date ? brief : null;
 }

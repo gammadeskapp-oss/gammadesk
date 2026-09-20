@@ -367,3 +367,138 @@ export function composeFallbackMorning(
     note: 'brief missing',
   };
 }
+
+// --- Closing "Closing Bell" brief (Cowork-supplied) --------------------------
+
+/**
+ * The daily "Closing Bell" brief, supplied by the Cowork task via
+ * POST /api/brief with `type: "closing"`. Untrusted off-platform input, so
+ * `validateClosingBrief` is strict.
+ *
+ * Unlike the morning brief, this carries both the level and the day change for
+ * each index: `spy` is the closing price and `spyChangePct` is the day's move in
+ * points (e.g. 0.4 = +0.4%). `vix` is the index level.
+ */
+export interface ClosingBrief {
+  type: 'closing';
+  date: string;
+  spy: number;
+  spyChangePct: number;
+  qqq: number;
+  qqqChangePct: number;
+  iwm: number;
+  iwmChangePct: number;
+  vix: number;
+  dayStory: string;
+  topMovers: string[];
+  receivedAt?: string;
+}
+
+/**
+ * Validate an incoming closing brief. Pure; returns a cleaned `ClosingBrief` or
+ * a reason it was rejected. Never throws.
+ */
+export function validateClosingBrief(raw: unknown, receivedAt: string): { ok: boolean; brief?: ClosingBrief; error?: string } {
+  if (!raw || typeof raw !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
+  const b = raw as Record<string, unknown>;
+
+  if (typeof b.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b.date)) {
+    return { ok: false, error: 'date must be a YYYY-MM-DD string.' };
+  }
+
+  // Levels: strictly positive prices/levels.
+  const levels: Record<'spy' | 'qqq' | 'iwm', number> = { spy: 0, qqq: 0, iwm: 0 };
+  for (const key of ['spy', 'qqq', 'iwm'] as const) {
+    const v = b[key];
+    if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
+      return { ok: false, error: `${key} must be a positive number (closing level).` };
+    }
+    levels[key] = v;
+  }
+
+  // Day changes: signed percent points, bounded.
+  const changes: Record<'spyChangePct' | 'qqqChangePct' | 'iwmChangePct', number> = {
+    spyChangePct: 0, qqqChangePct: 0, iwmChangePct: 0,
+  };
+  for (const key of ['spyChangePct', 'qqqChangePct', 'iwmChangePct'] as const) {
+    const v = b[key];
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      return { ok: false, error: `${key} must be a finite number (percent change in points).` };
+    }
+    if (Math.abs(v) > MAX_MOVE_POINTS) {
+      return { ok: false, error: `${key} of ${v}% is implausible for a daily move.` };
+    }
+    changes[key] = v;
+  }
+
+  const vix = b.vix;
+  if (typeof vix !== 'number' || !Number.isFinite(vix) || vix <= 0 || vix > 200) {
+    return { ok: false, error: 'vix must be a number in (0, 200].' };
+  }
+
+  if (typeof b.dayStory !== 'string' || b.dayStory.trim().length === 0) {
+    return { ok: false, error: 'dayStory must be a non-empty string.' };
+  }
+
+  if (!Array.isArray(b.topMovers) || b.topMovers.some((e) => typeof e !== 'string')) {
+    return { ok: false, error: 'topMovers must be an array of strings.' };
+  }
+  const movers = (b.topMovers as string[]).map((e) => e.trim()).filter(Boolean).slice(0, MAX_EARNINGS_STORED);
+
+  return {
+    ok: true,
+    brief: {
+      type: 'closing',
+      date: b.date,
+      spy: levels.spy,
+      spyChangePct: changes.spyChangePct,
+      qqq: levels.qqq,
+      qqqChangePct: changes.qqqChangePct,
+      iwm: levels.iwm,
+      iwmChangePct: changes.iwmChangePct,
+      vix,
+      dayStory: b.dayStory.trim().slice(0, MAX_STORY),
+      topMovers: movers,
+      receivedAt,
+    },
+  };
+}
+
+/**
+ * Compose the closing post from a closing brief.
+ *
+ * Plain English, under 280, no link. Stamped "as of market close" rather than a
+ * clock — the brief describes the finished session, not a moment. The day story
+ * is trimmed only as far as needed to fit.
+ */
+export function composeClosingBrief(brief: ClosingBrief): ComposedPost {
+  const marketLine = `SPY ${signedPoints(brief.spyChangePct)} · QQQ ${signedPoints(brief.qqqChangePct)} · IWM ${signedPoints(brief.iwmChangePct)}`;
+  const vixLine = `VIX ${brief.vix.toFixed(1)} (${vixWord(brief.vix)})`;
+  const movers = brief.topMovers.slice(0, 3);
+  const moversLine = movers.length > 0 ? `Top movers: ${movers.join(', ')}` : null;
+  const footer = `as of market close · ${DISCLAIMER}`;
+
+  const build = (story: string): string =>
+    ['Closing bell 🔔', marketLine, vixLine, story, ...(moversLine ? [moversLine] : []), footer].join('\n');
+
+  let story = brief.dayStory;
+  let text = build(story);
+  while ([...text].length > X_LIMIT && story.length > 1) {
+    const cut = Math.max(1, story.length - ([...text].length - X_LIMIT) - 1);
+    story = `${story.slice(0, cut).trimEnd()}…`;
+    text = build(story);
+  }
+
+  // All four are strictly-positive levels, safe for the jump check; the signed
+  // changes were validated at ingestion.
+  const numbers: PostNumbers = { spy: brief.spy, qqq: brief.qqq, iwm: brief.iwm, vix: brief.vix };
+
+  return {
+    slot: 'closing',
+    text,
+    length: [...text].length,
+    numbers,
+    dataIso: brief.receivedAt ?? new Date().toISOString(),
+    asOfLabel: 'market close',
+  };
+}

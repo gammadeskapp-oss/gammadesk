@@ -46,8 +46,11 @@ export function checkText(text: string): string[] {
   if (!text.includes(DISCLAIMER)) {
     failures.push(`Missing the "${DISCLAIMER}" disclaimer.`);
   }
-  if (!/\bas of\b/i.test(text) || !/\b(ET|CT)\b/.test(text)) {
-    failures.push('Missing the "as of … ET/CT" data time.');
+  // The data-time stamp is "as of <clock> ET/CT" for intraday posts, or the
+  // literal "as of market close" for the end-of-day brief.
+  const hasStamp = /\b(ET|CT)\b/.test(text) || /\bmarket close\b/i.test(text);
+  if (!/\bas of\b/i.test(text) || !hasStamp) {
+    failures.push('Missing the "as of … ET/CT" (or "as of market close") data time.');
   }
   for (const { re, label } of BANNED) {
     if (re.test(text)) failures.push(`Contains banned wording (${label}).`);

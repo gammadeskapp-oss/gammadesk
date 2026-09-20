@@ -1,19 +1,24 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { safeEqual } from '@/lib/tos/auth';
-import { saveBrief } from '@/lib/x/brief';
-import { validateBrief } from '@/lib/x/text';
+import { saveBrief, saveClosingBrief } from '@/lib/x/brief';
+import { validateBrief, validateClosingBrief } from '@/lib/x/text';
 
 /**
- * Ingest the daily "Morning Desk" brief from the Cowork task.
+ * Ingest the daily Cowork briefs — the morning "Desk" brief and the "Closing
+ * Bell" brief — from the Cowork task.
  *
  * Auth is a shared secret in the `x-brief-token` header, compared in constant
  * time against the `BRIEF_TOKEN` env var (read at request time, never logged).
  * The body is untrusted off-platform input, so it is strictly validated before
- * anything is stored. On success the brief is saved to Blob as today's brief;
- * the 8:25 CT morning post reads it.
+ * anything is stored. Each `type` is saved separately, so a morning update
+ * never clobbers a closing one.
  *
- * Body: { date: "YYYY-MM-DD", spy, qqq, iwm, vix, topStory, earningsToday[] }
- * where spy/qqq/iwm are percent changes in points and vix is the index level.
+ * Body carries a `type`: "morning" (default) or "closing".
+ *   morning: { type?, date, spy, qqq, iwm, vix, topStory, earningsToday[] }
+ *            — spy/qqq/iwm are percent changes in points, vix the index level.
+ *   closing: { type:"closing", date, spy, spyChangePct, qqq, qqqChangePct,
+ *              iwm, iwmChangePct, vix, dayStory, topMovers[] }
+ *            — spy/qqq/iwm are closing levels, *ChangePct the day's move.
  */
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -50,22 +55,44 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Body must be valid JSON.' }, { status: 400, headers: NO_STORE });
   }
 
-  const result = validateBrief(raw, new Date().toISOString());
-  if (!result.ok || !result.brief) {
-    return NextResponse.json({ error: result.error ?? 'Invalid brief.' }, { status: 400, headers: NO_STORE });
+  // Dispatch on `type`; a missing type is the morning brief (its original
+  // contract, so the existing Cowork morning task keeps working unchanged).
+  const type = (raw && typeof raw === 'object' ? (raw as { type?: unknown }).type : undefined) ?? 'morning';
+  if (type !== 'morning' && type !== 'closing') {
+    return NextResponse.json(
+      { error: 'type must be "morning" or "closing".' },
+      { status: 400, headers: NO_STORE },
+    );
   }
 
+  const now = new Date().toISOString();
+
   try {
+    if (type === 'closing') {
+      const result = validateClosingBrief(raw, now);
+      if (!result.ok || !result.brief) {
+        return NextResponse.json({ error: result.error ?? 'Invalid closing brief.' }, { status: 400, headers: NO_STORE });
+      }
+      await saveClosingBrief(result.brief);
+      return NextResponse.json(
+        { ok: true, type: 'closing', date: result.brief.date, movers: result.brief.topMovers.length },
+        { headers: NO_STORE },
+      );
+    }
+
+    const result = validateBrief(raw, now);
+    if (!result.ok || !result.brief) {
+      return NextResponse.json({ error: result.error ?? 'Invalid brief.' }, { status: 400, headers: NO_STORE });
+    }
     await saveBrief(result.brief);
+    return NextResponse.json(
+      { ok: true, type: 'morning', date: result.brief.date, earnings: result.brief.earningsToday.length },
+      { headers: NO_STORE },
+    );
   } catch (error) {
     return NextResponse.json(
       { error: 'Could not store the brief.', detail: error instanceof Error ? error.message : String(error) },
       { status: 500, headers: NO_STORE },
     );
   }
-
-  return NextResponse.json(
-    { ok: true, date: result.brief.date, earnings: result.brief.earningsToday.length },
-    { headers: NO_STORE },
-  );
 }
