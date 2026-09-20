@@ -61,6 +61,9 @@ export async function GET(request: NextRequest) {
     {
       postingEnabled: postingEnabled(),
       postingEnv: postingEnabledDiagnostic(),
+      // Which build is serving — Vercel injects the commit SHA per deployment.
+      // Lets the owner confirm a redeploy actually landed.
+      deployedCommit: process.env['VERCEL_GIT_COMMIT_SHA']?.slice(0, 7) ?? null,
       pause,
       store: storeStatus(),
       brief,
