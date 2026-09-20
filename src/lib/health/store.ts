@@ -30,3 +30,21 @@ export async function readHealthHistory(): Promise<HealthReport[]> {
 export async function appendHealthReport(report: HealthReport): Promise<void> {
   await historyStore.update((current) => trimHistory(current, report, KEEP_DAYS));
 }
+
+/**
+ * A dedicated probe store, used only to prove Blob is writable. It goes through
+ * the same `createJsonStore` write path as everything else — which tries the
+ * store's own access mode (private first) and remembers it — so the probe can
+ * never disagree with a real write by, say, hard-coding `access: 'public'`
+ * against a private store.
+ */
+const probeStore = createJsonStore<{ at: string }>(
+  'gammadesk/_health-probe.json',
+  () => ({ at: '' }),
+  (raw) => (raw && typeof raw === 'object' ? (raw as { at: string }) : null),
+);
+
+/** Write a probe object through the real store path. Throws on failure. */
+export async function probeBlobWrite(): Promise<void> {
+  await probeStore.write({ at: new Date().toISOString() });
+}

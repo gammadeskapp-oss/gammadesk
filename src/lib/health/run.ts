@@ -8,6 +8,7 @@ import { readBriefForDate, readClosingBriefForDate } from '../x/brief';
 import { readLog } from '../x/store';
 import { postingEnabled } from '../x/run';
 import { storeStatus } from '../jsonStore';
+import { probeBlobWrite } from './store';
 import { marketToday } from '../time';
 import {
   evaluateExpectedPosts,
@@ -64,13 +65,10 @@ async function checkBlobWritable(): Promise<HealthCheck> {
       : { id, label, ok: true, detail: 'Local file store (no Blob token) — not applicable.' };
   }
   try {
-    const { put } = await import('@vercel/blob');
-    await put('gammadesk/_health-probe.json', JSON.stringify({ at: new Date().toISOString() }), {
-      access: 'public',
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      contentType: 'application/json',
-    });
+    // Goes through the shared store path, which uses the store's own access
+    // mode (private first) — never a hard-coded `access: 'public'` that a
+    // private store rejects with "Cannot use public access on a private store".
+    await probeBlobWrite();
     return { id, label, ok: true, detail: 'Wrote a probe object successfully.' };
   } catch (error) {
     return { id, label, ok: false, detail: `Write failed: ${error instanceof Error ? error.message : String(error)}.` };
