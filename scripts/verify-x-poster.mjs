@@ -310,6 +310,23 @@ const goodBrief = { date: RX, spy: 0.4, qqq: 0.6, iwm: -0.2, vix: 14.8, topStory
   ok('receivedAt is stamped', r.brief.receivedAt === '2026-09-21T13:00:00Z');
   ok('earnings kept in order', r.brief.earningsToday.join(',') === 'AAPL,MSFT,NVDA,AMD');
 }
+{
+  // A real morning payload: spy/qqq/iwm are PERCENT changes here (small,
+  // signed), vix is the level. Distinct field semantics from the closing type.
+  const realMorning = {
+    type: 'morning', date: '2026-09-18', spy: 0.11, qqq: 0.2, iwm: -0.3,
+    vix: 15.2, topStory: 'Futures firm ahead of the open.',
+    earningsToday: ['NVDA', 'AAPL'],
+  };
+  const r = validateBrief(realMorning, '2026-09-18T13:00:00Z');
+  ok('real morning payload passes', r.ok === true, r.error);
+  ok('morning spy kept as a percent', r.brief?.spy === 0.11, String(r.brief?.spy));
+  // A price-sized value in a morning payload IS an implausible percent move,
+  // and the error must name the field and say why.
+  const bad = validateBrief({ ...realMorning, spy: 761.56 }, 'x');
+  ok('price-sized morning spy is rejected as implausible', bad.ok === false);
+  ok('rejection names spy and explains why', /spy/.test(bad.error ?? '') && /implausible/.test(bad.error ?? ''), bad.error);
+}
 ok('bad date rejected', validateBrief({ ...goodBrief, date: '9/21/2026' }, 'x').ok === false);
 ok('missing date rejected', validateBrief({ ...goodBrief, date: undefined }, 'x').ok === false);
 ok('non-number spy rejected', validateBrief({ ...goodBrief, spy: 'up' }, 'x').ok === false);
@@ -392,6 +409,21 @@ const goodClosing = {
   ok('a valid closing brief passes', r.ok === true, r.error);
   ok('receivedAt stamped', r.brief.receivedAt === '2026-09-21T20:20:00Z');
   ok('movers kept in order', r.brief.topMovers.join(',') === 'NVDA,AAPL,TSLA,AMD');
+}
+{
+  // The exact real closing payload Cowork sends. `spy` etc. are PRICES here,
+  // not percents — this must pass, and the price levels must survive unchanged
+  // (a regression guard against ever re-validating closing `spy` as a percent).
+  const real = {
+    type: 'closing', date: '2026-09-18', spy: 761.56, spyChangePct: 0.11,
+    qqq: 721.08, qqqChangePct: 0.2, iwm: 244.3, iwmChangePct: -0.3, vix: 15.2,
+    dayStory: 'Stocks drifted higher into the close on light volume.',
+    topMovers: ['NVDA +2%', 'AAPL -1%'],
+  };
+  const r = validateClosingBrief(real, '2026-09-18T20:20:00Z');
+  ok('real Cowork closing payload passes', r.ok === true, r.error);
+  ok('closing spy kept as a price level', r.brief?.spy === 761.56, String(r.brief?.spy));
+  ok('closing spyChangePct kept as a percent', r.brief?.spyChangePct === 0.11, String(r.brief?.spyChangePct));
 }
 ok('bad date rejected', validateClosingBrief({ ...goodClosing, date: 'x' }, 'x').ok === false);
 ok('non-positive spy level rejected', validateClosingBrief({ ...goodClosing, spy: 0 }, 'x').ok === false);

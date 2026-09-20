@@ -59,7 +59,13 @@ export async function POST(request: NextRequest) {
 
   // Dispatch on `type`; a missing type is the morning brief (its original
   // contract, so the existing Cowork morning task keeps working unchanged).
-  const type = (raw && typeof raw === 'object' ? (raw as { type?: unknown }).type : undefined) ?? 'morning';
+  // Normalise case and surrounding whitespace so a near-miss like "Closing"
+  // or " closing " still routes to the right validator instead of falling
+  // through to the morning branch — where a closing payload's price fields
+  // (e.g. spy=761.56) would be wrongly rejected as implausible percent moves.
+  const rawType = raw && typeof raw === 'object' ? (raw as { type?: unknown }).type : undefined;
+  const type =
+    typeof rawType === 'string' ? rawType.trim().toLowerCase() : rawType == null ? 'morning' : rawType;
   if (type !== 'morning' && type !== 'closing') {
     return NextResponse.json(
       { error: 'type must be "morning" or "closing".' },
