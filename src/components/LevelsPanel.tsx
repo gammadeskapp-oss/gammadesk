@@ -529,6 +529,7 @@ export function LevelsPanel({
           aria-label="Level weighting"
           className="flex items-center gap-1"
         >
+          <InfoTip for="levelWeighting" />
           {(['standard', 'activity'] as const).map((w) => {
             const disabled = w === 'activity' && activity === null;
             const selected = weighting === w && !disabled;

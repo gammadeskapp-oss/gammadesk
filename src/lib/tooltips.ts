@@ -308,6 +308,14 @@ const ENTRIES = {
       'Same solve, run on the nearest expiration alone. It appears only when it lands somewhere different from the full-chain flip. When the two disagree, the front week is the one the next few days are being traded against, and it moves fastest as that expiry decays out of the book.',
   },
 
+  levelWeighting: {
+    label: 'Standard vs Today’s activity',
+    plain:
+      'Two ways to weight the same levels. Standard uses open interest — every option position still open on the chain. Today’s activity uses this session’s volume — the contracts actually changing hands right now.',
+    detail:
+      'Think of a parking lot. Open interest is the cars still parked from last night: everything that was opened and left on. Volume is today’s traffic — what is driving in and out this session. Standard shows you where the big overnight crowd is parked; Today’s activity shows you where the cars are moving today. They often point at the same spots, and when they do the Standard view tags that level “confirmed by today’s trading”. When today’s traffic clusters somewhere the overnight lot is quiet, that is a level the standing book alone would miss. The maths behind the flip, ceiling and floor is identical; only the weight changes. Your choice is remembered on this device.',
+  },
+
   levelConfirmedByVolume: {
     label: 'Confirmed by today’s trading',
     plain:
@@ -660,4 +668,5 @@ export const TOOLTIP_ORDER: TooltipKey[] = [
   'retestRegimeFlip',
   'levelVwap',
   'levelPriorDay',
+  'levelWeighting',
 ];
