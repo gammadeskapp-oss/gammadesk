@@ -80,6 +80,8 @@ export interface RawQuote {
   /** `YYYY-MM-DD` */
   expiration: string;
   openInterest: number;
+  /** Contracts traded this session, or 0 when the adapter cannot see it. */
+  volume: number;
   /** Implied vol as quoted upstream, or null when absent/unusable. */
   quotedIv: number | null;
   /** Mid quote or close, used to back out IV when none was quoted. */
@@ -165,13 +167,20 @@ export function resolveIvSurface(
     }
 
     for (const quote of group) {
-      if (quote.openInterest <= 0) continue;
+      // A contract earns its place if it holds open interest *or* traded this
+      // session. The open-interest views filter volume-only contracts straight
+      // back out (`buildPositioning` keeps only rows with weight in its chosen
+      // basis), so keeping them here costs those views nothing while making a
+      // volume-weighted pass — where a freshly opened, zero-OI strike is
+      // exactly the interesting one — possible from the same snapshot.
+      if (quote.openInterest <= 0 && quote.volume <= 0) continue;
       out.push({
         ticker: quote.ticker,
         type: quote.type,
         strike,
         expiration,
         openInterest: quote.openInterest,
+        volume: quote.volume,
         iv,
         ivSource,
         T: Math.max(T, MIN_T),

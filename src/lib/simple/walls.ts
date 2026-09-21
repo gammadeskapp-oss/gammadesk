@@ -30,6 +30,30 @@ export const NEIGHBOURHOOD = 8;
 /** Share of the neighbourhood's biggest wall that counts as "strong". */
 export const STRONG_ENOUGH = 0.4;
 
+/**
+ * A dead-zone around spot, as a share of it, that no ceiling or floor may sit
+ * inside.
+ *
+ * A ceiling a fifth of a strike above spot is not a level price is heading
+ * *into* — it is the strike price already sits on, and calling it resistance
+ * is noise. This shows up most on the volume view, where 0DTE flow piles onto
+ * the at-the-money strike and the nearest wall each side lands a few cents off
+ * spot. A tenth of a percent is below one SPY strike ($1 ≈ 0.13% near 760), so
+ * in practice it excludes only the strike essentially on top of spot and never
+ * a genuine level one strike out.
+ *
+ * Applied in this one shared rule, and in the two surfaces that draw their own
+ * candidate lists (the walls view and the level map), so every place that names
+ * a ceiling or floor excludes the same near-spot strikes and they cannot
+ * disagree about it.
+ */
+export const MIN_LEVEL_DISTANCE_PCT = 0.001;
+
+/** True when a strike is far enough from spot to be a ceiling or floor. */
+export function clearsSpotDeadZone(strike: number, spot: number): boolean {
+  return spot > 0 && Math.abs(strike - spot) / spot >= MIN_LEVEL_DISTANCE_PCT;
+}
+
 export function nearestStrongWall(
   rows: StrikeGex[],
   spot: number,
@@ -38,6 +62,7 @@ export function nearestStrongWall(
   const candidates = rows
     .filter((r) => Number.isFinite(r.gex) && Math.abs(r.gex) > 0)
     .filter((r) => (side === 'above' ? r.strike > spot : r.strike <= spot))
+    .filter((r) => clearsSpotDeadZone(r.strike, spot))
     .sort((a, b) => (side === 'above' ? a.strike - b.strike : b.strike - a.strike))
     .slice(0, NEIGHBOURHOOD);
 

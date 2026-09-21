@@ -19,6 +19,17 @@ export interface DecisionContext {
   /** Plain word for the regime, used throughout the page. */
   mood: 'calm' | 'wild';
   flipLevel: number | null;
+  /**
+   * The nearest expiration's own flip, from that expiration alone.
+   *
+   * Surfaced on the page so our number is directly comparable to the many apps
+   * that show a single front-week expiry — their flip is this one, not the
+   * full-chain `flipLevel`. Null when there is only one expiry in scope, or the
+   * front week never crosses zero nearby. See `Summary.frontFlipLevel`.
+   */
+  frontFlipLevel: number | null;
+  /** Human label for the expiry the front-week flip was computed from. */
+  frontExpiryLabel: string | null;
   aboveFlip: boolean | null;
   flipDistancePct: number | null;
   magnetAbove: Wall | null;
@@ -80,6 +91,26 @@ export interface Verdict {
   tone: Grade;
 }
 
+/**
+ * The same levels, recomputed from today's traded volume instead of open
+ * interest — the "Today's activity" weighting.
+ *
+ * Built from the identical maths and the identical wall rule as the standard
+ * view, off the same chain snapshot, so the two are directly comparable. Null
+ * only when the volume pass could not be produced at all; `available` is false
+ * when the pass ran but nothing had traded yet in the session, which is a
+ * normal pre-open state rather than an error.
+ */
+export interface ActivityLevels {
+  /** False when nothing has traded this session — the view has no levels yet. */
+  available: boolean;
+  walls: { above: Wall[]; below: Wall[] };
+  levelMap: LevelMap;
+  flipLevel: number | null;
+  frontFlipLevel: number | null;
+  frontExpiryLabel: string | null;
+}
+
 export interface DecisionResult {
   context: DecisionContext;
   walls: { above: Wall[]; below: Wall[] };
@@ -90,6 +121,17 @@ export interface DecisionResult {
    * so both have to be present in the payload the server sends.
    */
   levelMap: LevelMap;
+  /**
+   * The volume-weighted view, and the standard-view level prices it confirms.
+   *
+   * `activity` is the whole "Today's activity" weighting. `confirmedByVolume`
+   * is the list of standard (open-interest) level prices that also show up as a
+   * level in the volume view — the Standard view tags exactly these "confirmed
+   * by today's trading". Kept as prices, computed on the server where both
+   * ladders and spot are in hand, so the client only has to test membership.
+   */
+  activity: ActivityLevels | null;
+  confirmedByVolume: number[];
   conviction: Conviction;
   verdict: Verdict;
   hasOptions: boolean;

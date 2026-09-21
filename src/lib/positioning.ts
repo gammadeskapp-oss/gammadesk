@@ -9,7 +9,7 @@ import { buildPositioning } from './exposure';
 import { readLastGoodSnapshot, saveLastGoodSnapshot } from './lastSnapshot';
 import { fetchPolygonSnapshot } from './polygon';
 import { formatAsOf } from './time';
-import type { DataSource, PositioningData } from './types';
+import type { DataSource, PositioningData, WeightBasis } from './types';
 
 const SOURCE_LABELS: Record<DataSource, string> = {
   cboe: 'Cboe (delayed)',
@@ -115,6 +115,7 @@ function toPositioning(
   raw: RawSnapshot,
   expirationCount: number,
   symbol = config.symbol,
+  weightBy: WeightBasis = 'openInterest',
 ): PositioningData {
   const now = new Date();
   const { snapshot, source, notes } = raw;
@@ -126,6 +127,7 @@ function toPositioning(
     dividendYield: config.dividendYield,
     expirationCount,
     strikesEachSide: config.strikesEachSide,
+    weightBy,
     meta: {
       source,
       sourceLabel: SOURCE_LABELS[source],
@@ -221,16 +223,21 @@ function claimChainBudget(): boolean {
  * Throws when the symbol has no usable listed chain — callers decide whether
  * that is fatal or simply means "no magnets".
  */
-export async function getPositioningForSymbol(
-  symbol: string,
-  expirationCount = config.forecastExpirations,
-): Promise<PositioningData> {
+/**
+ * One on-demand chain per symbol, cached under its own key.
+ *
+ * Split out from `getPositioningForSymbol` so the open-interest and the volume
+ * views of the same ticker share a single fetch: both weightings are built from
+ * this one snapshot, so the "today's activity" view on /decision costs no extra
+ * upstream request. The chain budget is claimed here, inside the producer, so
+ * only a genuine snapshot miss spends it — a second weighting off a cached
+ * snapshot is free.
+ */
+function cachedSymbolSnapshot(symbol: string): Promise<RawSnapshot> {
   return cached(
-    `positioning-symbol:${symbol}:${expirationCount}:${config.strikesEachSide}`,
+    `chain-symbol:${symbol}:${config.maxExpirations}:${config.strikesEachSide}`,
     config.cacheSeconds,
     async () => {
-      // Inside the producer, so only a genuine miss spends budget — a cached
-      // symbol is free however often it is asked for.
       if (!claimChainBudget()) {
         throw new ChainError(
           'Too many different tickers were requested in the last minute.',
@@ -239,12 +246,21 @@ export async function getPositioningForSymbol(
         );
       }
       const snapshot = await fetchCboeSnapshot(symbol);
-      return toPositioning(
-        { snapshot, source: 'cboe', notes: snapshot.notes },
-        expirationCount,
-        symbol,
-      );
+      return { snapshot, source: 'cboe', notes: snapshot.notes };
     },
+  );
+}
+
+export async function getPositioningForSymbol(
+  symbol: string,
+  expirationCount = config.forecastExpirations,
+  weightBy: WeightBasis = 'openInterest',
+): Promise<PositioningData> {
+  return cached(
+    `positioning-symbol:${symbol}:${expirationCount}:${config.strikesEachSide}:${weightBy}`,
+    config.cacheSeconds,
+    async () =>
+      toPositioning(await cachedSymbolSnapshot(symbol), expirationCount, symbol, weightBy),
   );
 }
 

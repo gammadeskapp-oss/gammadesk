@@ -18,6 +18,7 @@ import { SimpleRead } from '@/components/SimpleRead';
 import { getBreadth } from '@/lib/breadth';
 import type { BreadthReading } from '@/lib/breadth/types';
 import { regimeOfMood } from '@/lib/regime';
+import { marketStatus } from '@/lib/marketPhase';
 import { config } from '@/lib/config';
 import { getBars } from '@/lib/bars/intraday';
 import { buildContextBand, type ContextBand as ContextBandData } from '@/lib/decision/contextBand';
@@ -60,6 +61,18 @@ interface PageProps {
    * links shared before the rename keep working.
    */
   searchParams: Promise<{ ticker?: string; symbol?: string }>;
+}
+
+const SESSION_MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/** `2026-09-18` -> `Sep 18`, for the "Last session" label. */
+function formatSessionDate(iso: string): string {
+  const [, m, d] = iso.split('-');
+  const idx = Number(m) - 1;
+  return idx >= 0 && idx < 12 && d ? `${SESSION_MONTHS[idx]} ${Number(d)}` : iso;
 }
 
 const GRADE_TEXT: Record<Grade, string> = {
@@ -124,8 +137,14 @@ function Decision({
   methodology,
   positioningRecord,
   tracksLog,
+  marketClosed,
+  sessionDateLabel,
 }: {
   data: DecisionResult;
+  /** True when there is no live session — the volume view is the last one. */
+  marketClosed: boolean;
+  /** The session the volume is from, e.g. "Sep 18". */
+  sessionDateLabel: string | null;
   /** The whole context band, assembled on the server — see lib/decision/contextBand. */
   band: ContextBandData;
   /*
@@ -185,6 +204,12 @@ function Decision({
             spot={c.spot}
             asOfLabel={c.asOfLabel}
             showExposure={showExposure}
+            frontFlipLevel={c.frontFlipLevel}
+            frontExpiryLabel={c.frontExpiryLabel}
+            activity={data.activity}
+            confirmedByVolume={data.confirmedByVolume}
+            marketClosed={marketClosed}
+            sessionDateLabel={sessionDateLabel}
           />
 
           {methodology && (
@@ -474,6 +499,16 @@ export default async function DecisionPage({ searchParams }: PageProps) {
   const staleness = data ? snapshotStaleness(data.context.quoteDateIso) : null;
 
   /*
+   * Market clock, for the levels' volume view. When there is no live session
+   * the "today's activity" volume is really the last completed session's, so
+   * the panel relabels it "Last session" and names the date. Read fresh each
+   * request — the page is force-dynamic — rather than off the cached decision.
+   */
+  const market = marketStatus();
+  const marketClosed = !market.open;
+  const sessionDateLabel = formatSessionDate(market.lastSession.date);
+
+  /*
    * From the chain snapshot fetched alongside the decision, so the drawer
    * lists the inputs to this view rather than restating the general case.
    */
@@ -635,6 +670,8 @@ export default async function DecisionPage({ searchParams }: PageProps) {
                   methodology={methodology}
                   positioningRecord={positioningRecord}
                   tracksLog={tracksLog}
+                  marketClosed={marketClosed}
+                  sessionDateLabel={sessionDateLabel}
                 />
               )
             }

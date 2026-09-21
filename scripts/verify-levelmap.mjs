@@ -253,8 +253,11 @@ console.log('\nlevel map\n');
 
 // --- spot landing exactly on a strike --------------------------------------
 {
-  // The lower side of the wall test is inclusive, so spot can be a wall. The
-  // rung has to carry both labels and still render as spot.
+  // A strike sitting exactly on spot is inside the near-spot dead-zone, so it is
+  // no longer eligible to be the floor — a "floor" a fraction of a strike from
+  // spot is the strike price already sits on, which is noise, not support. The
+  // rung is still drawn (with its gamma) and still marked spot; the floor label
+  // moves to the next real strike below.
   const rows = [
     { strike: 102, gex: 100 },
     { strike: 100, gex: -200 },
@@ -269,9 +272,35 @@ console.log('\nlevel map\n');
   const rung = map.rungs.find((r) => r.price === 100);
   ok('spot-on-a-strike keeps its rung', rung !== undefined);
   ok('spot-on-a-strike is still flagged as spot', rung.isSpot === true);
-  ok('spot-on-a-strike keeps the strike labels', rung.labels.includes('floor'));
+  ok('spot-on-a-strike is NOT labelled a floor', !rung.labels.includes('floor'));
   ok('spot-on-a-strike keeps its gamma', rung.gex === -200);
+  eq('the floor moves to the next strike out', labelsAt(map, 98), 'floor,wall');
   eq('still exactly one spot rung', map.rungs.filter((r) => r.isSpot).length, 1);
+}
+
+// --- the near-spot dead-zone ------------------------------------------------
+{
+  // Ceiling/floor ignore any strike within 0.1% of spot. At spot 761.69 that is
+  // a $0.76 band, so 762 (+0.04%) and 761 (-0.09%) are both inside it and 765 /
+  // 758 are the first eligible levels each side — the volume-view case that the
+  // dead-zone exists to fix.
+  const spot = 761.69;
+  const rows = [
+    { strike: 765, gex: 80 },
+    { strike: 762, gex: 100 },
+    { strike: 761, gex: -90 },
+    { strike: 758, gex: -70 },
+  ];
+  const map = buildLevelMap(rows, spot, {
+    netGex: 0,
+    flipLevel: null,
+    frontFlipLevel: null,
+  });
+
+  ok('a +0.04% strike is not the ceiling', !map.rungs.some((r) => r.price === 762 && r.labels.includes('ceiling')));
+  ok('a -0.09% strike is not the floor', !map.rungs.some((r) => r.price === 761 && r.labels.includes('floor')));
+  eq('the ceiling is the first strike past the dead-zone', labelsAt(map, 765), 'ceiling,wall');
+  eq('the floor is the first strike past the dead-zone', labelsAt(map, 758), 'floor,wall');
 }
 
 // --- degenerate chains ------------------------------------------------------

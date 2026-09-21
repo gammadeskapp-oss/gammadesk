@@ -249,7 +249,7 @@ const ENTRIES = {
   wallColour: {
     label: 'Amber vs blue',
     plain:
-      'Amber = calm (dealers push back against moves). Blue = wild (dealers speed moves up).',
+      'Amber tends to slow price down; blue can speed it up.',
   },
 
   // --- level map ------------------------------------------------------------
@@ -301,11 +301,27 @@ const ENTRIES = {
   },
 
   levelFrontFlip: {
-    label: 'Front-week flip',
+    label: 'Today’s expiry flip',
     plain:
-      'Where gamma flips if you count only the nearest expiry, which is what drives the next few sessions.',
+      'The flip using only the options that expire on the nearest date — today’s expiring options while the market is open.',
     detail:
-      'Same solve, run on the nearest expiration alone. It appears only when it lands somewhere different from the full-chain flip. When the two disagree, the front week is the one the next few days are being traded against, and it moves fastest as that expiry decays out of the book.',
+      'Same solve, run on the nearest expiration alone rather than the whole chain. Other apps usually quote a single expiry, so this is the number closest to theirs — but the two can still differ by a few points because the flip itself is solved differently, not because the expiry set differs. On the level map it appears only when it lands somewhere different from the full-chain flip.',
+  },
+
+  levelWeighting: {
+    label: 'Standard vs Today’s activity',
+    plain:
+      'Two ways to weight the same levels. Standard uses open interest — every option position still open on the chain. Today’s activity uses this session’s volume — the contracts actually changing hands right now.',
+    detail:
+      'Think of a parking lot. Open interest is the cars still parked from last night: everything that was opened and left on. Volume is today’s traffic — what is driving in and out this session. Standard shows you where the big overnight crowd is parked; Today’s activity shows you where the cars are moving today. They often point at the same spots, and when they do the Standard view tags that level “confirmed by today’s trading”. When today’s traffic clusters somewhere the overnight lot is quiet, that is a level the standing book alone would miss. The maths behind the flip, ceiling and floor is identical; only the weight changes. Your choice is remembered on this device.',
+  },
+
+  levelConfirmedByVolume: {
+    label: 'Confirmed by today’s trading',
+    plain:
+      'This level also shows up when you weight by the contracts that actually traded today, not just by everything still open.',
+    detail:
+      'The Standard view is built from open interest — every position still open on the chain. This tag means the same price is also a level in the Today’s activity view, which re-runs the identical maths on this session’s volume. A level both weightings agree on has today’s flow behind it as well as the standing book, not just one of the two. Strikes must match exactly; the flip, being a solved crossing rather than a strike, matches when the two land within a tenth of a percent of spot.',
   },
 
   levelDistance: {
@@ -652,4 +668,5 @@ export const TOOLTIP_ORDER: TooltipKey[] = [
   'retestRegimeFlip',
   'levelVwap',
   'levelPriorDay',
+  'levelWeighting',
 ];
