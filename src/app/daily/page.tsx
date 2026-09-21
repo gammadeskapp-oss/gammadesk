@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { Footer } from '@/components/Footer';
 import { LevelBar } from '@/components/daily/LevelBar';
 import { TickerLinks } from '@/components/daily/TickerLinks';
+import { EmailSignup } from '@/components/email/EmailSignup';
 import { getPositioning } from '@/lib/positioning';
 import { buildSimpleRead } from '@/lib/simple/translate';
 import { fetchCboeQuotes } from '@/lib/x/cboeQuote';
@@ -242,6 +243,9 @@ export default async function DailyPage() {
 
         {/* Other covered tickers */}
         <TickerLinks current="SPY" />
+
+        {/* Free email signup */}
+        <EmailSignup />
 
         {/* One clear way onward */}
         <section className="pt-1">
