@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
+import { EmailSignup } from '@/components/email/EmailSignup';
 import { getPositioning } from '@/lib/positioning';
 import { buildSimpleRead } from '@/lib/simple/translate';
 import { fetchCboeQuotes } from '@/lib/x/cboeQuote';
@@ -283,6 +284,9 @@ export default async function DailyPage() {
             )}
           </section>
         )}
+
+        {/* Free email signup */}
+        <EmailSignup />
 
         {/* One clear way onward */}
         <section className="pt-1">
