@@ -49,19 +49,42 @@ export async function GET(request: NextRequest) {
     readHealthHistory().catch(() => []),
   ]);
 
-  // Previews are dry runs — compose and self-check, never post or log.
+  // Previews are dry runs — compose and self-check, never post or log. They
+  // each fetch live market data, so a slow or broken upstream must never blank
+  // or hang the whole console (the console is exactly what the owner needs to
+  // see *why* posting failed). So each preview is fault-isolated and time-
+  // bounded, and the core data above renders regardless of how they resolve.
+  const PREVIEW_BUDGET_MS = 8_000;
   const previews = await Promise.all(
     PREVIEW_SLOTS.map(async (slot) => {
-      const outcome = await runSlot(slot, { dry: true });
-      return {
-        slot: slot.kind,
-        label: slot.label,
-        text: outcome.text ?? null,
-        length: outcome.length ?? null,
-        asOfLabel: outcome.asOfLabel ?? null,
-        checks: outcome.checks ?? [],
-        reason: outcome.reason ?? null,
-      };
+      try {
+        const outcome = await Promise.race([
+          runSlot(slot, { dry: true }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('preview timed out')), PREVIEW_BUDGET_MS),
+          ),
+        ]);
+        return {
+          slot: slot.kind,
+          label: slot.label,
+          text: outcome.text ?? null,
+          length: outcome.length ?? null,
+          asOfLabel: outcome.asOfLabel ?? null,
+          checks: outcome.checks ?? [],
+          reason: outcome.reason ?? null,
+        };
+      } catch (error) {
+        // A preview that fails or times out becomes a visible note, not a 500.
+        return {
+          slot: slot.kind,
+          label: slot.label,
+          text: null,
+          length: null,
+          asOfLabel: null,
+          checks: [],
+          reason: `Preview unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
     }),
   );
 

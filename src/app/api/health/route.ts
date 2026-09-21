@@ -5,6 +5,9 @@ import { peekStoredFlow } from '@/lib/flow';
 import { peekStoredGroups } from '@/lib/groups';
 import { detectedBlobAccess, storeStatus } from '@/lib/jsonStore';
 import { readLog } from '@/lib/log/store';
+import { readLog as readXLog, readPause as readXPause } from '@/lib/x/store';
+import { postingEnabledFromValue } from '@/lib/x/flags';
+import { marketToday } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -145,6 +148,39 @@ export async function GET(request: Request) {
     readCronHealth().catch(() => null),
   ]);
 
+  /*
+   * X auto-poster status, so "why did nothing post to X today?" is answerable
+   * from outside without the owner cookie. Names/presence and outcomes only —
+   * never a credential value, never the post text. The kill switch, the pause
+   * state (whose reason reveals an auth/billing auto-pause), whether the four
+   * X credentials are present, and each slot's outcome for today.
+   */
+  const [xLog, xPause] = await Promise.all([
+    readXLog().catch(() => []),
+    readXPause().catch(() => ({ paused: false as boolean })),
+  ]);
+  const xEnabled = postingEnabledFromValue(process.env['X_POSTING_ENABLED']);
+  const xCredsPresent =
+    present('X_API_KEY') && present('X_API_SECRET') && present('X_ACCESS_TOKEN') && present('X_ACCESS_SECRET');
+  const xToday = marketToday();
+  const xPosting = {
+    enabled: xEnabled,
+    // Presence of the env var name (regardless of whether it is truthy), so
+    // "I set X_POSTING_ENABLED but it still says off" is distinguishable from
+    // "the running build cannot see it".
+    switchPresent: present('X_POSTING_ENABLED'),
+    credentialsPresent: xCredsPresent,
+    paused: Boolean((xPause as { paused?: boolean }).paused),
+    pauseReason: (xPause as { reason?: string }).reason ?? null,
+    today: xToday,
+    slotsToday: xLog
+      .filter((e) => e.date === xToday)
+      .map((e) => ({ slot: e.slot, slotKey: e.slotKey, outcome: e.outcome, reason: e.reason ?? null, at: e.at })),
+    lastEntry: xLog[0]
+      ? { date: xLog[0].date, slot: xLog[0].slot, outcome: xLog[0].outcome, reason: xLog[0].reason ?? null, at: xLog[0].at }
+      : null,
+  };
+
   const jobs = {
     'log snapshot + settle': {
       records: log.length,
@@ -251,6 +287,7 @@ export async function GET(request: Request) {
           }))
         : null,
       cronProblemCount: cron?.problemCount ?? null,
+      xPosting,
       jobs,
       /*
        * Which deployment is answering. Without this it is impossible to tell
