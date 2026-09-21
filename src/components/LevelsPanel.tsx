@@ -153,11 +153,11 @@ const STRIKE_LABELS: LevelKind[] = ['wall', 'heaviest', 'ceiling', 'floor'];
  * Only ever shown on the open-interest view: it is a statement about volume
  * agreeing with open interest, which is meaningless on the volume view itself.
  */
-function ConfirmedChip() {
+function ConfirmedChip({ text }: { text: string }) {
   return (
     <InfoTip for="levelConfirmedByVolume">
       <span className="border border-pos/50 bg-pos/10 px-1.5 py-px text-[10px] font-bold tracking-[0.06em] text-pos">
-        CONFIRMED BY TODAY&rsquo;S TRADING
+        {text}
       </span>
     </InfoTip>
   );
@@ -167,12 +167,15 @@ function RungRow({
   rung,
   showDollars,
   confirmed,
+  confirmedLabel,
 }: {
   rung: LevelRung;
   /** Whether the dollar-gamma column is revealed (Details toggle). */
   showDollars: boolean;
   /** True on the Standard view when this level also appears in the volume view. */
   confirmed: boolean;
+  /** Chip wording — differs when the last session, not today, is on screen. */
+  confirmedLabel: string;
 }) {
   const near = !rung.isSpot && Math.abs(rung.distancePct) < 0.5;
 
@@ -202,7 +205,7 @@ function RungRow({
         {rung.labels.map((l) => (
           <LabelBadge key={l} kind={l} />
         ))}
-        {confirmed && <ConfirmedChip />}
+        {confirmed && <ConfirmedChip text={confirmedLabel} />}
       </span>
 
       {/*
@@ -242,13 +245,15 @@ function LevelMapView({
   asOfLabel,
   showDollars,
   confirmedPrices,
+  confirmedLabel,
 }: {
   map: LevelMap;
   asOfLabel: string;
   /** Whether the dollar-gamma column and net-gamma figure are revealed. */
   showDollars: boolean;
-  /** Prices to tag "confirmed by today's trading"; empty on the volume view. */
+  /** Prices to tag as confirmed; empty on the volume view. */
   confirmedPrices: Set<number>;
+  confirmedLabel: string;
 }) {
   return (
     <div className="border border-term-line">
@@ -308,6 +313,7 @@ function LevelMapView({
               rung={r}
               showDollars={showDollars}
               confirmed={confirmedPrices.has(r.price)}
+              confirmedLabel={confirmedLabel}
             />
           ))}
         </ul>
@@ -322,6 +328,7 @@ function WallRow({
   showExposure,
   showDollars,
   confirmed,
+  confirmedLabel,
 }: {
   wall: Wall;
   spot: number;
@@ -331,6 +338,7 @@ function WallRow({
   showDollars: boolean;
   /** True on the Standard view when this strike also appears in the volume view. */
   confirmed: boolean;
+  confirmedLabel: string;
 }) {
   const pct = Math.round(wall.strength * 100);
   return (
@@ -377,7 +385,7 @@ function WallRow({
       )}
       {confirmed && (
         <span className="ml-auto">
-          <ConfirmedChip />
+          <ConfirmedChip text={confirmedLabel} />
         </span>
       )}
     </li>
@@ -394,6 +402,7 @@ function WallList({
   showExposure,
   showDollars,
   confirmedPrices,
+  confirmedLabel,
 }: {
   title: string;
   list: Wall[];
@@ -402,8 +411,9 @@ function WallList({
   spot: number;
   showExposure: boolean;
   showDollars: boolean;
-  /** Strikes to tag "confirmed by today's trading"; empty on the volume view. */
+  /** Strikes to tag as confirmed; empty on the volume view. */
   confirmedPrices: Set<number>;
+  confirmedLabel: string;
 }) {
   return (
     <div className="border border-term-line">
@@ -442,6 +452,7 @@ function WallList({
               showExposure={showExposure}
               showDollars={showDollars}
               confirmed={confirmedPrices.has(w.strike)}
+              confirmedLabel={confirmedLabel}
             />
           ))}
         </ul>
@@ -460,6 +471,8 @@ export function LevelsPanel({
   frontExpiryLabel,
   activity,
   confirmedByVolume,
+  marketClosed,
+  sessionDateLabel,
 }: {
   walls: { above: Wall[]; below: Wall[] };
   levelMap: LevelMap;
@@ -473,6 +486,14 @@ export function LevelsPanel({
   activity: ActivityLevels | null;
   /** Standard level prices today's trading also backs. */
   confirmedByVolume: number[];
+  /**
+   * True when the market is not in a live session. The volume then describes
+   * the last completed session, not today, so the whole view relabels — see
+   * `activityLabel` and `confirmedLabel` below.
+   */
+  marketClosed: boolean;
+  /** The session the volume is from, e.g. "Sep 18". Shown when closed. */
+  sessionDateLabel: string | null;
 }) {
   const [view, setView] = useState<View>('walls');
   const [showDetails, setShowDetails] = useState(false);
@@ -503,6 +524,16 @@ export function LevelsPanel({
 
   // Nothing traded yet: show the reason rather than empty wall lists.
   const activityEmpty = onActivity && activity !== null && !activity.available;
+
+  // When the market is closed the "today's activity" volume is really the last
+  // completed session's, so the whole view says so — the switch, the tags, and
+  // the blurb — rather than calling a Friday close "today".
+  const activityLabel = marketClosed ? 'Last session' : "Today's activity";
+  const activitySession =
+    marketClosed && sessionDateLabel ? ` (${sessionDateLabel})` : '';
+  const confirmedLabel = marketClosed
+    ? 'CONFIRMED BY LAST SESSION'
+    : 'CONFIRMED BY TODAY’S TRADING';
 
   return (
     <section className="space-y-2">
@@ -591,27 +622,37 @@ export function LevelsPanel({
                       : 'border-term-line text-term-faint hover:border-pos/50 hover:text-term-dim'
                 }`}
               >
-                {WEIGHTING_LABEL[w]}
+                {w === 'activity' ? activityLabel : WEIGHTING_LABEL.standard}
               </button>
             );
           })}
         </div>
         <p className="min-w-0 flex-1 text-2xs leading-relaxed text-term-faint">
           {onActivity
-            ? 'Based on today’s trading — the same flip, ceiling and floor, weighted by the contracts that changed hands this session rather than by everything still open.'
-            : 'Based on standing open interest — every position still open on the chain. Switch to today’s activity to weight by what actually traded this session.'}
+            ? `Based on ${
+                marketClosed ? 'last session’s' : 'today’s'
+              } trading${activitySession} — the same flip, ceiling and floor, weighted by the contracts that changed hands ${
+                marketClosed ? 'that session' : 'this session'
+              } rather than by everything still open.`
+            : `Based on standing open interest — every position still open on the chain. Switch to ${activityLabel.toLowerCase()} to weight by what actually traded ${
+                marketClosed ? 'in the last session' : 'this session'
+              }.`}
         </p>
       </div>
 
       <div className="panel space-y-2 p-2">
         {activityEmpty ? (
           <div className="border border-term-line px-4 py-8 text-center text-xs text-term-dim">
-            <p className="text-term-text">Nothing has traded yet in today’s session.</p>
+            <p className="text-term-text">
+              {marketClosed
+                ? 'No trading recorded for the last session yet.'
+                : 'Nothing has traded yet in today’s session.'}
+            </p>
             <p className="mx-auto mt-2 max-w-md leading-relaxed">
-              These levels come from the contracts that changed hands today, and
-              so far none have. Check back once the market has been open for a
-              while, or use the Standard view, which is built from open interest
-              and is available now.
+              These levels come from the contracts that changed hands
+              {marketClosed ? ' in that session' : ' today'}, and none are
+              showing. {marketClosed ? '' : 'Check back once the market has been open for a while. '}
+              The Standard view is built from open interest and is available now.
             </p>
           </div>
         ) : view === 'walls' ? (
@@ -625,6 +666,7 @@ export function LevelsPanel({
               showExposure={showExposure}
               showDollars={showDollars}
               confirmedPrices={confirmedPrices}
+              confirmedLabel={confirmedLabel}
             />
             <WallList
               title="Floors below"
@@ -635,6 +677,7 @@ export function LevelsPanel({
               showExposure={showExposure}
               showDollars={showDollars}
               confirmedPrices={confirmedPrices}
+              confirmedLabel={confirmedLabel}
             />
           </>
         ) : (
@@ -643,6 +686,7 @@ export function LevelsPanel({
             asOfLabel={asOfLabel}
             showDollars={showDollars}
             confirmedPrices={confirmedPrices}
+            confirmedLabel={confirmedLabel}
           />
         )}
 
@@ -686,24 +730,14 @@ export function LevelsPanel({
           </p>
         ) : (
           /*
-            Stated on the card, not just in the source — the same standard the
-            volume profile holds itself to. Someone reading a ceiling off this
-            ladder is reading a number that came out of an assumption, and they
-            should be told which one before they trade against it.
+            One plain line on the card. The full explanation — the dealer
+            convention, the wall rule, the not-to-scale caveat — still lives in
+            the levelNaiveGex tooltip and on /guide for anyone who wants it.
           */
           <p className="flex flex-wrap items-center gap-1.5 px-1 pb-1 text-2xs leading-relaxed text-term-faint">
             <span>
-              <span className="text-flip">Gamma here is an assumption.</span>{' '}
-              Dealers are taken to be short every call and long every put,
-              applied uniformly across the chain — the standard convention, not
-              a measurement of what any dealer actually holds. Nobody outside
-              those books can see the real positioning, so where the assumption
-              is wrong for a name, every level on this ladder moves with it.
-              Rungs are evenly spaced for legibility and are not to scale; the
-              right-hand column carries the true distance. A wall is a strike
-              holding at least {Math.round(active.levelMap.rule.threshold * 100)}% of
-              the gamma of the biggest strike among the{' '}
-              {active.levelMap.rule.neighbourhood} nearest on its own side.
+              These levels are estimates based on public options data, not actual
+              dealer positions.
             </span>
             <InfoTip for="levelNaiveGex" />
           </p>

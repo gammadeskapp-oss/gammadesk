@@ -4,7 +4,7 @@ import { getBars } from '../bars/intraday';
 import type { PositioningData } from '../types';
 import { cached } from '../cache';
 import { getPositioningForSymbol } from '../positioning';
-import { nearestStrongWall } from '../simple/walls';
+import { clearsSpotDeadZone, nearestStrongWall } from '../simple/walls';
 import { formatExpiryLabel } from '../time';
 import { normaliseSymbol } from '../ticker/bars';
 import { getTradeability } from '../ticker/liquidity';
@@ -37,7 +37,12 @@ function wallsFrom(
 ): { above: Wall[]; below: Wall[] } {
   const scored = rows
     .map((r) => ({ strike: r.strike, gex: r.total.gex }))
-    .filter((r) => Number.isFinite(r.gex) && Math.abs(r.gex) > 0);
+    .filter((r) => Number.isFinite(r.gex) && Math.abs(r.gex) > 0)
+    // Exclude the strikes essentially on top of spot, the same dead-zone the
+    // ceiling/floor rule uses — so the Ceilings/Floors list and the level map's
+    // CEILING/FLOOR badges lead with the same strike rather than one of them
+    // naming a level a few cents off spot.
+    .filter((r) => clearsSpotDeadZone(r.strike, spot));
 
   const pick = (side: 'above' | 'below'): Wall[] => {
     const candidates = scored

@@ -15,6 +15,7 @@
 import {
   NEIGHBOURHOOD,
   STRONG_ENOUGH,
+  clearsSpotDeadZone,
   nearestStrongWall,
   type StrikeGex,
 } from '../simple/walls';
@@ -108,6 +109,9 @@ function wallsOnSide(
   const candidates = rows
     .filter((r) => Number.isFinite(r.gex) && Math.abs(r.gex) > 0)
     .filter((r) => (side === 'above' ? r.strike > spot : r.strike <= spot))
+    // Same near-spot dead-zone the ceiling/floor rule uses, so a WALL badge and
+    // the CEILING/FLOOR badge never disagree about a strike sitting on spot.
+    .filter((r) => clearsSpotDeadZone(r.strike, spot))
     .sort((a, b) => (side === 'above' ? a.strike - b.strike : b.strike - a.strike))
     .slice(0, NEIGHBOURHOOD);
 
