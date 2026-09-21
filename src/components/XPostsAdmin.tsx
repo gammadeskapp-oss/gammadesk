@@ -148,8 +148,22 @@ export function XPostsAdmin() {
         setStatus('error');
         return;
       }
+      // Core data (status, pause, log) renders immediately — it comes from
+      // stored data alone. The live slot previews are slow (six market
+      // snapshots), so they load separately and merge in when ready; a stall
+      // there can no longer keep the whole console — and the Resume switch —
+      // from appearing.
       setData((await res.json()) as AdminData);
       setStatus('unlocked');
+
+      fetch('/api/admin/x-posts?previews=1', { cache: 'no-store', credentials: 'same-origin' })
+        .then((r) => (r.ok ? (r.json() as Promise<{ previews: Preview[] }>) : null))
+        .then((p) => {
+          if (p?.previews) setData((prev) => (prev ? { ...prev, previews: p.previews } : prev));
+        })
+        .catch(() => {
+          // Previews are optional; the console stands without them.
+        });
     } catch {
       setStatus('error');
     }
@@ -437,6 +451,9 @@ export function XPostsAdmin() {
       {/* Previews */}
       <section className="space-y-2">
         <h2 className="label-xs">Next-post previews (composed live, not sent)</h2>
+        {previews.length === 0 && (
+          <p className="text-2xs text-term-faint">Loading live previews…</p>
+        )}
         <div className="grid gap-2 sm:grid-cols-2">
           {previews.map((p) => (
             <div key={p.slot} className="panel px-3.5 py-3">
