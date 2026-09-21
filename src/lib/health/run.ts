@@ -5,7 +5,7 @@ import { snapshotStaleness, marketSessionRules } from '../events';
 import { isTradingDay } from '../x/schedule';
 import { fetchCboeQuote } from '../x/cboeQuote';
 import { readBriefForDate, readClosingBriefForDate } from '../x/brief';
-import { readLog } from '../x/store';
+import { readLog, readPause } from '../x/store';
 import { postingEnabled } from '../x/run';
 import { storeStatus } from '../jsonStore';
 import { probeBlobWrite } from './store';
@@ -123,6 +123,20 @@ export async function runNightlyChecks(baseUrl: string, now: Date = new Date()):
     { tradingDay, postingEnabled: posting },
   );
   checks.push({ id: 'posts:sent', label: "Today's expected X posts were sent", ok: posts.ok, detail: posts.detail });
+
+  // 7b: the X poster is not paused. An auto-pause (an X auth/billing error)
+  // silences every slot for the rest of the day, so a live-but-paused poster is
+  // a failure the nightly email must carry — the same signal the immediate
+  // auto-pause alert sends, repeated here so it cannot be missed.
+  const pause = await readPause().catch(() => ({ paused: false }) as Awaited<ReturnType<typeof readPause>>);
+  checks.push({
+    id: 'x:pause',
+    label: 'X posting is not paused',
+    ok: !pause.paused,
+    detail: pause.paused
+      ? `PAUSED — ${pause.reason ?? 'no reason recorded'}${pause.at ? ` (since ${pause.at})` : ''}`
+      : 'Posting is live (not paused).',
+  });
 
   // 8: today's briefs arrived from Cowork.
   if (!tradingDay) {

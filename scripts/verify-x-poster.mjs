@@ -21,6 +21,7 @@ const { buildAuthHeader, classify, rfc3986 } = await import('../src/lib/x/oauth.
 const {
   chicagoNow,
   isTradingDay,
+  dueMorningSlot,
   dueGammaSlot,
   duePulseSlot,
   dueClosingSlot,
@@ -158,6 +159,17 @@ ok('winter 13:30 UTC → not gamma (that is 7:30 CT)', dueGammaSlot(new Date('20
 ok('Saturday → no gamma', dueGammaSlot(new Date('2026-07-04T13:30:00Z')) === null);
 ok('holiday → no gamma', dueGammaSlot(new Date('2026-07-03T13:30:00Z'), closedRules) === null);
 ok('gamma slot key is stable', dueGammaSlot(new Date('2026-07-01T13:30:00Z')).key === 'gamma');
+
+section('The morning slot is 8:25 CT year-round (cron fires at :25)');
+// Summer: CDT = UTC-5, so 13:25 UTC is 08:25 Central; 14:25 UTC is 09:25.
+ok('summer 13:25 UTC → morning', dueMorningSlot(new Date('2026-07-01T13:25:00Z')) !== null);
+ok('summer 14:25 UTC → not morning (that is 9:25 CT)', dueMorningSlot(new Date('2026-07-01T14:25:00Z')) === null);
+// Winter: CST = UTC-6, so 14:25 UTC is 08:25 Central; 13:25 UTC is 07:25.
+ok('winter 14:25 UTC → morning', dueMorningSlot(new Date('2026-01-05T14:25:00Z')) !== null);
+ok('winter 13:25 UTC → not morning (that is 7:25 CT)', dueMorningSlot(new Date('2026-01-05T13:25:00Z')) === null);
+ok('Saturday → no morning', dueMorningSlot(new Date('2026-07-04T13:25:00Z')) === null);
+ok('holiday → no morning', dueMorningSlot(new Date('2026-07-03T13:25:00Z'), closedRules) === null);
+ok('morning slot key is stable', dueMorningSlot(new Date('2026-07-01T13:25:00Z')).key === 'morning');
 
 section('The pulse window is 9:30–2:30 CT, and the slot key carries the hour');
 

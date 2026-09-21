@@ -98,6 +98,10 @@
       "schedule": "30 22 * * 6"
     },
     {
+      "path": "/api/x/morning",
+      "schedule": "25 13,14 * * 1-5"
+    },
+    {
       "path": "/api/x/gamma",
       "schedule": "30 13,14 * * 1-5"
     },

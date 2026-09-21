@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { marketSessionRules, snapshotStaleness } from '../events';
+import { sendAutoPauseAlert } from '../health/email';
 import { marketToday } from '../time';
 import { readCredentials, postTweet, uploadMedia } from './client';
 import { buildForSlot, type ComposedPost } from './content';
@@ -235,9 +236,14 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
   }
 
   // Auth or billing errors auto-pause: retrying just burns attempts against a
-  // problem only a human can fix.
+  // problem only a human can fix. Email the owner immediately — a pause
+  // silences posting for the rest of the day, and waiting for the nightly
+  // health run to surface it is a day too late.
   if (result.kind === 'auth' || result.kind === 'billing') {
-    await autoPause(`Auto-paused after an X ${result.kind} error: ${result.error ?? 'unknown'}`);
+    const pauseReason = `Auto-paused after an X ${result.kind} error: ${result.error ?? 'unknown'}`;
+    await autoPause(pauseReason);
+    // Fire-and-forget: a mail failure must not change the post outcome.
+    void sendAutoPauseAlert(pauseReason, now).catch(() => {});
   }
 
   await log({

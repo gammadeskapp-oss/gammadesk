@@ -103,6 +103,9 @@ export function isTradingDay(
   return !rules.isClosed(date);
 }
 
+/** The Chicago hour at which the morning post fires (8:25 AM CT). */
+export const MORNING_HOUR_CT = 8;
+
 /** The Chicago hour at which the daily gamma post fires. */
 export const GAMMA_HOUR_CT = 8;
 
@@ -159,6 +162,26 @@ export function dueEarningsSlot(
   if (!isTradingDay(clock.date, rules)) return null;
   if (clock.hour !== EARNINGS_HOUR_CT) return null;
   return { kind: 'earnings', key: 'earnings', label: 'Earnings today (7:30 CT)' };
+}
+
+/**
+ * The morning slot if this firing is the 8:xx CT one on a trading day, else
+ * null — the 8:25 CT snapshot that leads with the Cowork "Morning Desk" brief.
+ *
+ * Gated on the hour (8 CT) like gamma, so a cron delayed a few minutes still
+ * posts and a firing pushed into the 9 o'clock hour is rejected. The morning
+ * cron fires at :25 and the gamma cron at :30, so they never land on the same
+ * firing even though both accept the 8 o'clock hour; the once-a-day ledger keys
+ * ('morning' vs 'gamma') keep them independent.
+ */
+export function dueMorningSlot(
+  now: Date = new Date(),
+  rules: ClosedCheck = NEVER_CLOSED,
+): PostSlot | null {
+  const clock = chicagoNow(now);
+  if (!isTradingDay(clock.date, rules)) return null;
+  if (clock.hour !== MORNING_HOUR_CT) return null;
+  return { kind: 'morning', key: 'morning', label: 'Morning snapshot (8:25 CT)' };
 }
 
 /**
