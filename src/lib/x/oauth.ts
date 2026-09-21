@@ -72,13 +72,18 @@ export function buildAuthHeader(
  * Classify a failed X response so the caller knows how to react:
  *   401/403 → auth, 402 → billing, 429 → rate, else other.
  * A 403 carrying a usage/quota/payment message is surfaced as billing.
- * `auth` and `billing` auto-pause; `rate`/`other` retry once.
+ * A 403 for duplicate content is `duplicate` — the tweet is already on X, so
+ * it is a benign no-op, not a credential problem: retrying just 403s again and
+ * auto-pausing would silence the whole poster over one repeated post.
+ * `auth` and `billing` auto-pause; `duplicate` skips; `rate`/`other` retry once.
  */
 export function classify(status: number, body: string): PostResult['kind'] {
   if (status === 401) return 'auth';
   if (status === 402) return 'billing';
   if (status === 403) {
-    return /usage|quota|cap|payment|billing/i.test(body) ? 'billing' : 'auth';
+    if (/usage|quota|cap|payment|billing/i.test(body)) return 'billing';
+    if (/duplicate/i.test(body)) return 'duplicate';
+    return 'auth';
   }
   if (status === 429) return 'rate';
   if (/usage|quota|cap|payment|billing/i.test(body)) return 'billing';

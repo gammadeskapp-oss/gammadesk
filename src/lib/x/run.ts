@@ -235,6 +235,26 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     return { ...base, status: 'sent', reason, text: composed.text, length: composed.length, tweetId: result.tweetId, asOfLabel: composed.asOfLabel };
   }
 
+  // A duplicate-content 403 means the identical tweet is already on X. That is
+  // not a failure and certainly not a reason to pause the whole poster — record
+  // it as a benign skip and move on, so the next slot still runs.
+  if (result.kind === 'duplicate') {
+    const reason = 'Skipped: X already has an identical post (duplicate content).';
+    await log({
+      at: now.toISOString(),
+      date,
+      slot: slot.kind,
+      slotKey: slot.key,
+      text: composed.text,
+      length: composed.length,
+      outcome: 'skipped',
+      reason,
+      asOfLabel: composed.asOfLabel,
+      numbers: composed.numbers,
+    });
+    return { ...base, status: 'skipped', reason, text: composed.text, length: composed.length, asOfLabel: composed.asOfLabel };
+  }
+
   // Auth or billing errors auto-pause: retrying just burns attempts against a
   // problem only a human can fix. Email the owner immediately — a pause
   // silences posting for the rest of the day, and waiting for the nightly

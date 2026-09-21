@@ -80,7 +80,8 @@ export interface PostResult {
   error?: string;
   /**
    * Classified failure mode, so the caller knows whether to retry, skip, or
-   * auto-pause. `auth` and `billing` auto-pause; `rate`/`other` retry once.
+   * auto-pause. `auth` and `billing` auto-pause; `duplicate` skips (already on
+   * X); `rate`/`other` retry once.
    */
-  kind?: 'auth' | 'billing' | 'rate' | 'other';
+  kind?: 'auth' | 'billing' | 'rate' | 'other' | 'duplicate';
 }

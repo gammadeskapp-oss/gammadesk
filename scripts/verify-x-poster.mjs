@@ -139,6 +139,7 @@ section('failure classification drives retry vs auto-pause');
 ok('401 → auth', classify(401, '') === 'auth');
 ok('403 (permissions) → auth', classify(403, 'not permitted') === 'auth');
 ok('403 (usage cap) → billing', classify(403, 'monthly usage cap reached') === 'billing');
+ok('403 (duplicate content) → duplicate', classify(403, 'You are not allowed to create a Tweet with duplicate content.') === 'duplicate');
 ok('402 → billing', classify(402, '') === 'billing');
 ok('429 → rate', classify(429, '') === 'rate');
 ok('500 → other', classify(500, 'boom') === 'other');
