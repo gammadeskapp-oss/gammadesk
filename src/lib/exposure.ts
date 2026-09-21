@@ -12,10 +12,24 @@ import type {
   PositioningData,
   StrikeRow,
   Summary,
+  WeightBasis,
 } from './types';
 
 /** Shares of the underlying controlled by one option contract. */
 const CONTRACT_MULTIPLIER = 100;
+
+/**
+ * The per-contract quantity a weighting is built on.
+ *
+ * Open interest is the standing convention; volume re-runs the identical
+ * exposure maths against what traded this session. Everything downstream — the
+ * greeks, the flip search, the walls — is agnostic to which one it was handed,
+ * so the choice lives in exactly this one function.
+ */
+function weightOf(contract: NormalisedContract, basis: WeightBasis): number {
+  const raw = basis === 'volume' ? contract.volume : contract.openInterest;
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
 
 /**
  * Dealer positioning convention (the standard SqueezeMetrics assumption, and
@@ -60,12 +74,16 @@ export interface GreekParams {
 export function contractMetrics(
   contract: NormalisedContract,
   params: GreekParams,
+  basis: WeightBasis = 'openInterest',
 ): Metrics {
   const { spot: S, riskFreeRate: r, dividendYield: q } = params;
-  const { strike: K, T, iv: sigma, openInterest, type } = contract;
+  const { strike: K, T, iv: sigma, type } = contract;
 
+  // Under the volume basis every count below is contracts traded this session
+  // rather than open interest; the maths is otherwise identical.
+  const weight = weightOf(contract, basis);
   const sign = dealerSign(type);
-  const notional = sign * openInterest * CONTRACT_MULTIPLIER;
+  const notional = sign * weight * CONTRACT_MULTIPLIER;
   const inputs = { S, K, T, r, q, sigma };
 
   // gamma is per $1 of spot; multiply by S once for dollar delta and again by
@@ -82,13 +100,13 @@ export function contractMetrics(
     gex,
     vex,
     cex,
-    oi: sign * openInterest,
+    oi: sign * weight,
     // Same dollars as `gex`, kept on the side the contract came from. One of
     // the two is always zero, so summing them back gives `gex` exactly.
     callGex: type === 'call' ? gex : 0,
     putGex: type === 'put' ? gex : 0,
-    callOi: type === 'call' ? openInterest : 0,
-    putOi: type === 'put' ? openInterest : 0,
+    callOi: type === 'call' ? weight : 0,
+    putOi: type === 'put' ? weight : 0,
   };
 }
 
@@ -97,6 +115,7 @@ function netGexAtSpot(
   contracts: NormalisedContract[],
   hypotheticalSpot: number,
   params: GreekParams,
+  basis: WeightBasis,
 ): number {
   let total = 0;
   for (const c of contracts) {
@@ -110,7 +129,7 @@ function netGexAtSpot(
     };
     total +=
       dealerSign(c.type) *
-      c.openInterest *
+      weightOf(c, basis) *
       CONTRACT_MULTIPLIER *
       bsGamma(inputs) *
       hypotheticalSpot *
@@ -133,7 +152,14 @@ function netGexAtSpot(
 export function findGammaFlip(
   contracts: NormalisedContract[],
   params: GreekParams,
+  basis: WeightBasis = 'openInterest',
 ): number | null {
+  // An empty book has no crossing to find. Without this, the all-zero curve
+  // makes the `prevValue === 0` branch below treat spot itself as a crossing
+  // and return it — a real risk on the volume basis before anything has traded,
+  // where the in-scope set is legitimately empty.
+  if (contracts.length === 0) return null;
+
   const S = params.spot;
   const lo = S * 0.85;
   const hi = S * 1.15;
@@ -141,14 +167,14 @@ export function findGammaFlip(
   const width = (hi - lo) / steps;
 
   let prevSpot = lo;
-  let prevValue = netGexAtSpot(contracts, lo, params);
+  let prevValue = netGexAtSpot(contracts, lo, params, basis);
 
   let best: number | null = null;
   let bestDistance = Infinity;
 
   for (let i = 1; i <= steps; i += 1) {
     const spot = lo + i * width;
-    const value = netGexAtSpot(contracts, spot, params);
+    const value = netGexAtSpot(contracts, spot, params, basis);
 
     if (prevValue === 0) {
       const distance = Math.abs(prevSpot - S);
@@ -177,6 +203,12 @@ export interface BuildOptions extends GreekParams {
   symbol: string;
   expirationCount: number;
   strikesEachSide: number;
+  /**
+   * What the exposure is weighted by. Defaults to open interest, which is every
+   * existing caller and every number the dashboard has shown; `volume` produces
+   * the "today's activity" view from the same snapshot.
+   */
+  weightBy?: WeightBasis;
   meta: Omit<DataMeta, 'contractsUsed' | 'ivSources'>;
 }
 
@@ -231,19 +263,30 @@ export function buildPositioning(
   options: BuildOptions,
 ): PositioningData {
   const { spot, expirationCount, strikesEachSide } = options;
+  const basis: WeightBasis = options.weightBy ?? 'openInterest';
   const params: GreekParams = {
     spot,
     riskFreeRate: options.riskFreeRate,
     dividendYield: options.dividendYield,
   };
 
+  /*
+   * Keep only the contracts that carry weight in the chosen basis, before any
+   * strike or expiration is picked. This is what makes the open-interest view
+   * byte-for-byte what it always was: the snapshot now also carries volume-only
+   * contracts (zero OI, traded today), and filtering here drops them straight
+   * back out for the OI basis so they can never shift a displayed strike or the
+   * flip search — while the volume basis keeps exactly them.
+   */
+  const contracts = allContracts.filter((c) => weightOf(c, basis) > 0);
+
   // --- choose the expiration columns -------------------------------------
-  const expirations = Array.from(new Set(allContracts.map((c) => c.expiration)))
+  const expirations = Array.from(new Set(contracts.map((c) => c.expiration)))
     .sort()
     .slice(0, expirationCount);
   const expirationIndex = new Map(expirations.map((e, i) => [e, i]));
 
-  const inScope = allContracts.filter((c) => expirationIndex.has(c.expiration));
+  const inScope = contracts.filter((c) => expirationIndex.has(c.expiration));
 
   // --- choose the strike rows --------------------------------------------
   const allStrikes = Array.from(new Set(inScope.map((c) => c.strike))).sort(
@@ -275,7 +318,7 @@ export function buildPositioning(
     const col = expirationIndex.get(contract.expiration);
     if (col === undefined) continue;
 
-    const metrics = contractMetrics(contract, params);
+    const metrics = contractMetrics(contract, params, basis);
     const row = rowMap.get(contract.strike);
     if (!row) continue;
 
@@ -296,7 +339,7 @@ export function buildPositioning(
     .filter(Boolean);
 
   // --- summary ------------------------------------------------------------
-  const flipLevel = findGammaFlip(inScope, params);
+  const flipLevel = findGammaFlip(inScope, params, basis);
 
   /*
    * The nearest expiration's flip, priced from that expiration alone.
@@ -318,6 +361,7 @@ export function buildPositioning(
       : findGammaFlip(
           inScope.filter((c) => c.expiration === frontExpiration),
           params,
+          basis,
         );
 
   let magnetAbove: Summary['magnetAbove'] = null;

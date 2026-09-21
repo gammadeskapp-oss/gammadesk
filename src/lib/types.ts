@@ -2,6 +2,18 @@ export type OptionType = 'call' | 'put';
 
 export type MetricKey = 'gex' | 'vex' | 'cex' | 'oi';
 
+/**
+ * What a dealer-exposure figure is weighted by.
+ *
+ * `openInterest` is the standing convention and the basis of every number the
+ * dashboard has ever shown — positions accumulated over the life of the chain.
+ * `volume` re-runs the exact same maths against the contracts that actually
+ * traded in the current session, which describes where today's flow is
+ * concentrated rather than where the whole book sits. The two are never
+ * blended; a caller picks one.
+ */
+export type WeightBasis = 'openInterest' | 'volume';
+
 /** Where the implied vol used for a contract came from. */
 export type IvSource = 'quoted' | 'solved' | 'model';
 
@@ -22,6 +34,13 @@ export interface NormalisedContract {
   /** `YYYY-MM-DD` */
   expiration: string;
   openInterest: number;
+  /**
+   * Contracts traded in the current (delayed) session, or 0 when the adapter
+   * cannot see it. Carried alongside open interest so the same normalised
+   * contract can drive either weighting without a second fetch — see
+   * `WeightBasis`.
+   */
+  volume: number;
   iv: number;
   ivSource: IvSource;
   /** Years to expiry, already floored at MIN_T. */

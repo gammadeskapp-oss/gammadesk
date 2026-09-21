@@ -1,14 +1,24 @@
 import 'server-only';
 
 import { getBars } from '../bars/intraday';
+import type { PositioningData } from '../types';
 import { cached } from '../cache';
 import { getPositioningForSymbol } from '../positioning';
 import { nearestStrongWall } from '../simple/walls';
+import { formatExpiryLabel } from '../time';
 import { normaliseSymbol } from '../ticker/bars';
 import { getTradeability } from '../ticker/liquidity';
+import { confirmedByVolume } from './activity';
 import { buildConviction } from './conviction';
 import { buildLevelMap } from './levelMap';
-import type { DecisionContext, DecisionResult, Grade, Verdict, Wall } from './types';
+import type {
+  ActivityLevels,
+  DecisionContext,
+  DecisionResult,
+  Grade,
+  Verdict,
+  Wall,
+} from './types';
 
 export type { DecisionResult } from './types';
 
@@ -138,8 +148,45 @@ function asWall(hit: { strike: number; gex: number } | null, spot: number): Wall
   };
 }
 
+/**
+ * The volume-weighted twin of the standard levels, off the same snapshot.
+ *
+ * Returns null only when the volume pass could not be built at all. When it ran
+ * but nothing had traded this session, `available` is false and the walls and
+ * ladder are simply empty — a normal pre-open state, not a failure.
+ */
+function buildActivity(volume: PositioningData): ActivityLevels {
+  const { summary, spot } = volume;
+  const strikeGex = volume.rows.map((r) => ({ strike: r.strike, gex: r.total.gex }));
+  const available = strikeGex.some(
+    (s) => Number.isFinite(s.gex) && Math.abs(s.gex) > 0,
+  );
+
+  return {
+    available,
+    walls: wallsFrom(volume.rows, spot),
+    levelMap: buildLevelMap(strikeGex, spot, summary),
+    flipLevel: summary.flipLevel,
+    frontFlipLevel: summary.frontFlipLevel,
+    frontExpiryLabel: summary.frontExpiration
+      ? formatExpiryLabel(summary.frontExpiration)
+      : null,
+  };
+}
+
 async function build(symbol: string): Promise<DecisionResult> {
-  const positioning = await getPositioningForSymbol(symbol, EXPIRATIONS);
+  /*
+   * Open interest and volume, built from one shared chain snapshot (see
+   * `cachedSymbolSnapshot`), so the second weighting costs no upstream request.
+   * The volume pass is allowed to fail on its own — the page is the
+   * open-interest page, and losing the secondary view is not worth losing it.
+   */
+  const [positioning, volumePositioning] = await Promise.all([
+    getPositioningForSymbol(symbol, EXPIRATIONS),
+    getPositioningForSymbol(symbol, EXPIRATIONS, 'volume').catch(
+      (): PositioningData | null => null,
+    ),
+  ]);
   const { summary, spot } = positioning;
 
   const walls = wallsFrom(positioning.rows, spot);
@@ -147,6 +194,10 @@ async function build(symbol: string): Promise<DecisionResult> {
     strike: r.strike,
     gex: r.total.gex,
   }));
+  const levelMap = buildLevelMap(strikeGex, spot, summary);
+
+  const activity = volumePositioning ? buildActivity(volumePositioning) : null;
+  const confirmed = confirmedByVolume(levelMap, activity?.levelMap ?? null, spot);
 
   const flipLevel = summary.flipLevel;
   const context: DecisionContext = {
@@ -155,6 +206,10 @@ async function build(symbol: string): Promise<DecisionResult> {
     regime: summary.regime,
     mood: summary.regime === 'positive' ? 'calm' : 'wild',
     flipLevel,
+    frontFlipLevel: summary.frontFlipLevel,
+    frontExpiryLabel: summary.frontExpiration
+      ? formatExpiryLabel(summary.frontExpiration)
+      : null,
     aboveFlip: flipLevel === null ? null : spot > flipLevel,
     flipDistancePct:
       flipLevel === null || flipLevel === 0
@@ -221,7 +276,9 @@ async function build(symbol: string): Promise<DecisionResult> {
     walls,
     // Built from the same rows and the same wall rule as the lists above, so
     // the two views of section 2 cannot contradict each other.
-    levelMap: buildLevelMap(strikeGex, spot, summary),
+    levelMap,
+    activity,
+    confirmedByVolume: confirmed,
     conviction,
     verdict,
     hasOptions: walls.above.length > 0 || walls.below.length > 0,

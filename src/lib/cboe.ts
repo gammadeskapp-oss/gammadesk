@@ -245,14 +245,20 @@ export async function fetchCboeSnapshot(
     }
 
     const openInterest = Number(c.open_interest ?? 0);
-    if (!Number.isFinite(openInterest) || openInterest <= 0) continue;
+    const oi = Number.isFinite(openInterest) && openInterest > 0 ? openInterest : 0;
+    const volume =
+      Number.isFinite(contractVolume) && contractVolume > 0 ? contractVolume : 0;
+    // Kept when it holds open interest or traded today; the OI views filter the
+    // volume-only ones back out, the volume view wants them.
+    if (oi <= 0 && volume <= 0) continue;
 
     quotes.push({
       ticker: c.option,
       type: parsed.type,
       strike: parsed.strike,
       expiration: parsed.expiration,
-      openInterest,
+      openInterest: oi,
+      volume,
       quotedIv: typeof c.iv === 'number' && c.iv > 0 ? c.iv : null,
       price: usablePrice(c),
     });
@@ -263,9 +269,9 @@ export async function fetchCboeSnapshot(
   }
   if (quotes.length === 0) {
     throw new ChainError(
-      `No ${symbol} contracts with open interest.`,
+      `No ${symbol} contracts with open interest or volume.`,
       200,
-      'Every contract returned had zero open interest.',
+      'Every contract returned had zero open interest and zero traded volume.',
     );
   }
 

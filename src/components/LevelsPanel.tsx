@@ -1,11 +1,65 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { InfoTip } from '@/components/InfoTip';
 import type { LevelKind, LevelMap, LevelRung } from '@/lib/decision/levelMap';
-import type { Wall } from '@/lib/decision/types';
+import type { ActivityLevels, Wall } from '@/lib/decision/types';
 import { formatPrice, formatStrike, formatUsd } from '@/lib/format';
 import type { TooltipKey } from '@/lib/tooltips';
+
+/**
+ * Which weighting drives the levels: standing open interest, or the contracts
+ * that actually traded this session. Remembered per device — see the effect in
+ * `LevelsPanel` — because it is a reading preference, not something the server
+ * needs to know.
+ */
+type Weighting = 'standard' | 'activity';
+
+const WEIGHTING_STORAGE_KEY = 'gammadesk:levels-weighting';
+const WEIGHTING_EVENT = 'gammadesk:levels-weighting-change';
+const DEFAULT_WEIGHTING: Weighting = 'standard';
+
+const WEIGHTING_LABEL: Record<Weighting, string> = {
+  standard: 'Standard',
+  activity: "Today's activity",
+};
+
+/*
+ * The choice is read through an external store rather than seeded into
+ * `useState`, for the same reason the context band's horizon is: the server has
+ * no storage, so seeding state from `localStorage` would make the first client
+ * render disagree with the server's and throw a hydration mismatch. The server
+ * renders the Standard default, the browser re-renders with the stored value,
+ * and hydration stays consistent. Every accessor is wrapped because storage
+ * throws in private windows and when site data is blocked.
+ */
+function readWeighting(): Weighting {
+  try {
+    return window.localStorage.getItem(WEIGHTING_STORAGE_KEY) === 'activity'
+      ? 'activity'
+      : 'standard';
+  } catch {
+    return DEFAULT_WEIGHTING;
+  }
+}
+
+function writeWeighting(next: Weighting): void {
+  try {
+    window.localStorage.setItem(WEIGHTING_STORAGE_KEY, next);
+  } catch {
+    // Storage unavailable; the choice holds for this view but will not persist.
+  }
+  window.dispatchEvent(new CustomEvent(WEIGHTING_EVENT));
+}
+
+function subscribeWeighting(onChange: () => void): () => void {
+  window.addEventListener('storage', onChange);
+  window.addEventListener(WEIGHTING_EVENT, onChange);
+  return () => {
+    window.removeEventListener('storage', onChange);
+    window.removeEventListener(WEIGHTING_EVENT, onChange);
+  };
+}
 
 /**
  * Section 2, and the switch between its two readings.
@@ -93,7 +147,32 @@ function LabelBadge({ kind }: { kind: LevelKind }) {
 /** Labels that only ever sit on a real strike. */
 const STRIKE_LABELS: LevelKind[] = ['wall', 'heaviest', 'ceiling', 'floor'];
 
-function RungRow({ rung, showExposure }: { rung: LevelRung; showExposure: boolean }) {
+/**
+ * The badge that marks a Standard-view level today's trading also backs.
+ *
+ * Only ever shown on the open-interest view: it is a statement about volume
+ * agreeing with open interest, which is meaningless on the volume view itself.
+ */
+function ConfirmedChip() {
+  return (
+    <InfoTip for="levelConfirmedByVolume">
+      <span className="border border-pos/50 bg-pos/10 px-1.5 py-px text-[10px] font-bold tracking-[0.06em] text-pos">
+        CONFIRMED BY TODAY&rsquo;S TRADING
+      </span>
+    </InfoTip>
+  );
+}
+
+function RungRow({
+  rung,
+  showExposure,
+  confirmed,
+}: {
+  rung: LevelRung;
+  showExposure: boolean;
+  /** True on the Standard view when this level also appears in the volume view. */
+  confirmed: boolean;
+}) {
   const near = !rung.isSpot && Math.abs(rung.distancePct) < 0.5;
 
   /*
@@ -122,6 +201,7 @@ function RungRow({ rung, showExposure }: { rung: LevelRung; showExposure: boolea
         {rung.labels.map((l) => (
           <LabelBadge key={l} kind={l} />
         ))}
+        {confirmed && <ConfirmedChip />}
       </span>
 
       {/*
@@ -158,10 +238,13 @@ function LevelMapView({
   map,
   asOfLabel,
   showExposure,
+  confirmedPrices,
 }: {
   map: LevelMap;
   asOfLabel: string;
   showExposure: boolean;
+  /** Prices to tag "confirmed by today's trading"; empty on the volume view. */
+  confirmedPrices: Set<number>;
 }) {
   return (
     <div className="border border-term-line">
@@ -212,7 +295,12 @@ function LevelMapView({
       ) : (
         <ul className="divide-y divide-term-line/60">
           {map.rungs.map((r) => (
-            <RungRow key={r.price} rung={r} showExposure={showExposure} />
+            <RungRow
+              key={r.price}
+              rung={r}
+              showExposure={showExposure}
+              confirmed={confirmedPrices.has(r.price)}
+            />
           ))}
         </ul>
       )}
@@ -224,15 +312,18 @@ function WallRow({
   wall,
   spot,
   showExposure,
+  confirmed,
 }: {
   wall: Wall;
   spot: number;
   /** False on thin chains — strength and the dollar figure are both GEX. */
   showExposure: boolean;
+  /** True on the Standard view when this strike also appears in the volume view. */
+  confirmed: boolean;
 }) {
   const pct = Math.round(wall.strength * 100);
   return (
-    <li className="flex items-center gap-2.5 px-3 py-2 text-xs tabular-nums">
+    <li className="flex flex-wrap items-center gap-2.5 px-3 py-2 text-xs tabular-nums">
       <span className="w-14 shrink-0 font-bold text-term-text">
         {formatStrike(wall.strike)}
       </span>
@@ -271,6 +362,11 @@ function WallRow({
           exposure suppressed
         </span>
       )}
+      {confirmed && (
+        <span className="ml-auto">
+          <ConfirmedChip />
+        </span>
+      )}
     </li>
   );
 }
@@ -283,6 +379,7 @@ function WallList({
   tip,
   spot,
   showExposure,
+  confirmedPrices,
 }: {
   title: string;
   list: Wall[];
@@ -290,6 +387,8 @@ function WallList({
   tip: TooltipKey;
   spot: number;
   showExposure: boolean;
+  /** Strikes to tag "confirmed by today's trading"; empty on the volume view. */
+  confirmedPrices: Set<number>;
 }) {
   return (
     <div className="border border-term-line">
@@ -321,7 +420,13 @@ function WallList({
       ) : (
         <ul className="divide-y divide-term-line/60">
           {list.map((w) => (
-            <WallRow key={w.strike} wall={w} spot={spot} showExposure={showExposure} />
+            <WallRow
+              key={w.strike}
+              wall={w}
+              spot={spot}
+              showExposure={showExposure}
+              confirmed={confirmedPrices.has(w.strike)}
+            />
           ))}
         </ul>
       )}
@@ -335,14 +440,47 @@ export function LevelsPanel({
   spot,
   asOfLabel,
   showExposure,
+  frontFlipLevel,
+  frontExpiryLabel,
+  activity,
+  confirmedByVolume,
 }: {
   walls: { above: Wall[]; below: Wall[] };
   levelMap: LevelMap;
   spot: number;
   asOfLabel: string;
   showExposure: boolean;
+  /** The standard (open-interest) front-week flip, for the comparability line. */
+  frontFlipLevel: number | null;
+  frontExpiryLabel: string | null;
+  /** The volume-weighted twin, or null when it could not be built. */
+  activity: ActivityLevels | null;
+  /** Standard level prices today's trading also backs. */
+  confirmedByVolume: number[];
 }) {
   const [view, setView] = useState<View>('walls');
+  const weighting = useSyncExternalStore(
+    subscribeWeighting,
+    readWeighting,
+    () => DEFAULT_WEIGHTING,
+  );
+  const choose = (next: Weighting) => writeWeighting(next);
+
+  // The volume view can be asked for but not exist (never built), or exist but
+  // be empty (nothing traded yet). Fall back to Standard for the former so the
+  // switch can never strand the reader on a blank panel.
+  const onActivity = weighting === 'activity' && activity !== null;
+  const active = onActivity && activity ? activity : { walls, levelMap };
+  const activeFrontFlip = onActivity && activity ? activity.frontFlipLevel : frontFlipLevel;
+  const activeFrontLabel =
+    onActivity && activity ? activity.frontExpiryLabel : frontExpiryLabel;
+
+  // Tags are a claim that volume agrees with open interest, so they belong only
+  // on the Standard view; on the volume view itself the set is empty.
+  const confirmedPrices = onActivity ? new Set<number>() : new Set(confirmedByVolume);
+
+  // Nothing traded yet: show the reason rather than empty wall lists.
+  const activityEmpty = onActivity && activity !== null && !activity.available;
 
   return (
     <section className="space-y-2">
@@ -378,28 +516,113 @@ export function LevelsPanel({
         </div>
       </div>
 
+      {/*
+        The weighting switch — the primary control, on its own full-width row.
+        Standard is standing open interest, the number every other view here
+        uses; Today's activity re-runs the same maths on the contracts that
+        actually traded this session. Disabled when the volume pass could not be
+        built at all, rather than offering a button that leads nowhere.
+      */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <div
+          role="group"
+          aria-label="Level weighting"
+          className="flex items-center gap-1"
+        >
+          {(['standard', 'activity'] as const).map((w) => {
+            const disabled = w === 'activity' && activity === null;
+            const selected = weighting === w && !disabled;
+            return (
+              <button
+                key={w}
+                type="button"
+                disabled={disabled}
+                onClick={() => choose(w)}
+                aria-pressed={selected}
+                title={
+                  disabled
+                    ? "Today's trading could not be read for this ticker."
+                    : undefined
+                }
+                className={`border px-2.5 py-1 text-2xs font-bold tracking-[0.08em] transition-colors ${
+                  selected
+                    ? 'border-pos/70 bg-pos/15 text-pos'
+                    : disabled
+                      ? 'cursor-not-allowed border-term-line/60 text-term-faint/50'
+                      : 'border-term-line text-term-faint hover:border-pos/50 hover:text-term-dim'
+                }`}
+              >
+                {WEIGHTING_LABEL[w]}
+              </button>
+            );
+          })}
+        </div>
+        <p className="min-w-0 flex-1 text-2xs leading-relaxed text-term-faint">
+          {onActivity
+            ? 'Based on today’s trading — the same flip, ceiling and floor, weighted by the contracts that changed hands this session rather than by everything still open.'
+            : 'Based on standing open interest — every position still open on the chain. Switch to today’s activity to weight by what actually traded this session.'}
+        </p>
+      </div>
+
       <div className="panel space-y-2 p-2">
-        {view === 'walls' ? (
+        {activityEmpty ? (
+          <div className="border border-term-line px-4 py-8 text-center text-xs text-term-dim">
+            <p className="text-term-text">Nothing has traded yet in today’s session.</p>
+            <p className="mx-auto mt-2 max-w-md leading-relaxed">
+              These levels come from the contracts that changed hands today, and
+              so far none have. Check back once the market has been open for a
+              while, or use the Standard view, which is built from open interest
+              and is available now.
+            </p>
+          </div>
+        ) : view === 'walls' ? (
           <>
             <WallList
               title="Walls above"
-              list={walls.above}
+              list={active.walls.above}
               tone="bull"
               tip="wallsAbove"
               spot={spot}
               showExposure={showExposure}
+              confirmedPrices={confirmedPrices}
             />
             <WallList
               title="Walls below"
-              list={walls.below}
+              list={active.walls.below}
               tone="bear"
               tip="wallsBelow"
               spot={spot}
               showExposure={showExposure}
+              confirmedPrices={confirmedPrices}
             />
           </>
         ) : (
-          <LevelMapView map={levelMap} asOfLabel={asOfLabel} showExposure={showExposure} />
+          <LevelMapView
+            map={active.levelMap}
+            asOfLabel={asOfLabel}
+            showExposure={showExposure}
+            confirmedPrices={confirmedPrices}
+          />
+        )}
+
+        {/*
+          The front-week flip, always shown when there is one. Other apps
+          typically quote a single front expiry, so this is the number that
+          lines up with theirs — the full-chain flip above blends several
+          expiries and will not.
+        */}
+        {!activityEmpty && activeFrontFlip !== null && (
+          <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1 text-2xs leading-relaxed text-term-faint">
+            <span className="label-xs text-pos/90">Front-week flip</span>
+            <span className="font-bold tabular-nums text-term-text">
+              {formatPrice(activeFrontFlip)}
+            </span>
+            <span>
+              {activeFrontLabel ? `the ${activeFrontLabel} expiry on its own` : 'the nearest expiry on its own'}
+              {' — the single-expiry number most other apps show, so ours lines up with theirs.'}
+            </span>
+            <InfoTip for="levelFrontFlip" />
+          </p>
         )}
 
         {!showExposure ? (
@@ -435,9 +658,9 @@ export function LevelsPanel({
               is wrong for a name, every level on this ladder moves with it.
               Rungs are evenly spaced for legibility and are not to scale; the
               right-hand column carries the true distance. A wall is a strike
-              holding at least {Math.round(levelMap.rule.threshold * 100)}% of
+              holding at least {Math.round(active.levelMap.rule.threshold * 100)}% of
               the gamma of the biggest strike among the{' '}
-              {levelMap.rule.neighbourhood} nearest on its own side.
+              {active.levelMap.rule.neighbourhood} nearest on its own side.
             </span>
             <InfoTip for="levelNaiveGex" />
           </p>

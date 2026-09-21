@@ -353,8 +353,13 @@ export async function fetchPolygonChain(
     const type = details?.contract_type;
     if (!strike || !expiration || (type !== 'call' && type !== 'put')) continue;
 
-    const openInterest = Number(raw.open_interest ?? 0);
-    if (!Number.isFinite(openInterest) || openInterest <= 0) continue;
+    const openInterestRaw = Number(raw.open_interest ?? 0);
+    const openInterest =
+      Number.isFinite(openInterestRaw) && openInterestRaw > 0 ? openInterestRaw : 0;
+    const volumeRaw = Number(raw.day?.volume ?? 0);
+    const volume = Number.isFinite(volumeRaw) && volumeRaw > 0 ? volumeRaw : 0;
+    // Kept when it holds open interest or traded today; see the Cboe adapter.
+    if (openInterest <= 0 && volume <= 0) continue;
 
     const iv = Number(raw.implied_volatility);
     quotes.push({
@@ -363,6 +368,7 @@ export async function fetchPolygonChain(
       strike,
       expiration,
       openInterest,
+      volume,
       quotedIv: Number.isFinite(iv) && iv > 0 ? iv : null,
       price: usablePrice(raw),
     });

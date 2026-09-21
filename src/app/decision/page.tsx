@@ -185,6 +185,10 @@ function Decision({
             spot={c.spot}
             asOfLabel={c.asOfLabel}
             showExposure={showExposure}
+            frontFlipLevel={c.frontFlipLevel}
+            frontExpiryLabel={c.frontExpiryLabel}
+            activity={data.activity}
+            confirmedByVolume={data.confirmedByVolume}
           />
 
           {methodology && (

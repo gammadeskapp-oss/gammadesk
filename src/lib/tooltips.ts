@@ -308,6 +308,14 @@ const ENTRIES = {
       'Same solve, run on the nearest expiration alone. It appears only when it lands somewhere different from the full-chain flip. When the two disagree, the front week is the one the next few days are being traded against, and it moves fastest as that expiry decays out of the book.',
   },
 
+  levelConfirmedByVolume: {
+    label: 'Confirmed by today’s trading',
+    plain:
+      'This level also shows up when you weight by the contracts that actually traded today, not just by everything still open.',
+    detail:
+      'The Standard view is built from open interest — every position still open on the chain. This tag means the same price is also a level in the Today’s activity view, which re-runs the identical maths on this session’s volume. A level both weightings agree on has today’s flow behind it as well as the standing book, not just one of the two. Strikes must match exactly; the flip, being a solved crossing rather than a strike, matches when the two land within a tenth of a percent of spot.',
+  },
+
   levelDistance: {
     label: '% from spot',
     plain:
