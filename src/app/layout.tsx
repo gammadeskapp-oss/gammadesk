@@ -1,5 +1,6 @@
 import { Suspense, type ReactNode } from 'react';
 import type { Metadata, Viewport } from 'next';
+import { CanonicalHost } from '@/components/CanonicalHost';
 import { ServiceWorker } from '@/components/ServiceWorker';
 import { SessionNotice } from '@/components/SessionNotice';
 import { Sidebar } from '@/components/Sidebar';
@@ -89,6 +90,7 @@ export default function RootLayout({
             {children}
           </div>
         </div>
+        <CanonicalHost />
         <ServiceWorker />
       </body>
     </html>
