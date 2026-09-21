@@ -13,7 +13,9 @@ import 'server-only';
  *
  * Env vars (set on the Vercel project):
  *   RESEND_API_KEY        — Resend API key (server-only).
- *   RESEND_AUDIENCE_ID    — the Audience subscribers are stored in.
+ *   RESEND_AUDIENCE_ID    — the Segment subscribers are stored in (Resend
+ *                           renamed Audiences to Segments; the var keeps its
+ *                           name, its value is now a segment id).
  *   EMAIL_FROM            — e.g. "GammaDesk <brief@gammadesk.app>".
  *   EMAIL_TOKEN_SECRET    — HMAC secret for confirm/unsubscribe links.
  *   EMAIL_MAILING_ADDRESS — physical postal address for the email footer.

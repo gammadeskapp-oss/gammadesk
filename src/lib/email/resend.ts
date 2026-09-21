@@ -6,11 +6,14 @@ import { emailConfig } from './config';
  * A thin Resend REST client, used through `fetch` so the project takes on no
  * new dependency and the API key stays server-side.
  *
- * Subscribers live in a Resend Audience; this module is the *only* place the
- * app talks to that list, and it never copies it into our own storage. The
- * daily brief goes out as a Resend broadcast, so even the send never pulls the
- * addresses down — Resend fans it out and appends its managed one-click
- * unsubscribe.
+ * Resend renamed Audiences to Segments: contacts are now global (top-level
+ * `/contacts`) and organised into segments, rather than living under an
+ * audience. `RESEND_AUDIENCE_ID` now holds a *segment* id — the env var keeps
+ * its name so no Vercel setting has to change. This module is the *only* place
+ * the app talks to that list, and it never copies it into our own storage. The
+ * daily brief goes out as a Resend broadcast targeting the segment, so even the
+ * send never pulls the addresses down — Resend fans it out and appends its
+ * managed one-click unsubscribe.
  */
 
 const BASE = 'https://api.resend.com';
@@ -67,44 +70,57 @@ export interface ResendContact {
 }
 
 /**
- * Create the contact as unsubscribed (pending), or leave an existing one as it
- * is. Idempotent: a second signup for the same address does not resurrect a
- * confirmed contact as pending, because Resend keys on the email and a 409 /
- * already-exists is treated as success.
+ * Create the contact as unsubscribed (pending) and place it in our segment, or
+ * leave an existing one as it is. Idempotent: a second signup for the same
+ * address does not resurrect a confirmed contact as pending, because Resend
+ * keys on the email and a 409 / already-exists is treated as success (a repeat
+ * signup is always someone who already went through this same segment).
  */
 export async function createPendingContact(email: string): Promise<void> {
   const c = requireConfig();
   try {
-    await call(`/audiences/${c.audienceId}/contacts`, {
+    await call('/contacts', {
       apiKey: c.apiKey,
       method: 'POST',
-      // unsubscribed:true means no broadcast will reach them until they confirm.
-      body: JSON.stringify({ email, unsubscribed: true }),
+      body: JSON.stringify({
+        email,
+        // unsubscribed:true means no broadcast will reach them until they confirm.
+        unsubscribed: true,
+        // `segments` takes an array of { id } — this is what puts the signup
+        // into the segment named by RESEND_AUDIENCE_ID.
+        segments: [{ id: c.audienceId }],
+      }),
     });
   } catch (error) {
-    // An address already in the audience is not an error for our purposes.
+    // An address already known to Resend is not an error for our purposes.
     if (error instanceof ResendError && (error.status === 409 || error.status === 422)) return;
     throw error;
   }
 }
 
-/** Flip a contact's subscribed state. Confirming sets subscribed = true. */
+/**
+ * Flip a contact's subscribed state. Confirming sets subscribed = true.
+ * Contacts are global now, so this is a top-level PATCH by email.
+ */
 export async function setContactSubscribed(email: string, subscribed: boolean): Promise<void> {
   const c = requireConfig();
-  await call(`/audiences/${c.audienceId}/contacts/${encodeURIComponent(email)}`, {
+  await call(`/contacts/${encodeURIComponent(email)}`, {
     apiKey: c.apiKey,
     method: 'PATCH',
     body: JSON.stringify({ unsubscribed: !subscribed }),
   });
 }
 
-/** The audience's contacts, for the owner-only admin list. */
+/** The segment's contacts, for the owner-only admin list. */
 export async function listContacts(): Promise<ResendContact[]> {
   const c = requireConfig();
-  const body = await call<{ data?: ResendContact[] }>(`/audiences/${c.audienceId}/contacts`, {
-    apiKey: c.apiKey,
-    method: 'GET',
-  });
+  const body = await call<{ data?: ResendContact[] }>(
+    `/contacts?segment_id=${encodeURIComponent(c.audienceId)}`,
+    {
+      apiKey: c.apiKey,
+      method: 'GET',
+    },
+  );
   return body.data ?? [];
 }
 
@@ -146,7 +162,7 @@ export async function sendTransactionalEmail(opts: {
  */
 export const RESEND_UNSUBSCRIBE_VARIABLE = '{{{RESEND_UNSUBSCRIBE_URL}}}';
 
-/** Create a broadcast to the whole audience and send it immediately. */
+/** Create a broadcast to the whole segment and send it immediately. */
 export async function sendBroadcast(opts: {
   subject: string;
   html: string;
@@ -158,7 +174,8 @@ export async function sendBroadcast(opts: {
     apiKey: c.apiKey,
     method: 'POST',
     body: JSON.stringify({
-      audience_id: c.audienceId,
+      // Broadcasts now target a segment, not an audience.
+      segment_id: c.audienceId,
       from: c.from,
       reply_to: BRIEF_REPLY_TO,
       subject: opts.subject,
