@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Footer } from '@/components/Footer';
+import { CopyTradingViewButton } from '@/components/daily/CopyTradingViewButton';
+import { buildLevelCode } from '@/lib/tradingview/code';
 import { getPositioning } from '@/lib/positioning';
 import { buildSimpleRead } from '@/lib/simple/translate';
 import { fetchCboeQuotes } from '@/lib/x/cboeQuote';
@@ -155,6 +157,17 @@ export default async function DailyPage() {
   const mood = read ? moodHeadline(read.mood) : null;
   const highlights = dailyHighlights(brief);
 
+  // Today's code for the "Copy for TradingView" button — null unless all three
+  // levels are present, in which case the button is simply not shown.
+  const tvCode = summary
+    ? buildLevelCode({
+        symbol: 'SPY',
+        floor: summary.magnetBelow?.strike ?? null,
+        ceiling: summary.magnetAbove?.strike ?? null,
+        flip: summary.flipLevel,
+      })
+    : null;
+
   // The freshest "as of" we can show, preferring the map's own timestamp.
   const quoteIsos = [...quotes.values()].map((q) => q.quoteIso).filter(Boolean).sort();
   const asOfIso = positioning?.meta.quoteDateIso ?? quoteIsos.slice(-1)[0] ?? null;
@@ -205,6 +218,8 @@ export default async function DailyPage() {
                 {read.conflict}
               </p>
             )}
+
+            {tvCode && <CopyTradingViewButton code={tvCode} />}
           </section>
         ) : (
           <Updating asOf={staleness?.asOfLabel ?? null} />

@@ -1,0 +1,91 @@
+//@version=6
+// GammaDesk Levels — https://gammadesk.app
+//
+// Paste one code into the "Levels code" input below and this indicator draws
+// today's GammaDesk decision levels on your chart:
+//
+//   • Floor   (red)            — where selling has tended to get absorbed
+//   • Ceiling (green)          — where buying has tended to stall
+//   • Flip    (yellow, dashed) — the balance point between the two
+//
+// The code looks like:  SPY|760|765|763.21
+// which is:             SYMBOL | FLOOR | CEILING | FLIP
+//
+// Copy today's code straight from the "Copy for TradingView" button on
+// gammadesk.app/daily (and each ticker page). Levels update through the day,
+// so grab a fresh code when you want fresh levels.
+//
+// Not financial advice. For informational and educational purposes only.
+indicator("GammaDesk Levels", "GD Levels", overlay = true, max_lines_count = 10, max_labels_count = 10)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+codeInput = input.string("SPY|760|765|763.21", "Levels code",
+     tooltip = "Paste today's code from gammadesk.app, e.g. SPY|760|765|763.21  (SYMBOL|FLOOR|CEILING|FLIP)")
+floorColor   = input.color(color.new(color.red, 0),    "Floor colour",   group = "Style")
+ceilingColor = input.color(color.new(color.green, 0),  "Ceiling colour", group = "Style")
+flipColor    = input.color(color.new(color.yellow, 0), "Flip colour",    group = "Style")
+lineWidth    = input.int(2, "Line width", minval = 1, maxval = 5, group = "Style")
+showLabels   = input.bool(true, "Show labels", group = "Style")
+showMark     = input.bool(true, "Show gammadesk.app watermark", group = "Style")
+
+// ── Parse the code once ───────────────────────────────────────────────────────
+// Parsed on the first bar and cached, so retyping the input reparses but the
+// per-bar cost is nil.
+var string sym       = ""
+var float  floorLvl  = na
+var float  ceilLvl   = na
+var float  flipLvl   = na
+var bool   parsedOk  = false
+
+if barstate.isfirst
+    parts = str.split(codeInput, "|")
+    n = array.size(parts)
+    if n >= 4
+        sym      := str.upper(array.get(parts, 0))
+        floorLvl := str.tonumber(array.get(parts, 1))
+        ceilLvl  := str.tonumber(array.get(parts, 2))
+        flipLvl  := str.tonumber(array.get(parts, 3))
+        parsedOk := not na(floorLvl) and not na(ceilLvl) and not na(flipLvl)
+
+// ── Draw the levels ───────────────────────────────────────────────────────────
+// Full-width horizontal lines redrawn on the last bar. extend.both keeps them
+// spanning the whole chart regardless of the anchor bars.
+var line  floorLine = na
+var line  ceilLine  = na
+var line  flipLine  = na
+var label floorLbl  = na
+var label ceilLbl   = na
+var label flipLbl   = na
+
+f_label(existing, price, txt, col) =>
+    label.delete(existing)
+    label.new(bar_index, price, text = txt, xloc = xloc.bar_index, yloc = yloc.price,
+         style = label.style_label_left, color = color.new(col, 85), textcolor = col, size = size.small)
+
+if barstate.islast and parsedOk
+    line.delete(floorLine)
+    line.delete(ceilLine)
+    line.delete(flipLine)
+
+    floorLine := line.new(bar_index - 1, floorLvl, bar_index, floorLvl,
+         xloc = xloc.bar_index, extend = extend.both, color = floorColor, width = lineWidth, style = line.style_solid)
+    ceilLine  := line.new(bar_index - 1, ceilLvl, bar_index, ceilLvl,
+         xloc = xloc.bar_index, extend = extend.both, color = ceilingColor, width = lineWidth, style = line.style_solid)
+    flipLine  := line.new(bar_index - 1, flipLvl, bar_index, flipLvl,
+         xloc = xloc.bar_index, extend = extend.both, color = flipColor, width = lineWidth, style = line.style_dashed)
+
+    if showLabels
+        floorLbl := f_label(floorLbl, floorLvl, "Floor "   + str.tostring(floorLvl),   floorColor)
+        ceilLbl  := f_label(ceilLbl,  ceilLvl,  "Ceiling " + str.tostring(ceilLvl),    ceilingColor)
+        flipLbl  := f_label(flipLbl,  flipLvl,  "Flip "    + str.tostring(flipLvl),     flipColor)
+    else
+        label.delete(floorLbl)
+        label.delete(ceilLbl)
+        label.delete(flipLbl)
+
+// ── Watermark ─────────────────────────────────────────────────────────────────
+var table mark = table.new(position.bottom_right, 1, 1)
+if barstate.islast and showMark
+    markText = parsedOk and str.length(sym) > 0 ? sym + " · gammadesk.app" : "gammadesk.app"
+    table.cell(mark, 0, 0, markText, text_color = color.new(color.gray, 20), text_size = size.small,
+         bgcolor = color.new(color.gray, 90))

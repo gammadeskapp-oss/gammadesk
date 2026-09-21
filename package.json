@@ -45,9 +45,10 @@
     "verify:tos-lock": "node scripts/verify-tos-lock.mjs",
     "verify:x-poster": "node scripts/verify-x-poster.mjs",
     "verify:daily": "node scripts/verify-daily.mjs",
+    "verify:tradingview": "node scripts/verify-tradingview.mjs",
     "verify:health": "node scripts/verify-health.mjs",
     "verify:news": "node scripts/verify-news.mjs",
-    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:regime && npm run verify:retests && npm run verify:staleness && npm run verify:market-phase && npm run verify:context && npm run verify:context-band && npm run verify:tos-scanner && npm run verify:tos-lock && npm run verify:x-poster && npm run verify:daily && npm run verify:health && npm run verify:news && npm run verify:events && npm run verify:research && npm run verify:scanner && npm run verify:scanner-record && npm run verify:movers && npm run verify:errors && npm run verify:history && npm run verify:track-record && npm run verify:positioning-record && npm run verify:what-changed && npm run verify:session-history && npm run verify:analogues && npm run verify:macro && npm run verify:episodic"
+    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:regime && npm run verify:retests && npm run verify:staleness && npm run verify:market-phase && npm run verify:context && npm run verify:context-band && npm run verify:tos-scanner && npm run verify:tos-lock && npm run verify:x-poster && npm run verify:daily && npm run verify:tradingview && npm run verify:health && npm run verify:news && npm run verify:events && npm run verify:research && npm run verify:scanner && npm run verify:scanner-record && npm run verify:movers && npm run verify:errors && npm run verify:history && npm run verify:track-record && npm run verify:positioning-record && npm run verify:what-changed && npm run verify:session-history && npm run verify:analogues && npm run verify:macro && npm run verify:episodic"
   },
   "dependencies": {
     "@vercel/blob": "^2.7.0",
