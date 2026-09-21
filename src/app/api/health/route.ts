@@ -7,6 +7,7 @@ import { detectedBlobAccess, storeStatus } from '@/lib/jsonStore';
 import { readLog } from '@/lib/log/store';
 import { readLog as readXLog, readPause as readXPause } from '@/lib/x/store';
 import { postingEnabledFromValue } from '@/lib/x/flags';
+import { emailConfig, MAILING_ADDRESS_PLACEHOLDER } from '@/lib/email/config';
 import { marketToday } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -315,6 +316,18 @@ export async function GET(request: Request) {
         CRON_SECRET: present('CRON_SECRET'),
         POLYGON_API_KEY: present('POLYGON_API_KEY'),
         DISCORD_WEBHOOK_URL: present('DISCORD_WEBHOOK_URL'),
+        /*
+         * Email brief. Presence only, never values. `mailingAddressIsPlaceholder`
+         * is true when EMAIL_MAILING_ADDRESS is unset or still the shipped
+         * placeholder — the footer is then legally incomplete for CAN-SPAM.
+         */
+        RESEND_API_KEY: present('RESEND_API_KEY'),
+        RESEND_AUDIENCE_ID: present('RESEND_AUDIENCE_ID'),
+        EMAIL_FROM: present('EMAIL_FROM'),
+        EMAIL_TOKEN_SECRET: present('EMAIL_TOKEN_SECRET'),
+        EMAIL_MAILING_ADDRESS: present('EMAIL_MAILING_ADDRESS'),
+        mailingAddressIsPlaceholder:
+          emailConfig().mailingAddress === MAILING_ADDRESS_PLACEHOLDER,
       },
       storage: {
         kind: status.kind,

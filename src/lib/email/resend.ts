@@ -108,6 +108,13 @@ export async function listContacts(): Promise<ResendContact[]> {
   return body.data ?? [];
 }
 
+/**
+ * Reply-to for every brief email. Resend sends from the `EMAIL_FROM` identity
+ * (a domain that may not accept inbound mail), so replies are pointed at a real
+ * monitored inbox instead of bouncing.
+ */
+export const BRIEF_REPLY_TO = 'gammadesk.app@gmail.com';
+
 /** Send a one-off transactional email (the confirmation). */
 export async function sendTransactionalEmail(opts: {
   to: string;
@@ -123,6 +130,7 @@ export async function sendTransactionalEmail(opts: {
     body: JSON.stringify({
       from: c.from,
       to: [opts.to],
+      reply_to: BRIEF_REPLY_TO,
       subject: opts.subject,
       html: opts.html,
       text: opts.text,
@@ -152,6 +160,7 @@ export async function sendBroadcast(opts: {
     body: JSON.stringify({
       audience_id: c.audienceId,
       from: c.from,
+      reply_to: BRIEF_REPLY_TO,
       subject: opts.subject,
       html: opts.html,
       text: opts.text,

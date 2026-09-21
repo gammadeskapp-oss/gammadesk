@@ -3,6 +3,9 @@ import Link from 'next/link';
 import { Footer } from '@/components/Footer';
 import { LevelBar } from '@/components/daily/LevelBar';
 import { TickerLinks } from '@/components/daily/TickerLinks';
+import { CopyTradingViewButton } from '@/components/daily/CopyTradingViewButton';
+import { EmailSignup } from '@/components/email/EmailSignup';
+import { buildLevelCode } from '@/lib/tradingview/code';
 import { cached } from '@/lib/cache';
 import { config } from '@/lib/config';
 import { coverageEntry, isCovered } from '@/lib/daily/coverage';
@@ -171,6 +174,17 @@ export default async function TickerDailyPage({ params }: PageProps) {
 
   const mood = read ? moodHeadline(read.mood) : null;
 
+  // Today's code for the "Copy for TradingView" button — null unless all three
+  // levels are present, in which case the button is simply not shown.
+  const tvCode = summary
+    ? buildLevelCode({
+        symbol,
+        floor: summary.magnetBelow?.strike ?? null,
+        ceiling: summary.magnetAbove?.strike ?? null,
+        flip: summary.flipLevel,
+      })
+    : null;
+
   // Prefer the map's own timestamp for "as of"; fall back to the quote's.
   const asOfIso = positioning?.meta.quoteDateIso ?? quote?.quoteIso ?? null;
   const asOfLabel = asOfIso ? formatAsOf(new Date(asOfIso)) : null;
@@ -220,6 +234,8 @@ export default async function TickerDailyPage({ params }: PageProps) {
                 {read.conflict}
               </p>
             )}
+
+            {tvCode && <CopyTradingViewButton code={tvCode} />}
           </section>
         ) : (
           <Updating symbol={symbol} asOf={staleness?.asOfLabel ?? null} />
@@ -246,6 +262,9 @@ export default async function TickerDailyPage({ params }: PageProps) {
         )}
 
         <TickerLinks current={symbol} />
+
+        {/* Free email signup */}
+        <EmailSignup />
 
         <section className="pt-1">
           <Link
