@@ -249,7 +249,7 @@ const ENTRIES = {
   wallColour: {
     label: 'Amber vs blue',
     plain:
-      'Amber = calm (dealers push back against moves). Blue = wild (dealers speed moves up).',
+      'Amber tends to slow price down; blue can speed it up.',
   },
 
   // --- level map ------------------------------------------------------------
@@ -301,11 +301,11 @@ const ENTRIES = {
   },
 
   levelFrontFlip: {
-    label: 'Front-week flip',
+    label: 'Today’s expiry flip',
     plain:
-      'Where gamma flips if you count only the nearest expiry, which is what drives the next few sessions.',
+      'The flip using only the options that expire on the nearest date — today’s expiring options while the market is open.',
     detail:
-      'Same solve, run on the nearest expiration alone. It appears only when it lands somewhere different from the full-chain flip. When the two disagree, the front week is the one the next few days are being traded against, and it moves fastest as that expiry decays out of the book.',
+      'Same solve, run on the nearest expiration alone rather than the whole chain. Other apps usually quote a single expiry, so this is the number closest to theirs — but the two can still differ by a few points because the flip itself is solved differently, not because the expiry set differs. On the level map it appears only when it lands somewhere different from the full-chain flip.',
   },
 
   levelWeighting: {

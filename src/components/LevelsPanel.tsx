@@ -113,7 +113,7 @@ const LABEL_META: Record<
     className: 'border-pos/60 bg-pos/10 text-pos',
   },
   frontFlip: {
-    text: 'FRONT-WEEK FLIP',
+    text: 'TODAY’S EXPIRY FLIP',
     tip: 'levelFrontFlip',
     className: 'border-pos/40 text-pos/90',
   },
@@ -165,11 +165,12 @@ function ConfirmedChip() {
 
 function RungRow({
   rung,
-  showExposure,
+  showDollars,
   confirmed,
 }: {
   rung: LevelRung;
-  showExposure: boolean;
+  /** Whether the dollar-gamma column is revealed (Details toggle). */
+  showDollars: boolean;
   /** True on the Standard view when this level also appears in the volume view. */
   confirmed: boolean;
 }) {
@@ -205,21 +206,23 @@ function RungRow({
       </span>
 
       {/*
-        Dollar gamma, and a dash where there is none. The flips are solved
-        positions on a continuous curve rather than strikes, so they carry no
-        open interest of their own — an empty cell there is the honest cell.
+        Dollar gamma, only when Details is on. The flips are solved positions on
+        a continuous curve rather than strikes, so they carry no open interest
+        of their own — an empty cell there is the honest cell.
       */}
-      <span
-        className={`w-20 shrink-0 text-right ${
-          rung.gex === null
-            ? 'text-term-faint'
-            : rung.gex >= 0
-              ? 'text-pos'
-              : 'text-neg'
-        }`}
-      >
-        {rung.gex === null ? '—' : showExposure ? formatUsd(rung.gex) : '·'}
-      </span>
+      {showDollars && (
+        <span
+          className={`w-20 shrink-0 text-right ${
+            rung.gex === null
+              ? 'text-term-faint'
+              : rung.gex >= 0
+                ? 'text-pos'
+                : 'text-neg'
+          }`}
+        >
+          {rung.gex === null ? '—' : formatUsd(rung.gex)}
+        </span>
+      )}
 
       <span
         className={`w-16 shrink-0 text-right text-2xs ${
@@ -237,12 +240,13 @@ function RungRow({
 function LevelMapView({
   map,
   asOfLabel,
-  showExposure,
+  showDollars,
   confirmedPrices,
 }: {
   map: LevelMap;
   asOfLabel: string;
-  showExposure: boolean;
+  /** Whether the dollar-gamma column and net-gamma figure are revealed. */
+  showDollars: boolean;
   /** Prices to tag "confirmed by today's trading"; empty on the volume view. */
   confirmedPrices: Set<number>;
 }) {
@@ -257,16 +261,18 @@ function LevelMapView({
               {formatPrice(map.spot)}
             </span>
           </span>
-          <span className="flex items-baseline gap-1">
-            <span className="label-xs">net gamma</span>
-            <span
-              className={`font-bold tabular-nums ${
-                map.netGex >= 0 ? 'text-pos' : 'text-neg'
-              }`}
-            >
-              {showExposure ? formatUsd(map.netGex) : '·'}
+          {showDollars && (
+            <span className="flex items-baseline gap-1">
+              <span className="label-xs">net gamma</span>
+              <span
+                className={`font-bold tabular-nums ${
+                  map.netGex >= 0 ? 'text-pos' : 'text-neg'
+                }`}
+              >
+                {formatUsd(map.netGex)}
+              </span>
             </span>
-          </span>
+          )}
           <span className="flex items-baseline gap-1">
             <span className="label-xs">levels</span>
             <span className="font-bold tabular-nums text-term-text">
@@ -280,9 +286,11 @@ function LevelMapView({
       <div className="flex items-center gap-2.5 border-b border-term-line/60 px-3 py-1.5 text-2xs text-term-faint">
         <span className="w-16 shrink-0 pl-0.5">level</span>
         <span className="min-w-0 flex-1" />
-        <span className="flex w-20 shrink-0 items-center justify-end gap-1">
-          $ gamma <InfoTip for="wallDollar" />
-        </span>
+        {showDollars && (
+          <span className="flex w-20 shrink-0 items-center justify-end gap-1">
+            $ gamma <InfoTip for="wallDollar" />
+          </span>
+        )}
         <span className="flex w-16 shrink-0 items-center justify-end gap-1">
           from spot <InfoTip for="levelDistance" />
         </span>
@@ -298,7 +306,7 @@ function LevelMapView({
             <RungRow
               key={r.price}
               rung={r}
-              showExposure={showExposure}
+              showDollars={showDollars}
               confirmed={confirmedPrices.has(r.price)}
             />
           ))}
@@ -312,12 +320,15 @@ function WallRow({
   wall,
   spot,
   showExposure,
+  showDollars,
   confirmed,
 }: {
   wall: Wall;
   spot: number;
-  /** False on thin chains — strength and the dollar figure are both GEX. */
+  /** False on thin chains — the strength bar itself is suppressed. */
   showExposure: boolean;
+  /** Whether the dollar-gamma column is revealed (Details toggle). */
+  showDollars: boolean;
   /** True on the Standard view when this strike also appears in the volume view. */
   confirmed: boolean;
 }) {
@@ -347,11 +358,13 @@ function WallRow({
           </span>
 
           <span className="w-9 shrink-0 text-right text-2xs text-term-dim">{pct}%</span>
-          <span
-            className={`w-20 shrink-0 text-right ${wall.gex >= 0 ? 'text-pos' : 'text-neg'}`}
-          >
-            {formatUsd(wall.gex)}
-          </span>
+          {showDollars && (
+            <span
+              className={`w-20 shrink-0 text-right ${wall.gex >= 0 ? 'text-pos' : 'text-neg'}`}
+            >
+              {formatUsd(wall.gex)}
+            </span>
+          )}
           <span className="sr-only">
             {wall.strike} is {pct} percent as strong as the largest wall on this side,
             {spot > wall.strike ? ' below' : ' above'} the current price.
@@ -379,6 +392,7 @@ function WallList({
   tip,
   spot,
   showExposure,
+  showDollars,
   confirmedPrices,
 }: {
   title: string;
@@ -387,6 +401,7 @@ function WallList({
   tip: TooltipKey;
   spot: number;
   showExposure: boolean;
+  showDollars: boolean;
   /** Strikes to tag "confirmed by today's trading"; empty on the volume view. */
   confirmedPrices: Set<number>;
 }) {
@@ -402,14 +417,14 @@ function WallList({
         <span className="flex items-center gap-2 text-2xs text-term-faint">
           nearest first
           {showExposure && (
-            <>
-              <span className="flex items-center gap-1">
-                strength <InfoTip for="wallStrength" />
-              </span>
-              <span className="flex items-center gap-1">
-                $ <InfoTip for="wallDollar" />
-              </span>
-            </>
+            <span className="flex items-center gap-1">
+              strength <InfoTip for="wallStrength" />
+            </span>
+          )}
+          {showDollars && (
+            <span className="flex items-center gap-1">
+              $ <InfoTip for="wallDollar" />
+            </span>
           )}
         </span>
       </div>
@@ -425,6 +440,7 @@ function WallList({
               wall={w}
               spot={spot}
               showExposure={showExposure}
+              showDollars={showDollars}
               confirmed={confirmedPrices.has(w.strike)}
             />
           ))}
@@ -459,12 +475,18 @@ export function LevelsPanel({
   confirmedByVolume: number[];
 }) {
   const [view, setView] = useState<View>('walls');
+  const [showDetails, setShowDetails] = useState(false);
   const weighting = useSyncExternalStore(
     subscribeWeighting,
     readWeighting,
     () => DEFAULT_WEIGHTING,
   );
   const choose = (next: Weighting) => writeWeighting(next);
+
+  // The dollar-gamma figures are the one piece of real jargon on the card, so
+  // they stay behind a Details toggle and are off by default. They still only
+  // make sense when the chain is deep enough to trust them, so both gates apply.
+  const showDollars = showExposure && showDetails;
 
   // The volume view can be asked for but not exist (never built), or exist but
   // be empty (nothing traded yet). Fall back to Standard for the former so the
@@ -513,6 +535,22 @@ export function LevelsPanel({
               {VIEW_LABEL[v]}
             </button>
           ))}
+          {/* Reveals the dollar-gamma columns. Only meaningful when the chain is
+              deep enough for those figures to be shown at all. */}
+          {showExposure && (
+            <button
+              type="button"
+              onClick={() => setShowDetails((d) => !d)}
+              aria-pressed={showDetails}
+              className={`ml-1 border px-2 py-0.5 text-2xs font-bold tracking-[0.08em] transition-colors ${
+                showDetails
+                  ? 'border-pos/70 bg-pos/15 text-pos'
+                  : 'border-term-line text-term-faint hover:border-pos/50 hover:text-term-dim'
+              }`}
+            >
+              {showDetails ? 'Hide $' : 'Details'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -579,21 +617,23 @@ export function LevelsPanel({
         ) : view === 'walls' ? (
           <>
             <WallList
-              title="Walls above"
+              title="Ceilings above"
               list={active.walls.above}
               tone="bull"
               tip="wallsAbove"
               spot={spot}
               showExposure={showExposure}
+              showDollars={showDollars}
               confirmedPrices={confirmedPrices}
             />
             <WallList
-              title="Walls below"
+              title="Floors below"
               list={active.walls.below}
               tone="bear"
               tip="wallsBelow"
               spot={spot}
               showExposure={showExposure}
+              showDollars={showDollars}
               confirmedPrices={confirmedPrices}
             />
           </>
@@ -601,26 +641,28 @@ export function LevelsPanel({
           <LevelMapView
             map={active.levelMap}
             asOfLabel={asOfLabel}
-            showExposure={showExposure}
+            showDollars={showDollars}
             confirmedPrices={confirmedPrices}
           />
         )}
 
         {/*
-          The front-week flip, always shown when there is one. Other apps
-          typically quote a single front expiry, so this is the number that
-          lines up with theirs — the full-chain flip above blends several
-          expiries and will not.
+          Today's expiry flip: the flip counting only the nearest expiry's
+          options. Other apps typically quote a single expiry, so this is the
+          number closest to theirs — though the two can still differ, because
+          the flip is solved differently (see the /guide entry).
         */}
         {!activityEmpty && activeFrontFlip !== null && (
           <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1 text-2xs leading-relaxed text-term-faint">
-            <span className="label-xs text-pos/90">Front-week flip</span>
+            <span className="label-xs text-pos/90">Today&rsquo;s expiry flip</span>
             <span className="font-bold tabular-nums text-term-text">
               {formatPrice(activeFrontFlip)}
             </span>
             <span>
-              {activeFrontLabel ? `the ${activeFrontLabel} expiry on its own` : 'the nearest expiry on its own'}
-              {' — the single-expiry number most other apps show, so ours lines up with theirs.'}
+              {activeFrontLabel
+                ? `counts only the ${activeFrontLabel} options that expire that day`
+                : 'counts only the options expiring on the nearest expiry'}
+              {' — the single-expiry number most other apps show.'}
             </span>
             <InfoTip for="levelFrontFlip" />
           </p>
@@ -635,10 +677,10 @@ export function LevelsPanel({
         ) : view === 'walls' ? (
           <p className="flex flex-wrap items-center gap-1.5 px-1 pb-1 text-2xs leading-relaxed text-term-faint">
             <span>
-              Strength is relative to the largest wall on the same side, not
-              across both — a 100% bar below does not mean the floor is stronger
-              than the ceiling. Amber bars are positive gamma (dealers lean
-              against moves), blue is negative.
+              <span className="text-pos">Amber</span> = tends to slow price down;{' '}
+              <span className="text-neg">blue</span> = can speed price up. The bar
+              shows how strong each level is next to the biggest one on the same
+              side.
             </span>
             <InfoTip for="wallColour" />
           </p>
