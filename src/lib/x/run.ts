@@ -215,6 +215,21 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     result = await postTweet(composed.text, mediaId);
   }
 
+  // If a tweet carrying an image is rejected for a permission reason, it is the
+  // image X is refusing, not the text — the text-only slots (gamma/pulse) post
+  // fine with the same credentials. Retry once without the image so the update
+  // still goes out, rather than failing the whole post and pausing the poster
+  // over an optional poster. (X media upload needs a paid API tier; until then
+  // the image simply cannot attach, and text-only is the right graceful result.)
+  if (!result.ok && mediaId && result.kind === 'auth') {
+    const textOnly = await postTweet(composed.text);
+    if (textOnly.ok) {
+      result = textOnly;
+      imageNote = 'image rejected by X, posted text-only';
+      mediaId = undefined; // the image did not post — don't let cleanup retire it.
+    }
+  }
+
   if (result.ok) {
     // A posted image is marked so the daily cleanup may later retire it.
     if (mediaId && imageRef) await markImagePosted(imageRef.date, imageRef.type);
