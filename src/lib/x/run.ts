@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { marketSessionRules, snapshotStaleness } from '../events';
-import { sendAutoPauseAlert } from '../health/email';
+import { sendAutoPauseAlert, sendSkipAlert } from '../health/email';
 import { marketToday } from '../time';
 import { readCredentials, postTweet, uploadMedia } from './client';
 import { buildForSlot, type ComposedPost } from './content';
@@ -127,7 +127,14 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     composed = await buildForSlot(slot.kind, now);
   } catch (error) {
     const reason = `Could not build the post: ${error instanceof Error ? error.message : String(error)}`;
-    if (!dry) await log({ at: now.toISOString(), date, slot: slot.kind, slotKey: slot.key, text: '', length: 0, outcome: 'skipped', reason });
+    if (!dry) {
+      await log({ at: now.toISOString(), date, slot: slot.kind, slotKey: slot.key, text: '', length: 0, outcome: 'skipped', reason });
+      // The earnings heads-up legitimately has nothing to post on many days;
+      // that is routine editorial emptiness, not a delivery problem, so it does
+      // not warrant an email. Every other build failure does.
+      const routineEmpty = slot.kind === 'earnings' && /no earnings names|no morning brief/i.test(reason);
+      if (!routineEmpty) void sendSkipAlert(slot.kind, reason, now).catch(() => {});
+    }
     return { ...base, status: 'skipped', reason };
   }
 
@@ -215,13 +222,13 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     result = await postTweet(composed.text, mediaId);
   }
 
-  // If a tweet carrying an image is rejected for a permission reason, it is the
-  // image X is refusing, not the text — the text-only slots (gamma/pulse) post
-  // fine with the same credentials. Retry once without the image so the update
-  // still goes out, rather than failing the whole post and pausing the poster
-  // over an optional poster. (X media upload needs a paid API tier; until then
-  // the image simply cannot attach, and text-only is the right graceful result.)
-  if (!result.ok && mediaId && result.kind === 'auth') {
+  // If a tweet carrying an image fails for any reason other than a duplicate,
+  // the image is the likely culprit (the text-only slots post fine with the same
+  // credentials). Retry once without the image so the update still goes out,
+  // rather than losing the post over an optional poster. X media upload needs a
+  // paid API tier; until then the image simply cannot attach and text-only is
+  // the right graceful result.
+  if (!result.ok && mediaId && result.kind !== 'duplicate') {
     const textOnly = await postTweet(composed.text);
     if (textOnly.ok) {
       result = textOnly;
@@ -250,11 +257,13 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     return { ...base, status: 'sent', reason, text: composed.text, length: composed.length, tweetId: result.tweetId, asOfLabel: composed.asOfLabel };
   }
 
-  // A duplicate-content 403 means the identical tweet is already on X. That is
-  // not a failure and certainly not a reason to pause the whole poster — record
-  // it as a benign skip and move on, so the next slot still runs.
-  if (result.kind === 'duplicate') {
-    const reason = 'Skipped: X already has an identical post (duplicate content).';
+  // Only two failures ever pause the poster: genuinely bad credentials (`auth`)
+  // and out-of-credit / quota (`billing`). Retrying those just burns attempts
+  // against a problem only a human can fix, so we pause and email at once.
+  if (result.kind === 'auth' || result.kind === 'billing') {
+    const pauseReason = `Auto-paused after an X ${result.kind} error: ${result.error ?? 'unknown'}`;
+    await autoPause(pauseReason);
+    void sendAutoPauseAlert(pauseReason, now).catch(() => {});
     await log({
       at: now.toISOString(),
       date,
@@ -262,25 +271,21 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
       slotKey: slot.key,
       text: composed.text,
       length: composed.length,
-      outcome: 'skipped',
-      reason,
+      outcome: 'failed',
+      reason: result.error ?? 'X post failed.',
       asOfLabel: composed.asOfLabel,
       numbers: composed.numbers,
     });
-    return { ...base, status: 'skipped', reason, text: composed.text, length: composed.length, asOfLabel: composed.asOfLabel };
+    return { ...base, status: 'failed', reason: result.error, text: composed.text, length: composed.length };
   }
 
-  // Auth or billing errors auto-pause: retrying just burns attempts against a
-  // problem only a human can fix. Email the owner immediately — a pause
-  // silences posting for the rest of the day, and waiting for the nightly
-  // health run to surface it is a day too late.
-  if (result.kind === 'auth' || result.kind === 'billing') {
-    const pauseReason = `Auto-paused after an X ${result.kind} error: ${result.error ?? 'unknown'}`;
-    await autoPause(pauseReason);
-    // Fire-and-forget: a mail failure must not change the post outcome.
-    void sendAutoPauseAlert(pauseReason, now).catch(() => {});
-  }
-
+  // Everything else — a duplicate, a 403 the account cannot perform, a rate
+  // limit, a timeout — is NOT a reason to pause. Skip this one post, email the
+  // reason, and let every later slot run untouched.
+  const reason =
+    result.kind === 'duplicate'
+      ? 'Skipped: X already has an identical post (duplicate content).'
+      : `Skipped: ${result.error ?? 'X post failed.'}`;
   await log({
     at: now.toISOString(),
     date,
@@ -288,10 +293,11 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     slotKey: slot.key,
     text: composed.text,
     length: composed.length,
-    outcome: 'failed',
-    reason: result.error ?? 'X post failed.',
+    outcome: 'skipped',
+    reason,
     asOfLabel: composed.asOfLabel,
     numbers: composed.numbers,
   });
-  return { ...base, status: 'failed', reason: result.error, text: composed.text, length: composed.length };
+  void sendSkipAlert(slot.kind, reason, now).catch(() => {});
+  return { ...base, status: 'skipped', reason, text: composed.text, length: composed.length, asOfLabel: composed.asOfLabel };
 }

@@ -83,3 +83,24 @@ export async function sendAutoPauseAlert(reason: string, at: Date = new Date()):
   ].join('\n');
   return sendOwnerEmail(subject, text);
 }
+
+/**
+ * Immediate alert when a single slot is skipped (an image X refused, a duplicate,
+ * a rate limit, a timeout, a missing brief). Posting is NOT paused — the one post
+ * did not go out and the poster carries on — so this is informational, one email
+ * per skipped slot. Never throws.
+ */
+export async function sendSkipAlert(slot: string, reason: string, at: Date = new Date()): Promise<MailResult> {
+  const subject = `GammaDesk: X ${slot} post skipped`;
+  const text = [
+    `The X "${slot}" post was skipped. Posting is NOT paused — the other slots today will still go out.`,
+    '',
+    `When: ${at.toISOString()}`,
+    `Slot: ${slot}`,
+    `Reason: ${reason}`,
+    '',
+    'Full log for today: https://www.gammadesk.app/admin/x-posts',
+    'Status: https://www.gammadesk.app/api/health  (see the xPosting block).',
+  ].join('\n');
+  return sendOwnerEmail(subject, text);
+}

@@ -524,7 +524,22 @@ export function XPostsAdmin() {
 
       {/* Recent log */}
       <section className="space-y-2">
-        <h2 className="label-xs">Recent posts</h2>
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="label-xs">Recent posts</h2>
+          {(() => {
+            const today = recent[0]?.date;
+            if (!today) return null;
+            const t = recent.filter((e) => e.date === today);
+            const n = (o: LogEntry['outcome']) => t.filter((e) => e.outcome === o).length;
+            return (
+              <span className="text-2xs tabular-nums text-term-faint">
+                Today: <span className="text-bull">{n('sent')} sent</span> ·{' '}
+                <span className="text-term-dim">{n('skipped')} skipped</span>
+                {n('failed') > 0 && <> · <span className="text-bear">{n('failed')} failed</span></>}
+              </span>
+            );
+          })()}
+        </div>
         {recent.length === 0 ? (
           <div className="panel px-4 py-8 text-center text-xs text-term-dim">
             Nothing logged yet.

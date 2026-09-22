@@ -135,14 +135,19 @@ ok('! → %21', rfc3986('!') === '%21');
 ok("* ' ( ) encoded", rfc3986("*'()") === '%2A%27%28%29');
 ok('unreserved untouched', rfc3986("aZ0-_.~") === 'aZ0-_.~');
 
-section('failure classification drives retry vs auto-pause');
+section('failure classification: pause ONLY on auth (401/bad creds) or billing');
+// The only two kinds that pause the poster:
 ok('401 → auth', classify(401, '') === 'auth');
-ok('403 (permissions) → auth', classify(403, 'not permitted') === 'auth');
-ok('403 (usage cap) → billing', classify(403, 'monthly usage cap reached') === 'billing');
-ok('403 (duplicate content) → duplicate', classify(403, 'You are not allowed to create a Tweet with duplicate content.') === 'duplicate');
+ok('bad-credentials body → auth', classify(403, 'Invalid or expired token') === 'auth');
 ok('402 → billing', classify(402, '') === 'billing');
+ok('403 (usage cap) → billing', classify(403, 'monthly usage cap reached') === 'billing');
+ok('out-of-credit body → billing', classify(403, 'You have exceeded your credit balance') === 'billing');
+// Everything else must NOT pause — skip and continue:
+ok('403 (permissions) → other, NOT auth', classify(403, 'You are not permitted to perform this action.') === 'other');
+ok('403 (duplicate content) → duplicate', classify(403, 'You are not allowed to create a Tweet with duplicate content.') === 'duplicate');
 ok('429 → rate', classify(429, '') === 'rate');
 ok('500 → other', classify(500, 'boom') === 'other');
+ok('timeout-ish 408 → other', classify(408, 'request timeout') === 'other');
 
 // --- Chicago-clock schedule (DST must not shift the posts) -------------------
 

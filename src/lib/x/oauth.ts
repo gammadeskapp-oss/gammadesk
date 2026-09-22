@@ -69,23 +69,30 @@ export function buildAuthHeader(
 }
 
 /**
- * Classify a failed X response so the caller knows how to react:
- *   401/403 → auth, 402 → billing, 429 → rate, else other.
- * A 403 carrying a usage/quota/payment message is surfaced as billing.
- * A 403 for duplicate content is `duplicate` — the tweet is already on X, so
- * it is a benign no-op, not a credential problem: retrying just 403s again and
- * auto-pausing would silence the whole poster over one repeated post.
- * `auth` and `billing` auto-pause; `duplicate` skips; `rate`/`other` retry once.
+ * Classify a failed X response so the caller knows how to react.
+ *
+ * Only two kinds ever pause the poster, because only two are "truly broken" and
+ * unfixable by retrying: `auth` (a 401, or a body that says the credentials are
+ * invalid/expired) and `billing` (a 402, or an out-of-credit / quota message).
+ * Everything else — a plain 403 "not permitted", a rate limit, a duplicate, a
+ * timeout — is `other`/`rate`/`duplicate`: the caller skips that one post and
+ * carries on, and never pauses. A 403 is deliberately NOT auth: X returns it for
+ * things like an image the account's API tier may not attach, which must not
+ * take the whole poster down.
  */
 export function classify(status: number, body: string): PostResult['kind'] {
-  if (status === 401) return 'auth';
-  if (status === 402) return 'billing';
-  if (status === 403) {
-    if (/usage|quota|cap|payment|billing/i.test(body)) return 'billing';
-    if (/duplicate/i.test(body)) return 'duplicate';
+  const b = body || '';
+  // Genuinely bad credentials — the only non-billing reason to pause.
+  if (/invalid or expired token|could not authenticate|unable to authenticate|bad authentication|invalid credentials|unauthoriz/i.test(b)) {
     return 'auth';
   }
+  if (status === 401) return 'auth';
+  // Out of credits / over quota — the billing reason to pause.
+  if (status === 402 || /\b(usage|quota|cap|payment|billing|out of credit|credit balance|exceeded your)\b/i.test(b)) {
+    return 'billing';
+  }
+  if (/duplicate/i.test(b)) return 'duplicate';
   if (status === 429) return 'rate';
-  if (/usage|quota|cap|payment|billing/i.test(body)) return 'billing';
+  // A 403 "not permitted", a 5xx, a timeout, anything else — skip, never pause.
   return 'other';
 }
