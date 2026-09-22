@@ -353,30 +353,33 @@ export function LabChart({
           if (price === null) return;
           const anchor = { time: param.time as never, price };
 
-          if (!pendingRef.current) {
-            pendingRef.current = anchor;
-            primitive.setDraft({
-              id: 'draft',
-              tool: active,
-              a: anchor,
-              b: anchor,
-            });
+          // A horizontal ray needs only a price, so one click commits it. The
+          // two-click tools set their first anchor, preview, then commit.
+          const commit = (drawing: Drawing) => {
+            pendingRef.current = null;
+            primitive.setDraft(null);
+            const next = [...drawingsRef.current, drawing];
+            drawingsRef.current = next;
+            primitive.setDrawings(next);
+            saveDrawings(symbol, next);
+            setDrawingCount(next.length);
+          };
+
+          const newId = () =>
+            `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+          if (active === 'ray') {
+            commit({ id: newId(), tool: 'ray', a: anchor, b: anchor });
             return;
           }
 
-          const drawing: Drawing = {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            tool: active,
-            a: pendingRef.current,
-            b: anchor,
-          };
-          pendingRef.current = null;
-          primitive.setDraft(null);
-          const next = [...drawingsRef.current, drawing];
-          drawingsRef.current = next;
-          primitive.setDrawings(next);
-          saveDrawings(symbol, next);
-          setDrawingCount(next.length);
+          if (!pendingRef.current) {
+            pendingRef.current = anchor;
+            primitive.setDraft({ id: 'draft', tool: active, a: anchor, b: anchor });
+            return;
+          }
+
+          commit({ id: newId(), tool: active, a: pendingRef.current, b: anchor });
         };
 
         // While a first anchor is down, the second follows the crosshair so
