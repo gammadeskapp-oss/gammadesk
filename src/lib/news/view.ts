@@ -61,17 +61,18 @@ export function hasMoving(top: PickedStory[] | null | undefined): boolean {
 
 /**
  * One-line summary of a story for the morning/closing X post, in the scanner's
- * own words: "AAPL: disclosed a deal or acquisition agreement". Kept short and
- * with no link (the post carries its own /daily link) and no source words.
+ * own words: "KO: raised its full-year guidance". Kept short, with no link (the
+ * post carries its own /daily link) and no source words. The company name is
+ * dropped from the front so it appears once, next to the ticker.
  */
 export function xLine(story: Pick<PickedStory, 'ticker' | 'company' | 'headline'>): string {
-  const label = story.ticker ?? (story.company || '').trim();
-  const head = story.headline.replace(/^[^(]*\([^)]*\)\s*/, '').trim() || story.headline;
-  // The headline already leads with the subject; for the X line we prefer the
-  // bare ticker prefix so it reads tightly next to the market numbers.
-  return label ? `${label}: ${lowerFirst(head)}` : story.headline;
-}
-
-function lowerFirst(s: string): string {
-  return s ? s.charAt(0).toLowerCase() + s.slice(1) : s;
+  const company = (story.company || '').trim();
+  const label = story.ticker ?? company;
+  let head = story.headline.trim();
+  // The headline leads with the company name; strip it so the ticker carries
+  // the subject and the name is not repeated ("Coca-Cola raised…" → "raised…").
+  if (company && head.toLowerCase().startsWith(company.toLowerCase())) {
+    head = head.slice(company.length).replace(/^['’]s\b/i, '').replace(/^[\s,]+/, '').trim();
+  }
+  return label && head ? `${label}: ${head}` : story.headline;
 }

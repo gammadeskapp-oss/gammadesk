@@ -25,6 +25,8 @@ const { relativeTime, storyLabel, hasMoving, xLine, SOURCE_LABEL } = await impor
 const { rankItems } = await import('../src/lib/news/scan-core.ts');
 const { sizeTierFor } = await import('../src/lib/news/universe.ts');
 const { parseDisplayName, filingUrl, parseFeedItems, tickerFromTitle } = await import('../src/lib/news/parse.ts');
+const { shortName, isHealthcare } = await import('../src/lib/news/industry.ts');
+const { extractStory, cleanFilingText } = await import('../src/lib/news/extract.ts');
 
 let failures = 0;
 let checks = 0;
@@ -163,8 +165,10 @@ ok('hasMoving false on empty', hasMoving([]) === false && hasMoving(null) === fa
 ok('hasMoving true with items', hasMoving([{}]) === true);
 ok('every source has a label', ['edgar', 'polygon', 'press'].every((s) => typeof SOURCE_LABEL[s] === 'string'));
 {
-  const line = xLine({ ticker: 'AAPL', company: 'Apple', headline: 'Apple (AAPL) disclosed a deal or acquisition agreement' });
-  ok('xLine leads with the ticker', line.startsWith('AAPL: '), line);
+  const line = xLine({ ticker: 'KO', company: 'Coca-Cola', headline: 'Coca-Cola raised its full-year guidance' });
+  ok('xLine leads with the ticker and drops the name', line === 'KO: raised its full-year guidance', line);
+  const poss = xLine({ ticker: 'WMT', company: 'Walmart', headline: "Walmart's CEO is departing" });
+  ok('xLine strips a possessive company prefix', poss === 'WMT: CEO is departing', poss);
   for (const re of BANNED) ok(`xLine avoids ${re}`, !re.test(line), line);
 }
 
@@ -178,25 +182,28 @@ section('sizeTierFor tiers by universe membership');
   ok('null ticker is other', sizeTierFor(null, watch) === 'other');
 }
 
-section('rankItems dedupes, ranks and picks the top 3–5');
+section('rankItems surfaces only enriched items, dedupes and ranks');
 {
   const watch = new Set();
+  const enrich = (category, company, headline, magnitude) => ({ category, company, headline, why: `${company} why line.`, magnitude });
   const raw = [
-    { source: 'edgar', ticker: 'AAPL', company: 'Apple', category: 'ma', timestamp: '2026-09-20T14:00:00Z', url: 'u1', signals: {} },
-    // Same story, weaker source — should be deduped, but marks AAPL corroborated.
+    { source: 'edgar', ticker: 'AAPL', company: 'Apple Inc.', category: 'ma', timestamp: '2026-09-20T14:00:00Z', url: 'u1', signals: {}, enrichment: enrich('ma', 'Apple', 'Apple agreed to acquire NewCo for $5 billion', 0.9) },
+    // Second, weaker source names AAPL too — no enrichment, but corroborates.
     { source: 'polygon', ticker: 'AAPL', company: 'AAPL', category: 'ma', timestamp: '2026-09-20T13:00:00Z', url: 'u2', signals: {} },
-    { source: 'edgar', ticker: 'MSFT', company: 'Microsoft', category: 'buyback', timestamp: '2026-09-20T12:00:00Z', url: 'u3', signals: {} },
-    { source: 'edgar', ticker: 'XOM', company: 'Exxon', category: 'earnings', timestamp: '2026-09-20T11:00:00Z', url: 'u4', signals: {} },
-    { source: 'edgar', ticker: 'WMT', company: 'Walmart', category: 'leadership', timestamp: '2026-09-20T10:00:00Z', url: 'u5', signals: {} },
+    { source: 'edgar', ticker: 'MSFT', company: 'Microsoft', category: 'buyback', timestamp: '2026-09-20T12:00:00Z', url: 'u3', signals: {}, enrichment: enrich('buyback', 'Microsoft', 'Microsoft authorized a $10 billion share buyback', 0.6) },
+    // Un-enriched EDGAR item (text unreadable) — must be dropped, never shown.
+    { source: 'edgar', ticker: 'XOM', company: 'Exxon', category: 'ma', timestamp: '2026-09-20T11:00:00Z', url: 'u4', signals: {} },
+    { source: 'edgar', ticker: 'WMT', company: 'Walmart', category: 'leadership', timestamp: '2026-09-20T10:00:00Z', url: 'u5', signals: {}, enrichment: enrich('leadership', 'Walmart', "Walmart's CEO is departing", 0.8) },
   ];
-  const { top, ranked } = rankItems(raw, watch, new Date('2026-09-20T15:00:00Z'));
-  ok('earnings (ignore) is filtered out', !ranked.some((r) => r.ticker === 'XOM'), JSON.stringify(ranked.map((r) => r.ticker)));
-  ok('AAPL deduped to one row', ranked.filter((r) => r.ticker === 'AAPL').length === 1);
+  const { top, ranked } = rankItems(raw, watch);
+  ok('un-enriched item is dropped', !ranked.some((r) => r.ticker === 'XOM'), JSON.stringify(ranked.map((r) => r.ticker)));
+  ok('AAPL surfaces one row', ranked.filter((r) => r.ticker === 'AAPL').length === 1);
   ok('AAPL kept the EDGAR source', ranked.find((r) => r.ticker === 'AAPL')?.source === 'edgar');
-  ok('AAPL ranks first (mega deal + corroborated)', ranked[0]?.ticker === 'AAPL', ranked[0]?.ticker);
-  ok('three rows survive the filter', ranked.length === 3, String(ranked.length));
+  ok('AAPL ranks first (mega deal + corroborated + magnitude)', ranked[0]?.ticker === 'AAPL', ranked[0]?.ticker);
+  ok('AAPL headline names the company once', ranked[0]?.headline === 'Apple agreed to acquire NewCo for $5 billion', ranked[0]?.headline);
+  ok('three enriched rows survive', ranked.length === 3, String(ranked.length));
   ok('top surfaces all three', top.length === 3);
-  ok('every picked story has a generated headline', top.every((s) => s.headline && s.why));
+  ok('every picked story has headline + why', top.every((s) => s.headline && s.why));
 }
 
 section('EDGAR display-name and URL parsing');
@@ -227,6 +234,53 @@ section('feed parsing and press ticker extraction');
   const universe = new Set(['ACME', 'BETA']);
   ok('ticker from "(NASDAQ: ACME)"', tickerFromTitle('Acme Corp (NASDAQ: ACME) announces merger', universe) === 'ACME');
   ok('no ticker when none in universe', tickerFromTitle('Nobody Inc does something', universe) === null);
+}
+
+section('industry: friendly names and the FDA gate');
+ok('shortName uses the curated map', shortName('Meta Platforms, Inc.', 'META') === 'Meta');
+ok('shortName strips corporate suffixes', shortName('Some Widget Holdings Inc.', 'SWH') === 'Some Widget');
+ok('shortName drops a leading "The"', shortName('The Coca-Cola Company', 'KO') === 'Coca-Cola');
+ok('shortName falls back to ticker when name == ticker', shortName('ZZZ', 'ZZZ') === 'ZZZ');
+ok('healthcare gate: LLY is healthcare', isHealthcare('LLY') === true);
+ok('healthcare gate: META is not', isHealthcare('META') === false);
+
+section('extractStory reads real text into a specific headline');
+{
+  const base = { itemCodes: [], itemCategory: 'other', ticker: 'X', isHealthcare: false };
+  const g = extractStory({ ...base, company: 'Coca-Cola', text: 'The Company raised its full-year revenue guidance and now sees revenue of $46 billion for fiscal 2026.' });
+  ok('guidance direction + number', g && /Coca-Cola raised its full-year revenue guidance to \$46 billion/.test(g.headline), g && g.headline);
+  ok('guidance category confirmed', g && g.category === 'guidance');
+
+  const m = extractStory({ ...base, company: 'Acme', text: 'Acme entered into a definitive agreement to acquire Beacon Systems for $3.2 billion in cash.' });
+  ok('M&A names the target and value', m && /Acme agreed to acquire Beacon Systems for \$3.2 billion/.test(m.headline), m && m.headline);
+
+  const l = extractStory({ ...base, itemCodes: ['5.02'], company: 'Widget', text: 'Widget announced that its Chief Executive Officer, Jane Roe, will step down effective next month.' });
+  ok('leadership names the role', l && /Widget's CEO/.test(l.headline), l && l.headline);
+  ok('leadership category', l && l.category === 'leadership');
+  // A leadership event with no 5.02 item code is not trusted as leadership.
+  ok('leadership needs item 5.02', extractStory({ ...base, company: 'Widget', text: 'Our Chief Executive Officer discussed strategy at a conference.' }) === null);
+
+  const vague = extractStory({ ...base, company: 'Vague', text: 'The registrant filed this report to furnish an investor presentation under Regulation FD. Nothing material.' });
+  ok('a vague filing yields null (dropped)', vague === null);
+
+  // FDA gate: identical text, non-healthcare vs healthcare.
+  const fdaText = 'The company announced that the FDA approved its new therapy following a successful Phase 3 clinical trial.';
+  ok('non-healthcare never gets FDA', extractStory({ ...base, company: 'Meta', ticker: 'META', text: fdaText })?.category !== 'fda');
+  const drug = extractStory({ ...base, company: 'Eli Lilly', ticker: 'LLY', isHealthcare: true, text: fdaText });
+  ok('healthcare FDA approval surfaces', drug && drug.category === 'fda' && /Eli Lilly won FDA approval/.test(drug.headline), drug && drug.headline);
+
+  // No copied source text and no trading language in any generated headline.
+  for (const s of [g, m, l, drug]) {
+    if (!s) continue;
+    for (const re of BANNED) ok(`extract headline avoids ${re}`, !re.test(s.headline), s.headline);
+  }
+}
+
+section('cleanFilingText strips tags and decodes entities');
+{
+  const txt = cleanFilingText('<html><body><p>Acme &amp; Co. raised&nbsp;guidance</p><script>bad()</script></body></html>');
+  ok('tags removed', !/[<>]/.test(txt), txt);
+  ok('entities decoded and script dropped', txt === 'Acme & Co. raised guidance', txt);
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);

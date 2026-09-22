@@ -56,6 +56,21 @@ export interface RawItem {
     /** Lower-cased keyword tokens matched in a title/description, if any. */
     keywords?: string[];
   };
+  /**
+   * The specific story pulled from the filing's real text, present only for
+   * EDGAR items whose text could be fetched and understood. Non-EDGAR items and
+   * unreadable filings have none — the ranker surfaces only enriched items and
+   * uses the rest purely as a corroboration signal.
+   */
+  enrichment?: {
+    headline: string;
+    why: string;
+    category: NewsCategory;
+    /** Friendly company name shown in the headline ("Coca-Cola"). */
+    company: string;
+    /** 0..1 event size, folded into ranking. */
+    magnitude: number;
+  };
 }
 
 /** A raw item after scoring, ready to rank. */

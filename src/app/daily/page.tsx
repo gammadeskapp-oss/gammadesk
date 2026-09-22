@@ -11,7 +11,7 @@ import { buildSimpleRead } from '@/lib/simple/translate';
 import { fetchCboeQuotes } from '@/lib/x/cboeQuote';
 import { readBriefForDate } from '@/lib/x/brief';
 import { readScanForDate, readLatestScan } from '@/lib/news/store';
-import { SOURCE_LABEL, hasMoving, relativeTime, storyLabel } from '@/lib/news/view';
+import { SOURCE_LABEL, hasMoving, relativeTime } from '@/lib/news/view';
 import { marketToday } from '@/lib/time';
 import { formatPrice } from '@/lib/format';
 import { formatAsOf } from '@/lib/time';
@@ -217,12 +217,12 @@ export default async function DailyPage() {
                 const ago = relativeTime(story.timestamp, now);
                 return (
                   <li key={`${story.url}-${i}`} className="border-t border-term-line pt-4 first:border-t-0 first:pt-0">
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-mono text-sm font-bold text-flip">{storyLabel(story)}</span>
-                      <span className="text-sm font-bold leading-snug text-term-text">{story.headline}</span>
-                    </div>
+                    {/* The headline already names the company once; the ticker
+                        lives in the meta line below, so nothing is repeated. */}
+                    <p className="text-sm font-bold leading-snug text-term-text">{story.headline}</p>
                     <p className="mt-1 text-sm leading-relaxed text-term-dim">{story.why}</p>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-term-faint">
+                      {story.ticker && <span className="font-mono font-bold text-flip">{story.ticker}</span>}
                       <a
                         href={story.url}
                         target="_blank"
