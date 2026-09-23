@@ -1,6 +1,7 @@
 import 'server-only';
 
-import { getPositioning } from '../positioning';
+import { getPositioning, secondaryChainSource } from '../positioning';
+import { config } from '../config';
 import { snapshotStaleness, marketSessionRules } from '../events';
 import { isTradingDay } from '../x/schedule';
 import { fetchCboeQuote } from '../x/cboeQuote';
@@ -92,19 +93,39 @@ export async function runNightlyChecks(baseUrl: string, now: Date = new Date()):
     const positioning = await getPositioning();
     checks.push({ id: 'data:chain', label: 'Chain data source (Polygon/Cboe) responds', ok: true, detail: 'Positioning snapshot loaded.' });
     const staleness = snapshotStaleness(positioning.meta.quoteDateIso, now);
+    // Naming the source that actually answered reveals whether failover engaged:
+    // a "fresh, via Polygon.io" line when the primary is Cboe means the stale-
+    // feed fallback did its job on this refresh.
+    const via = positioning.meta.sourceLabel;
     checks.push({
       id: 'data:fresh',
       label: 'No stale data on /daily',
       ok: !staleness.stale,
       detail: staleness.stale
-        ? `Snapshot is stale (${staleness.asOfLabel ?? 'no timestamp'}). ${staleness.expectedNote}`
-        : `Snapshot fresh, as of ${staleness.asOfLabel ?? 'unknown'}.`,
+        ? `Snapshot is stale (${staleness.asOfLabel ?? 'no timestamp'}, via ${via}). ${staleness.expectedNote}`
+        : `Snapshot fresh, as of ${staleness.asOfLabel ?? 'unknown'} (via ${via}).`,
     });
   } catch (error) {
     const detail = `Failed: ${error instanceof Error ? error.message : String(error)}.`;
     checks.push({ id: 'data:chain', label: 'Chain data source (Polygon/Cboe) responds', ok: false, detail });
     checks.push({ id: 'data:fresh', label: 'No stale data on /daily', ok: false, detail: 'Could not load a snapshot to grade.' });
   }
+
+  // 5b: is a second chain source standing by if the primary goes stale? This is
+  // informational, not a failure — a deployment can legitimately run Cboe-only —
+  // but during a primary-feed outage it is the first thing to check, so it earns
+  // a permanent row rather than a line buried in the stale detail.
+  const secondary = config.sourceFallback ? secondaryChainSource() : null;
+  checks.push({
+    id: 'data:fallback',
+    label: 'Failover chain source configured',
+    ok: true,
+    detail: !config.sourceFallback
+      ? `Disabled (GAMMADESK_SOURCE_FALLBACK is off). Primary ${config.dataSource} has no standby.`
+      : secondary
+        ? `${secondary} is available to cover a stale ${config.dataSource} feed.`
+        : `None — primary is ${config.dataSource} and no secondary is usable (Polygon needs POLYGON_API_KEY). A stale primary shows the banner with no failover.`,
+  });
 
   // 6: the compact Cboe quote feed responds.
   try {
