@@ -5,9 +5,10 @@ import type { ChainSnapshot } from './chainSource';
 import { ChainError } from './chainSource';
 import { config } from './config';
 import { fetchCboeSnapshot } from './cboe';
+import { snapshotStaleness } from './events';
 import { buildPositioning } from './exposure';
 import { readLastGoodSnapshot, saveLastGoodSnapshot } from './lastSnapshot';
-import { fetchPolygonSnapshot } from './polygon';
+import { fetchPolygonChain } from './polygon';
 import { formatAsOf } from './time';
 import type { DataSource, PositioningData, WeightBasis } from './types';
 
@@ -47,6 +48,93 @@ function viewCacheKey(expirationCount: number): string {
  * built from this single cached snapshot, so widening the forecast horizon
  * costs nothing upstream.
  */
+/** Fetch one chain from a named source, or throw the way that source throws. */
+function fetchFromSource(source: DataSource, symbol: string): Promise<ChainSnapshot> {
+  if (source === 'polygon') {
+    if (!config.apiKey) {
+      throw new ChainError(
+        'The market data provider is not configured.',
+        0,
+        'See /status for which credential is missing.',
+      );
+    }
+    return fetchPolygonChain(symbol);
+  }
+  return fetchCboeSnapshot(symbol);
+}
+
+/**
+ * The other source, when it can actually be used.
+ *
+ * Cboe is always reachable — it is keyless. Polygon is only a candidate when a
+ * key is configured, so a free deployment never fans out to a call it cannot
+ * make. Returns null when there is no usable alternate.
+ *
+ * Exported so the health page can report whether failover is even possible on a
+ * given deployment — a stale-feed alarm reads very differently when there is a
+ * second source standing by than when Cboe is the only thing configured.
+ */
+export function secondaryChainSource(
+  primary: DataSource = config.dataSource,
+): DataSource | null {
+  const other: DataSource = primary === 'cboe' ? 'polygon' : 'cboe';
+  if (other === 'polygon' && !config.apiKey) return null;
+  return other;
+}
+
+/**
+ * One refresh from the primary source, with the *other* source tried when the
+ * primary answers but answers stale.
+ *
+ * ## Why staleness, not just failure
+ *
+ * `loadSnapshot` below already covers the case where a source throws. It does
+ * not cover the failure mode that actually took the site down: a provider that
+ * returns HTTP 200 with a complete, well-formed chain whose own quote timestamp
+ * is hours old. On 23 Sep 2026 Cboe's delayed-quotes CDN served every symbol
+ * frozen at the prior evening's build; nothing threw, so nothing fell back, and
+ * the page rendered a confident set of levels the banner then had to condemn.
+ *
+ * So the freshness of the primary's own timestamp is the trigger. If it is
+ * fresh, the secondary is never touched. If it is stale, the secondary is tried
+ * and taken when it is either fresh or simply newer — never when it would be a
+ * lateral move to something equally old. On any secondary error, or when the
+ * secondary is no better, the stale primary is returned unchanged and the
+ * banner does its job exactly as before. The extra fetch only ever happens on
+ * the stale path, and that path sits behind the same TTL cache as everything
+ * else, so a provider outage costs one secondary fetch per cache window.
+ */
+async function fetchFreshest(symbol: string): Promise<RawSnapshot> {
+  const primary = config.dataSource;
+  const snapshot = await fetchFromSource(primary, symbol);
+  const primaryRaw: RawSnapshot = { snapshot, source: primary, notes: snapshot.notes };
+
+  if (!config.sourceFallback) return primaryRaw;
+  if (!snapshotStaleness(snapshot.quoteDate.toISOString()).stale) return primaryRaw;
+
+  const secondary = secondaryChainSource(primary);
+  if (!secondary) return primaryRaw;
+
+  try {
+    const alt = await fetchFromSource(secondary, symbol);
+    const altStale = snapshotStaleness(alt.quoteDate.toISOString()).stale;
+    if (!altStale || alt.quoteDate.getTime() > snapshot.quoteDate.getTime()) {
+      return {
+        snapshot: alt,
+        source: secondary,
+        notes: [
+          ...alt.notes,
+          `${SOURCE_LABELS[primary]} answered but was stale (its quote was from ${formatAsOf(snapshot.quoteDate)}), so this reading came from ${SOURCE_LABELS[secondary]} instead.`,
+        ],
+      };
+    }
+  } catch {
+    // Secondary unreachable or no better — keep the stale primary. The banner
+    // will flag it, which is the correct outcome when nothing fresher exists.
+  }
+  return primaryRaw;
+}
+
 async function fetchSnapshot(): Promise<RawSnapshot> {
   if (config.dataSource === 'polygon' && !config.apiKey) {
     throw new ChainError(
@@ -56,10 +144,7 @@ async function fetchSnapshot(): Promise<RawSnapshot> {
     );
   }
 
-  const source = config.dataSource;
-  const snapshot =
-    source === 'polygon' ? await fetchPolygonSnapshot() : await fetchCboeSnapshot();
-  return { snapshot, source, notes: snapshot.notes };
+  return fetchFreshest(config.symbol);
 }
 
 /**
@@ -245,8 +330,9 @@ function cachedSymbolSnapshot(symbol: string): Promise<RawSnapshot> {
           'Cboe caps how many chains can be pulled per window, and the allowance is shared. Wait a moment and try again — tickers already loaded are still instant.',
         );
       }
-      const snapshot = await fetchCboeSnapshot(symbol);
-      return { snapshot, source: 'cboe', notes: snapshot.notes };
+      // Same freshness fallback as the configured symbol: if Cboe answers stale
+      // for this ticker, Polygon is tried before the stale banner goes up.
+      return fetchFreshest(symbol);
     },
   );
 }

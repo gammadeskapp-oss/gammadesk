@@ -29,6 +29,18 @@ export const config = {
   get dataSource(): SourceChoice {
     return sourceChoice();
   },
+  /**
+   * When the primary source returns a *stale* chain — a successful response
+   * whose own quote timestamp is hours behind the market clock, which is how a
+   * provider outage actually looks (Cboe's CDN froze every symbol at the prior
+   * evening's build on 23 Sep 2026) — try the other configured source before
+   * giving up and showing the stale banner. Off only if explicitly disabled,
+   * and a no-op anyway unless a usable secondary exists (Polygon needs a key).
+   */
+  get sourceFallback(): boolean {
+    const raw = (process.env.GAMMADESK_SOURCE_FALLBACK ?? '').trim().toLowerCase();
+    return raw !== '0' && raw !== 'false' && raw !== 'off';
+  },
   get apiKey(): string | undefined {
     const key = process.env.POLYGON_API_KEY?.trim();
     return key && key !== 'your_polygon_key_here' ? key : undefined;
