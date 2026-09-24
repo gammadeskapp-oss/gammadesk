@@ -57,6 +57,7 @@ const {
   plainEnglish,
   checkPost,
   ageMinutes,
+  stalestIso,
   MAX_DATA_AGE_MIN,
   NFA,
   DAILY_LINK: MARKET_DAILY_LINK,
@@ -752,6 +753,21 @@ section('ageMinutes / the 90-minute freshness gate');
   ok('a fresh stamp is under the limit', ageMinutes(new Date(now.getTime() - 10 * 60000).toISOString(), now) < MAX_DATA_AGE_MIN);
   ok('a 2h-old stamp is over the limit', ageMinutes('2026-09-21T13:00:00Z', now) > MAX_DATA_AGE_MIN);
   ok('an unparseable stamp is Infinity', ageMinutes('nonsense', now) === Infinity);
+}
+
+section('stalestIso: freshness judged by the oldest feed (stale chain blocks a fresh quote)');
+{
+  const fresh = '2026-09-24T14:00:00Z';
+  const staleChain = '2026-09-23T20:00:00Z';
+  ok('picks the older of quote vs chain', stalestIso(fresh, staleChain) === staleChain);
+  ok('order does not matter', stalestIso(staleChain, fresh) === staleChain);
+  ok('ignores a missing stamp', stalestIso(fresh, null) === fresh && stalestIso(undefined, fresh) === fresh);
+  ok('ignores an unparseable stamp', stalestIso('nonsense', fresh) === fresh);
+  ok('null when nothing valid', stalestIso(null, undefined, 'nope') === null);
+  // A fresh quote carrying an hours-old chain is graded stale by the 90-min gate.
+  const now = new Date('2026-09-24T14:30:00Z');
+  ok('a fresh quote + stale chain is over the age limit', ageMinutes(stalestIso(fresh, staleChain), now) > MAX_DATA_AGE_MIN);
+  ok('two fresh feeds stay under the limit', ageMinutes(stalestIso(fresh, '2026-09-24T14:10:00Z'), now) < MAX_DATA_AGE_MIN);
 }
 
 section('plainEnglish reads the box');

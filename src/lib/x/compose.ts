@@ -290,6 +290,33 @@ export function checkPost(text: string): string[] {
   return failures;
 }
 
+/**
+ * The oldest (stalest) of several ISO timestamps — the honest "as of" for a
+ * post assembled from more than one feed.
+ *
+ * The morning/closing posts read the spot and day change from the compact SPY
+ * quote but the levels (wall/floor/flip) from the option-chain snapshot. Those
+ * two Cboe feeds can freeze independently, so the freshness gate must judge the
+ * post by whichever is oldest — otherwise a fresh quote could carry hours-old
+ * levels past the 90-minute check (exactly the stale-chain failure the
+ * /decision banner catches). Unparseable or missing stamps are ignored; returns
+ * null only when nothing valid was given.
+ */
+export function stalestIso(...isos: Array<string | null | undefined>): string | null {
+  let oldest: string | null = null;
+  let oldestMs = Infinity;
+  for (const iso of isos) {
+    if (!iso) continue;
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) continue;
+    if (ms < oldestMs) {
+      oldestMs = ms;
+      oldest = iso;
+    }
+  }
+  return oldest;
+}
+
 /** Minutes between an ISO data stamp and `now`; Infinity when unparseable. */
 export function ageMinutes(dataIso: string, now: Date = new Date()): number {
   const then = Date.parse(dataIso);

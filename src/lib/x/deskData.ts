@@ -7,6 +7,7 @@ import { getPositioning } from '../positioning';
 import { readScanForDate } from '../news/store';
 import { xLine } from '../news/view';
 import { fetchCboeQuote } from './cboeQuote';
+import { stalestIso } from './compose';
 import type { DeskSnapshot, ScoredName } from './compose';
 
 /**
@@ -56,6 +57,9 @@ export async function loadDeskSnapshot(now: Date = new Date()): Promise<DeskSnap
     strong,
     weak,
     headline,
-    dataIso: quote?.quoteIso ?? positioning.meta.quoteDateIso,
+    // Freshness is judged by whichever feed is oldest: the compact SPY quote
+    // (spot, day change) or the option-chain snapshot (the levels). A fresh
+    // quote must not carry stale levels past the 90-minute gate.
+    dataIso: stalestIso(quote?.quoteIso, positioning.meta.quoteDateIso) ?? new Date().toISOString(),
   };
 }
