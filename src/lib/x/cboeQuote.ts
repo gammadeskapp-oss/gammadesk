@@ -29,6 +29,10 @@ export interface CboeQuote {
   prevClose: number;
   /** Fractional day change, e.g. 0.0123 for +1.23%. */
   changePct: number;
+  /** Session high, when Cboe reports one (absent pre-open). */
+  dayHigh: number | null;
+  /** Session low, when Cboe reports one. */
+  dayLow: number | null;
   /** When Cboe stamped the payload, as a UTC ISO string. */
   quoteIso: string;
 }
@@ -40,7 +44,14 @@ interface CboeQuotePayload {
     prev_day_close?: number;
     close?: number;
     price_change_percent?: number;
+    high?: number;
+    low?: number;
   };
+}
+
+/** A finite, strictly-positive number from the payload, else null. */
+function positive(value: number | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 /**
@@ -95,6 +106,8 @@ export async function fetchCboeQuote(symbol: string): Promise<CboeQuote> {
     price,
     prevClose,
     changePct,
+    dayHigh: positive(data?.high),
+    dayLow: positive(data?.low),
     quoteIso: parseTimestamp(payload.timestamp),
   };
 }

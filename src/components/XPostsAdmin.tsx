@@ -20,6 +20,8 @@ interface Preview {
   asOfLabel: string | null;
   checks: string[];
   reason: string | null;
+  /** For the intraday preview: which phrase-bank situation was picked. */
+  situation?: string | null;
 }
 
 interface LogEntry {
@@ -135,6 +137,7 @@ export function XPostsAdmin() {
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -215,14 +218,34 @@ export function XPostsAdmin() {
     setStatus('locked');
   }, []);
 
+  /**
+   * Re-compose the live previews without posting. The intraday preview is
+   * generated fresh by the Claude API each time, so this doubles as the
+   * "Preview next post" button — click it to see another candidate update.
+   */
+  const regenPreviews = useCallback(async () => {
+    setPreviewing(true);
+    try {
+      const r = await fetch('/api/admin/x-posts?previews=1', { cache: 'no-store', credentials: 'same-origin' });
+      if (r.ok) {
+        const p = (await r.json()) as { previews: Preview[] };
+        if (p?.previews) setData((prev) => (prev ? { ...prev, previews: p.previews } : prev));
+      }
+    } catch {
+      // Leave the current previews in place.
+    } finally {
+      setPreviewing(false);
+    }
+  }, []);
+
   const togglePause = useCallback(
-    async (paused: boolean) => {
+    async (paused: boolean, scope?: 'today') => {
       setBusy(true);
       try {
         const res = await fetch('/api/admin/x-pause', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ paused }),
+          body: JSON.stringify(scope ? { paused, scope } : { paused }),
           credentials: 'same-origin',
         });
         if (res.ok) await load();
@@ -343,14 +366,25 @@ export function XPostsAdmin() {
               Resume posting
             </button>
           ) : (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void togglePause(true)}
-              className="border border-bear/60 bg-bear/12 px-3 py-1.5 text-2xs font-bold uppercase tracking-[0.14em] text-bear transition-colors hover:bg-bear/20 disabled:opacity-40"
-            >
-              Pause posting
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void togglePause(true, 'today')}
+                className="border border-flip/60 bg-flip/12 px-3 py-1.5 text-2xs font-bold uppercase tracking-[0.14em] text-flip transition-colors hover:bg-flip/20 disabled:opacity-40"
+                title="Auto-resumes on the next trading day"
+              >
+                Pause today
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void togglePause(true)}
+                className="border border-bear/60 bg-bear/12 px-3 py-1.5 text-2xs font-bold uppercase tracking-[0.14em] text-bear transition-colors hover:bg-bear/20 disabled:opacity-40"
+              >
+                Pause posting
+              </button>
+            </>
           )}
           <button
             type="button"
@@ -450,7 +484,17 @@ export function XPostsAdmin() {
 
       {/* Previews */}
       <section className="space-y-2">
-        <h2 className="label-xs">Next-post previews (composed live, not sent)</h2>
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="label-xs">Next-post previews (composed live, not sent)</h2>
+          <button
+            type="button"
+            disabled={previewing}
+            onClick={() => void regenPreviews()}
+            className="border border-pos/60 bg-pos/12 px-3 py-1 text-2xs font-bold uppercase tracking-[0.14em] text-pos transition-colors hover:bg-pos/20 disabled:opacity-40"
+          >
+            {previewing ? 'Composing…' : 'Preview next post'}
+          </button>
+        </div>
         {previews.length === 0 && (
           <p className="text-2xs text-term-faint">Loading live previews…</p>
         )}
@@ -458,7 +502,12 @@ export function XPostsAdmin() {
           {previews.map((p) => (
             <div key={p.slot} className="panel px-3.5 py-3">
               <div className="flex items-center justify-between">
-                <span className="text-2xs font-bold uppercase tracking-[0.12em] text-term-dim">{p.label}</span>
+                <span className="text-2xs font-bold uppercase tracking-[0.12em] text-term-dim">
+                  {p.label}
+                  {p.situation && (
+                    <span className="ml-1.5 font-normal normal-case tracking-normal text-pos">· {p.situation}</span>
+                  )}
+                </span>
                 <span className={`text-2xs tabular-nums ${p.length && p.length > 280 ? 'text-bear' : 'text-term-faint'}`}>
                   {p.length ?? '—'}/280
                 </span>

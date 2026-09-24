@@ -86,6 +86,26 @@ export async function setPause(state: PauseState): Promise<PauseState> {
 }
 
 /**
+ * "Pause today": an owner pause scoped to one market date that the autonomous
+ * tick auto-resumes on the next trading day (see `shouldAutoResume`).
+ */
+export async function pauseToday(date: string): Promise<PauseState> {
+  return setPause({
+    paused: true,
+    by: 'owner',
+    scope: 'today',
+    date,
+    reason: 'Paused for today from the admin page (auto-resumes next trading day).',
+    at: new Date().toISOString(),
+  });
+}
+
+/** Clear the pause, recording why (an owner click, or an automatic resume). */
+export async function resume(reason: string): Promise<PauseState> {
+  return setPause({ paused: false, by: 'owner', reason, at: new Date().toISOString() });
+}
+
+/**
  * Auto-pause after an auth or billing failure. Never overwrites an existing
  * owner pause with an auto one, so a human's note is not clobbered by a
  * subsequent API error.

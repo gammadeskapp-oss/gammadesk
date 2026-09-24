@@ -6,14 +6,14 @@ import { runSlot } from '@/lib/x/run';
 import { storeStatus } from '@/lib/x/store';
 
 /**
- * The 8:25 AM CT morning snapshot post to X. Its own cron — see `vercel.json`.
+ * The 8:30 AM CT morning post to X — the fixed template built from the same
+ * /decision SPY data (spot, mood, walls, flip, strong/weak names). Its own cron
+ * — see `vercel.json`.
  *
- * Registered at both candidate UTC times (13:25 and 14:25) so the 8:25 Central
- * slot is covered in summer and winter; `dueMorningSlot` reads the actual
- * Chicago clock and only the intended firing posts — the other sees the wrong
- * hour and returns without spending anything. This decouples the X morning post
- * from the /api/post Discord job (which runs at 8:00 CT), so the tweet lands at
- * a stable 8:25 CT year-round, just after the Cowork brief arrives (~8:20 CT).
+ * Registered at both candidate UTC times so the 8:30 Central slot is covered in
+ * summer and winter; `dueMorningSlot` reads the actual Chicago clock and only
+ * the intended firing posts — the other sees the wrong hour and returns without
+ * spending anything.
  *
  * `?dry=1` composes and self-checks without posting. `?force=1` runs regardless
  * of the clock and re-posts a slot already sent.
@@ -32,11 +32,11 @@ export async function GET(request: Request) {
 
   const now = new Date();
   const slot = force
-    ? { kind: 'morning' as const, key: 'morning', label: 'Morning snapshot (8:25 CT)' }
+    ? { kind: 'morning' as const, key: 'morning', label: 'Morning post (8:30 CT)' }
     : dueMorningSlot(now, marketSessionRules());
 
   if (!slot) {
-    return NextResponse.json({ status: 'skipped', reason: 'Not the 8:25 CT morning slot on a trading day.' });
+    return NextResponse.json({ status: 'skipped', reason: 'Not the 8:30 CT morning slot on a trading day.' });
   }
 
   const outcome = await runSlot(slot, { dry, force, now });

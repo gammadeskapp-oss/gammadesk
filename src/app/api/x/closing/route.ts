@@ -11,12 +11,13 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 /**
- * The 3:20 PM CT closing post to X. New cron — see `vercel.json`.
+ * The 3:15 PM CT closing post to X — the fixed template built from the same
+ * /decision SPY data (close, day change, flip, range, top/worst name, top
+ * story). New cron — see `vercel.json`.
  *
- * Leads with the Cowork "Closing Bell" brief when today's has arrived, else
- * falls back to the dealer-positioning closing post. Registered at both
- * candidate UTC times so the 3:20 Central slot is covered in summer and winter;
- * `dueClosingSlot` reads the Chicago clock and only the intended firing posts.
+ * Registered at both candidate UTC times so the 3:15 Central slot is covered in
+ * summer and winter; `dueClosingSlot` reads the Chicago clock and only the
+ * intended firing posts.
  *
  * `?dry=1` composes and self-checks without posting. `?force=1` runs regardless
  * of the clock and re-posts a slot already sent.
@@ -31,11 +32,11 @@ export async function GET(request: Request) {
 
   const now = new Date();
   const slot = force
-    ? { kind: 'closing' as const, key: 'closing', label: 'Closing snapshot (3:20 CT)' }
+    ? { kind: 'closing' as const, key: 'closing', label: 'Closing post (3:15 CT)' }
     : dueClosingSlot(now, marketSessionRules());
 
   if (!slot) {
-    return NextResponse.json({ status: 'skipped', reason: 'Not the 3:20 CT closing slot on a trading day.' });
+    return NextResponse.json({ status: 'skipped', reason: 'Not the 3:15 CT closing slot on a trading day.' });
   }
 
   const outcome = await runSlot(slot, { dry, force, now });

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE, verifySession } from '@/lib/tos/auth';
-import { readPause, setPause } from '@/lib/x/store';
+import { marketToday } from '@/lib/time';
+import { pauseToday, readPause, resume, setPause } from '@/lib/x/store';
 
 /**
  * Owner-only pause switch for the X poster.
@@ -18,7 +19,9 @@ const NO_STORE: Record<string, string> = {
   'X-Robots-Tag': 'noindex, nofollow',
 };
 
-async function readPaused(request: NextRequest): Promise<boolean | null> {
+type PauseAction = { paused: false } | { paused: true; scope: 'today' | 'until-fixed' };
+
+async function readAction(request: NextRequest): Promise<PauseAction | null> {
   let raw: string;
   try {
     raw = await request.text();
@@ -27,8 +30,12 @@ async function readPaused(request: NextRequest): Promise<boolean | null> {
   }
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as { paused?: unknown };
-    if (typeof parsed.paused === 'boolean') return parsed.paused;
+    const parsed = JSON.parse(raw) as { paused?: unknown; scope?: unknown };
+    if (parsed.paused === false) return { paused: false };
+    if (parsed.paused === true) {
+      const scope = parsed.scope === 'today' ? 'today' : 'until-fixed';
+      return { paused: true, scope };
+    }
   } catch {
     // Not JSON — fall through.
   }
@@ -41,22 +48,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Locked.' }, { status: 401, headers: NO_STORE });
   }
 
-  const paused = await readPaused(request);
-  if (paused === null) {
+  const action = await readAction(request);
+  if (action === null) {
     return NextResponse.json(
-      { error: 'Body must be { "paused": true } or { "paused": false }.' },
+      { error: 'Body must be { "paused": false }, { "paused": true } or { "paused": true, "scope": "today" }.' },
       { status: 400, headers: NO_STORE },
     );
   }
 
   try {
-    const next = paused
-      ? await setPause({ paused: true, by: 'owner', reason: 'Paused from the admin page.', at: new Date().toISOString() })
-      : await setPause({ paused: false, by: 'owner', reason: 'Resumed from the admin page.', at: new Date().toISOString() });
+    let next;
+    if (!action.paused) {
+      next = await resume('Resumed from the admin page.');
+    } else if (action.scope === 'today') {
+      next = await pauseToday(marketToday());
+    } else {
+      next = await setPause({ paused: true, by: 'owner', scope: 'until-fixed', reason: 'Paused from the admin page.', at: new Date().toISOString() });
+    }
     return NextResponse.json({ ok: true, pause: next }, { headers: NO_STORE });
   } catch {
-    // A read after a failed write lets the caller see the true state.
-    const current = await readPause().catch(() => ({ paused }));
+    const current = await readPause().catch(() => ({ paused: action.paused }));
     return NextResponse.json(
       { error: 'Could not update the pause state.', pause: current },
       { status: 500, headers: NO_STORE },

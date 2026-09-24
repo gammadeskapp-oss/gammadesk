@@ -98,20 +98,8 @@
       "schedule": "30 22 * * 6"
     },
     {
-      "path": "/api/x/morning",
-      "schedule": "25 13,14 * * 1-5"
-    },
-    {
-      "path": "/api/x/gamma",
-      "schedule": "30 13,14 * * 1-5"
-    },
-    {
-      "path": "/api/x/pulse",
-      "schedule": "30 14-20 * * 1-5"
-    },
-    {
-      "path": "/api/x/closing",
-      "schedule": "20 20,21 * * 1-5"
+      "path": "/api/x/tick",
+      "schedule": "*/5 13-22 * * 1-5"
     },
     {
       "path": "/api/cron/health",

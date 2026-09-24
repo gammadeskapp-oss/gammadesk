@@ -26,10 +26,9 @@ const NO_STORE: Record<string, string> = {
 };
 
 const PREVIEW_SLOTS: PostSlot[] = [
-  { kind: 'morning', key: 'morning', label: 'Morning snapshot (~8:25 CT)' },
-  { kind: 'gamma', key: 'gamma', label: 'SPY gamma levels (8:30 CT)' },
-  { kind: 'pulse', key: 'pulse-preview', label: 'Market pulse (hourly 9:30–2:30 CT)' },
-  { kind: 'closing', key: 'closing', label: 'Closing snapshot' },
+  { kind: 'morning', key: 'morning', label: 'Morning post (8:30 CT)' },
+  { kind: 'intraday', key: 'intraday-preview', label: 'Intraday update (every 30–45 min, 9:00–2:45 CT)' },
+  { kind: 'closing', key: 'closing', label: 'Closing post (3:15 CT)' },
   { kind: 'earnings', key: 'earnings', label: 'Earnings today (7:30 CT, trading days)' },
   { kind: 'weekly', key: 'weekly', label: 'Weekly recap (Sun 5:00 CT)' },
 ];
@@ -58,6 +57,7 @@ async function buildPreviews() {
           asOfLabel: outcome.asOfLabel ?? null,
           checks: outcome.checks ?? [],
           reason: outcome.reason ?? null,
+          situation: outcome.situation ?? null,
         };
       } catch (error) {
         return {
@@ -68,6 +68,7 @@ async function buildPreviews() {
           asOfLabel: null,
           checks: [],
           reason: `Preview unavailable: ${error instanceof Error ? error.message : String(error)}`,
+          situation: null,
         };
       }
     }),
