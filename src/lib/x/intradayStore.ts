@@ -67,3 +67,13 @@ export async function markSummarySent(date: string): Promise<void> {
     // Best effort — a missed mark only risks a duplicate summary, never a post.
   }
 }
+
+/** Record that the market-hours stale-data alert just fired (throttle anchor). */
+export async function markStaleAlerted(date: string, now: Date): Promise<void> {
+  try {
+    const current = await readIntradayState(date);
+    await stateStore.write({ ...current, date, staleAlertedAt: now.toISOString() });
+  } catch {
+    // Best effort — a missed mark only risks an extra alert, never a post.
+  }
+}

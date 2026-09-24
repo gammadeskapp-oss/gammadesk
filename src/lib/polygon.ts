@@ -231,6 +231,66 @@ async function fetchChain(
   return { results, truncated };
 }
 
+/** Median of a non-empty numeric list. */
+function median(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+
+/**
+ * Spot from the options chain itself, by put-call parity.
+ *
+ * ## Why this exists
+ *
+ * On a pure Polygon *Options* plan (Options Starter and up, no Stocks
+ * entitlement) the options snapshot carries open interest, IV and greeks but
+ * **not** the underlying price — `underlying_asset` is `{ ticker }` and nothing
+ * else. The previous-close endpoint that would supply the price is a stocks
+ * call and returns 403. That single gap silently defeated the stale-feed
+ * failover: no spot meant no strike window meant the whole Polygon fetch threw.
+ *
+ * Parity closes it without a second subscription. For each strike in the front
+ * expiration, the forward is `K + (call − put)`; that equals spot to within
+ * discounting, which is negligible for the near-dated expirations shown here.
+ * A rough median locates the money, then only strikes within 5% of it are kept
+ * — near-ATM strikes are the two-sided, liquid ones, so a stale one-sided quote
+ * on a deep wing cannot drag the estimate. Verified against a live Starter
+ * snapshot: strikes 758–762 all returned 763.66–763.70.
+ */
+export function spotFromParity(results: SnapshotResult[]): number | null {
+  let frontExp: string | undefined;
+  for (const r of results) {
+    const e = r.details?.expiration_date;
+    if (e && (!frontExp || e < frontExp)) frontExp = e;
+  }
+  if (!frontExp) return null;
+
+  const calls = new Map<number, number>();
+  const puts = new Map<number, number>();
+  for (const r of results) {
+    if (r.details?.expiration_date !== frontExp) continue;
+    const k = r.details?.strike_price;
+    const price = usablePrice(r);
+    if (typeof k !== 'number' || price === null || price <= 0) continue;
+    if (r.details.contract_type === 'call') calls.set(k, price);
+    else if (r.details.contract_type === 'put') puts.set(k, price);
+  }
+
+  const pairs: Array<{ k: number; f: number }> = [];
+  for (const [k, c] of calls) {
+    const p = puts.get(k);
+    if (p === undefined) continue;
+    pairs.push({ k, f: k + (c - p) });
+  }
+  if (pairs.length < 5) return null;
+
+  const rough = median(pairs.map((x) => x.f));
+  if (!(rough > 0)) return null;
+  const near = pairs.filter((x) => Math.abs(x.k - rough) <= 0.05 * rough).map((x) => x.f);
+  const est = near.length >= 3 ? median(near) : rough;
+  return est > 0 ? est : null;
+}
+
 function usablePrice(raw: SnapshotResult): number | null {
   const bid = raw.last_quote?.bid;
   const ask = raw.last_quote?.ask;
@@ -444,24 +504,53 @@ async function fetchChainSpot(
     return { price: hint, asOf: new Date(), source: 'caller' };
   }
 
+  // Read the underlying price the options snapshot echoes on each contract. A
+  // single row is asked for `?limit=1`, but not every contract carries the
+  // `underlying_asset.price` field, so a whole page is scanned — one row missing
+  // it must not push us onto the stocks endpoint below. This is the request
+  // that keeps a pure *options* plan self-sufficient for spot.
   try {
     const data = await polygonFetch<SnapshotResponse>(
-      `/v3/snapshot/options/${encodeURIComponent(symbol)}?limit=1`,
+      `/v3/snapshot/options/${encodeURIComponent(symbol)}?limit=250`,
       counter,
     );
-    const price = data.results?.find(
+    const results = data.results ?? [];
+    const price = results.find(
       (r) => typeof r.underlying_asset?.price === 'number' && r.underlying_asset.price > 0,
     )?.underlying_asset?.price;
 
     if (typeof price === 'number' && price > 0) {
       return { price, asOf: new Date(), source: 'snapshot' };
     }
+
+    // Options-only plans don't echo the underlying price, so derive it from the
+    // chain by put-call parity — no stocks entitlement required.
+    const parity = spotFromParity(results);
+    if (parity !== null) {
+      return { price: parity, asOf: new Date(), source: 'snapshot' };
+    }
   } catch {
     // Fall through to the stocks endpoint, which is reported by the caller.
   }
 
-  const { price, asOf } = await fetchSpot(symbol, counter);
-  return { price, asOf, source: 'aggs' };
+  // Last resort: the previous-close bar. This is a STOCKS-plan call, so on an
+  // options-only plan (Options Starter and up, no stocks entitlement) it returns
+  // 403 — the failure that silently defeated the stale-feed failover. Kept as a
+  // genuine fallback for stocks-entitled keys, but its 403 is now turned into a
+  // clear, specific error the caller can surface rather than a generic throw.
+  try {
+    const { price, asOf } = await fetchSpot(symbol, counter);
+    return { price, asOf, source: 'aggs' };
+  } catch (error) {
+    if (error instanceof ChainError && (error.status === 401 || error.status === 403)) {
+      throw new ChainError(
+        `Could not establish a spot price for ${symbol} from Polygon.`,
+        error.status,
+        'The options snapshot did not echo the underlying price, and the previous-close endpoint is a stocks-plan call not included in an options-only plan. Add the Stocks entitlement, or use a key that carries it.',
+      );
+    }
+    throw error;
+  }
 }
 
 // --- entitlement -------------------------------------------------------------

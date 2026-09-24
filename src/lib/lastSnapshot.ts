@@ -89,7 +89,22 @@ export interface RecoveredSnapshot {
 }
 
 /**
- * Write through on every successful fetch.
+ * Write through on every successful fetch — but only when the fetched snapshot
+ * is actually *newer* than the one already stored.
+ *
+ * ## Why the freshness guard
+ *
+ * A "successful fetch" is not the same as fresh data. When Cboe's CDN freezes it
+ * keeps answering HTTP 200 with a well-formed chain whose own `quoteDate` is
+ * hours old (measured on 24 Sep 2026: every symbol stamped ~35h stale). Writing
+ * that through unconditionally did two harmful things: it recorded stale data as
+ * "last good", and — worse — it could *overwrite* a genuinely newer stored
+ * snapshot with an older one, walking the last-good pointer backwards.
+ *
+ * So the store is kept monotonic: it only advances to a strictly newer
+ * `quoteDate`. A stale-but-200 response is a no-op here, which is what makes the
+ * recovered snapshot the freshest real reading ever seen rather than whatever
+ * the frozen feed last handed back.
  *
  * Never throws and never blocks the caller's result: a storage failure must not
  * turn a working page into a broken one. The snapshot the reader asked for has
@@ -99,6 +114,13 @@ export async function saveLastGoodSnapshot(
   snapshot: ChainSnapshot,
   source: DataSource,
 ): Promise<void> {
+  // Do not walk the pointer backwards: keep the newest real quote we have seen.
+  const existing = await lastGoodSnapshotStatus().catch(() => null);
+  if (existing?.quoteDate) {
+    const stored = Date.parse(existing.quoteDate);
+    if (Number.isFinite(stored) && snapshot.quoteDate.getTime() <= stored) return;
+  }
+
   const doc: LastSnapshotDoc = {
     snapshot: {
       symbol: config.symbol,
