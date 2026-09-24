@@ -495,6 +495,24 @@ export async function fetchPolygonChain(
  * it is cheap to check and costs one unlimited options request on the tiers
  * that do serve it.
  */
+/**
+ * A live spot price on its own, without the full chain.
+ *
+ * The dashboard's chain snapshot is cached for many minutes so the levels stay
+ * stable and cheap; this is the cheap companion that keeps the *price* current
+ * — one options-snapshot page (spot echoed, or put-call parity when the plan
+ * does not echo it), no pagination and no gamma computation. Used behind the
+ * short `spotCacheSeconds` cache to overlay a fresh price on the display.
+ */
+export async function fetchPolygonSpot(
+  symbol: string,
+): Promise<{ price: number; asOf: Date; source: 'snapshot' | 'aggs' }> {
+  const counter = { count: 0 };
+  const { price, asOf, source } = await fetchChainSpot(symbol, counter);
+  // `caller` cannot occur without a hint, which is never passed here.
+  return { price, asOf, source: source === 'caller' ? 'snapshot' : source };
+}
+
 async function fetchChainSpot(
   symbol: string,
   counter: { count: number },

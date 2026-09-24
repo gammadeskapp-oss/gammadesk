@@ -62,6 +62,17 @@ export const config = {
     return Math.max(floor, num(process.env.GAMMADESK_CACHE_SECONDS, fallback));
   },
   /**
+   * How long a live spot quote is reused. The option chain is cached for many
+   * minutes (see `cacheSeconds`) so the levels stay stable and cheap, but the
+   * *price* those levels are measured against should track the tape — so the
+   * spot is fetched on its own short cache and overlaid on the display. One
+   * light request (a single options-snapshot page, or the Cboe compact quote)
+   * per window per symbol, which a paid plan spends without noticing.
+   */
+  get spotCacheSeconds(): number {
+    return Math.min(this.cacheSeconds, Math.max(30, num(process.env.GAMMADESK_SPOT_CACHE_SECONDS, 90)));
+  },
+  /**
    * How long a ticker consensus is reused. Daily bars only change once a
    * session, so an hour is generous and keeps repeated searches free.
    */
