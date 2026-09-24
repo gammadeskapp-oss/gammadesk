@@ -4,6 +4,7 @@ import { getBars } from '../bars/intraday';
 import type { PositioningData } from '../types';
 import { cached } from '../cache';
 import { getPositioningForSymbol } from '../positioning';
+import { getSpotQuote } from '../spot';
 import { clearsSpotDeadZone, nearestStrongWall } from '../simple/walls';
 import { formatExpiryLabel } from '../time';
 import { normaliseSymbol } from '../ticker/bars';
@@ -194,6 +195,21 @@ async function build(symbol: string): Promise<DecisionResult> {
   ]);
   const { summary, spot } = positioning;
 
+  /*
+   * `spot` is the chain snapshot's own price, on the many-minute chain cache. It
+   * is used below to *build* and *classify* the levels — which strikes count as
+   * walls, which side of the flip they sit on — so those stay stable within a
+   * cache window and do not flicker as price wobbles.
+   *
+   * `displaySpot` is a live quote on its own short cache (see `lib/spot.ts`),
+   * used for what the reader is quoted: the price itself and its distance to the
+   * flip and the walls. So the levels come from the (cheap, stable) chain and
+   * the price tracks the tape. Falls back to the chain spot if the live quote
+   * is unavailable.
+   */
+  const live = await getSpotQuote(symbol).catch(() => null);
+  const displaySpot = live?.price ?? spot;
+
   const walls = wallsFrom(positioning.rows, spot);
   const strikeGex = positioning.rows.map((r) => ({
     strike: r.strike,
@@ -207,7 +223,7 @@ async function build(symbol: string): Promise<DecisionResult> {
   const flipLevel = summary.flipLevel;
   const context: DecisionContext = {
     symbol: positioning.symbol,
-    spot,
+    spot: displaySpot,
     regime: summary.regime,
     mood: summary.regime === 'positive' ? 'calm' : 'wild',
     flipLevel,
@@ -215,15 +231,17 @@ async function build(symbol: string): Promise<DecisionResult> {
     frontExpiryLabel: summary.frontExpiration
       ? formatExpiryLabel(summary.frontExpiration)
       : null,
-    aboveFlip: flipLevel === null ? null : spot > flipLevel,
+    aboveFlip: flipLevel === null ? null : displaySpot > flipLevel,
     flipDistancePct:
       flipLevel === null || flipLevel === 0
         ? null
-        : ((spot - flipLevel) / flipLevel) * 100,
+        : ((displaySpot - flipLevel) / flipLevel) * 100,
     // Nearest *strong*, shared with the simple view so the two cannot
-    // disagree about where price stalls — see lib/simple/walls.ts.
-    magnetAbove: asWall(nearestStrongWall(strikeGex, spot, 'above'), spot),
-    magnetBelow: asWall(nearestStrongWall(strikeGex, spot, 'below'), spot),
+    // disagree about where price stalls — see lib/simple/walls.ts. The wall is
+    // *selected* off the chain spot (stable), its distance measured to the live
+    // price (current).
+    magnetAbove: asWall(nearestStrongWall(strikeGex, spot, 'above'), displaySpot),
+    magnetBelow: asWall(nearestStrongWall(strikeGex, spot, 'below'), displaySpot),
     asOfLabel: positioning.meta.asOfLabel,
     quoteDateLabel: positioning.meta.quoteDateLabel,
     quoteDateIso: positioning.meta.quoteDateIso,
