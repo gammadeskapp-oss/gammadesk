@@ -83,6 +83,36 @@ export function nextAction(input: TickInput): Action {
   return { kind: 'idle', reason: input.intraday.post === false ? input.intraday.reason : 'Nothing due.' };
 }
 
+// --- self-reporting: stale data during market hours --------------------------
+
+/** Regular NYSE session on the Chicago clock: 8:30 AM through 3:00 PM CT. */
+export const MARKET_OPEN_MIN = 8 * 60 + 30;
+export const MARKET_CLOSE_MIN = 15 * 60;
+
+/**
+ * Should the "SPY data is stale during market hours" alarm fire this tick?
+ *
+ * The nightly health check grades freshness after the close, when a
+ * close-of-session snapshot is legitimately the newest — so a feed that is
+ * frozen all day still reads "OK" there. This is the missing market-hours
+ * signal: while the regular session is open, data older than the 90-minute
+ * limit is a failure even though every fetch returned HTTP 200. Throttled to
+ * once an hour so a multi-hour outage sends one alert, not twelve.
+ */
+export function marketHoursStaleAlarm(input: {
+  hour: number;
+  minute: number;
+  stale: boolean;
+  staleAlertedAt?: string;
+  now: Date;
+}): boolean {
+  if (!input.stale) return false;
+  const m = input.hour * 60 + input.minute;
+  if (m < MARKET_OPEN_MIN || m >= MARKET_CLOSE_MIN) return false;
+  const last = Date.parse(input.staleAlertedAt ?? '');
+  return !Number.isFinite(last) || input.now.getTime() - last >= 60 * 60 * 1000;
+}
+
 // --- self-healing: auto-resume -----------------------------------------------
 
 /** One hour, the throttle for re-testing an auto-pause. */

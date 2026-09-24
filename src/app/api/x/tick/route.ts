@@ -6,6 +6,7 @@ import { marketToday } from '@/lib/time';
 import { ageMinutes, MAX_DATA_AGE_MIN } from '@/lib/x/compose';
 import {
   consecutiveSkips,
+  marketHoursStaleAlarm,
   nextAction,
   shouldAutoResume,
   summariseDay,
@@ -13,7 +14,7 @@ import {
 } from '@/lib/x/dispatch';
 import { loadDeskSnapshot } from '@/lib/x/deskData';
 import { decideIntraday, phraseUsage } from '@/lib/x/intradaySchedule';
-import { readIntradayState, recordIntradayPost, markSummarySent } from '@/lib/x/intradayStore';
+import { readIntradayState, recordIntradayPost, markSummarySent, markStaleAlerted } from '@/lib/x/intradayStore';
 import { postingEnabled, runSlot, type RunOutcome } from '@/lib/x/run';
 import { chicagoNow, isPostingDay } from '@/lib/x/schedule';
 import { alreadyPosted, readLog, readPause, resume, storeStatus } from '@/lib/x/store';
@@ -63,6 +64,28 @@ export async function GET(request: Request) {
   const stale = !snapshot || ageMinutes(snapshot.dataIso, now) > MAX_DATA_AGE_MIN;
 
   const state = await readIntradayState(date);
+
+  // Market-hours freshness alarm: SPY data over 90 min old while the regular
+  // session is open, even though every fetch returned 200 and the nightly
+  // health check reads "OK". Throttled to once an hour.
+  if (!dry && marketHoursStaleAlarm({ hour: clock.hour, minute: clock.minute, stale, staleAlertedAt: state.staleAlertedAt, now })) {
+    const ageLabel = snapshot ? `${Math.round(ageMinutes(snapshot.dataIso, now))} min old` : 'unavailable (no snapshot)';
+    await sendOwnerEmail(
+      'GammaDesk: SPY data STALE during market hours',
+      [
+        `The SPY snapshot behind /decision is ${ageLabel} while the market is open (limit ${MAX_DATA_AGE_MIN} min).`,
+        'Every upstream fetch is still returning HTTP 200, so the nightly health check will not catch this.',
+        '',
+        'Most likely the Cboe delayed-quotes CDN is frozen (it keeps answering 200 with a stale timestamp).',
+        'Failover only helps if a fresh secondary is configured — Polygon free has no open interest, so it cannot',
+        'replace the chain. Check /api/health and /status.',
+        '',
+        'Decision page: https://www.gammadesk.app/decision',
+      ].join('\n'),
+    ).catch(() => ({ sent: false }));
+    await markStaleAlerted(date, now);
+  }
+
   const intraday = snapshot
     ? decideIntraday(snapshot, state, now)
     : { post: false as const, reason: 'No snapshot.' };

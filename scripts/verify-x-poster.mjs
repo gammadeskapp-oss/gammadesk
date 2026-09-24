@@ -43,6 +43,7 @@ const {
   shouldAutoResume,
   summariseDay,
   consecutiveSkips,
+  marketHoursStaleAlarm,
 } = await import('../src/lib/x/dispatch.ts');
 const { phraseUsage } = await import('../src/lib/x/intradaySchedule.ts');
 const {
@@ -959,6 +960,18 @@ section('shouldAutoResume: pause-today next day, hourly auth re-test, never open
   ok('an auto-pause under an hour waits', shouldAutoResume({ paused: true, by: 'auto', at: '2026-09-21T14:30:00Z' }, '2026-09-21', now).resume === false);
   ok('an open-ended owner pause never auto-resumes', shouldAutoResume({ paused: true, by: 'owner', scope: 'until-fixed' }, '2026-09-21', now).resume === false);
   ok('a poster that is not paused stays that way', shouldAutoResume({ paused: false }, '2026-09-21', now).resume === false);
+}
+
+section('marketHoursStaleAlarm fires only when stale, in-session, throttled hourly');
+{
+  const now = new Date('2026-09-24T15:00:00Z');
+  ok('fresh data → no alarm', marketHoursStaleAlarm({ hour: 10, minute: 0, stale: false, now }) === false);
+  ok('stale, mid-session, never alerted → alarm', marketHoursStaleAlarm({ hour: 10, minute: 0, stale: true, now }) === true);
+  ok('stale but before 8:30 CT → no alarm', marketHoursStaleAlarm({ hour: 8, minute: 15, stale: true, now }) === false);
+  ok('stale but after 3:00 CT → no alarm (close covers it)', marketHoursStaleAlarm({ hour: 15, minute: 30, stale: true, now }) === false);
+  ok('stale, alerted 20 min ago → throttled', marketHoursStaleAlarm({ hour: 10, minute: 0, stale: true, staleAlertedAt: '2026-09-24T14:40:00Z', now }) === false);
+  ok('stale, alerted 70 min ago → alarm again', marketHoursStaleAlarm({ hour: 10, minute: 0, stale: true, staleAlertedAt: '2026-09-24T13:50:00Z', now }) === true);
+  ok('at the open (8:30 CT) → in session', marketHoursStaleAlarm({ hour: 8, minute: 30, stale: true, now }) === true);
 }
 
 // --- Self-reporting ----------------------------------------------------------

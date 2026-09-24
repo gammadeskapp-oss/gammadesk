@@ -30,6 +30,8 @@ export interface IntradayState {
   usedPhrases: string[];
   /** True once the 4:30 CT daily summary email has gone out for this day. */
   summarySent?: boolean;
+  /** When the "stale during market hours" alert last fired, ISO — throttles it. */
+  staleAlertedAt?: string;
 }
 
 function minutesOfDay(hour: number, minute: number): number {
