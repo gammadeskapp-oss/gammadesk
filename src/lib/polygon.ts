@@ -444,9 +444,14 @@ async function fetchChainSpot(
     return { price: hint, asOf: new Date(), source: 'caller' };
   }
 
+  // Read the underlying price the options snapshot echoes on each contract. A
+  // single row is asked for `?limit=1`, but not every contract carries the
+  // `underlying_asset.price` field, so a whole page is scanned — one row missing
+  // it must not push us onto the stocks endpoint below. This is the request
+  // that keeps a pure *options* plan self-sufficient for spot.
   try {
     const data = await polygonFetch<SnapshotResponse>(
-      `/v3/snapshot/options/${encodeURIComponent(symbol)}?limit=1`,
+      `/v3/snapshot/options/${encodeURIComponent(symbol)}?limit=250`,
       counter,
     );
     const price = data.results?.find(
@@ -460,8 +465,24 @@ async function fetchChainSpot(
     // Fall through to the stocks endpoint, which is reported by the caller.
   }
 
-  const { price, asOf } = await fetchSpot(symbol, counter);
-  return { price, asOf, source: 'aggs' };
+  // Last resort: the previous-close bar. This is a STOCKS-plan call, so on an
+  // options-only plan (Options Starter and up, no stocks entitlement) it returns
+  // 403 — the failure that silently defeated the stale-feed failover. Kept as a
+  // genuine fallback for stocks-entitled keys, but its 403 is now turned into a
+  // clear, specific error the caller can surface rather than a generic throw.
+  try {
+    const { price, asOf } = await fetchSpot(symbol, counter);
+    return { price, asOf, source: 'aggs' };
+  } catch (error) {
+    if (error instanceof ChainError && (error.status === 401 || error.status === 403)) {
+      throw new ChainError(
+        `Could not establish a spot price for ${symbol} from Polygon.`,
+        error.status,
+        'The options snapshot did not echo the underlying price, and the previous-close endpoint is a stocks-plan call not included in an options-only plan. Add the Stocks entitlement, or use a key that carries it.',
+      );
+    }
+    throw error;
+  }
 }
 
 // --- entitlement -------------------------------------------------------------

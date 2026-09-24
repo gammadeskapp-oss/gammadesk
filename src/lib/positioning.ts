@@ -128,11 +128,28 @@ async function fetchFreshest(symbol: string): Promise<RawSnapshot> {
         ],
       };
     }
-  } catch {
-    // Secondary unreachable or no better — keep the stale primary. The banner
-    // will flag it, which is the correct outcome when nothing fresher exists.
+    // The secondary answered but was no fresher — say so, rather than leaving the
+    // stale banner to imply the failover was never attempted.
+    return {
+      ...primaryRaw,
+      notes: [
+        ...primaryRaw.notes,
+        `${SOURCE_LABELS[primary]} was stale, so ${SOURCE_LABELS[secondary]} was tried — but it was no fresher (its quote was from ${formatAsOf(alt.quoteDate)}), so the ${SOURCE_LABELS[primary]} reading was kept.`,
+      ],
+    };
+  } catch (error) {
+    // Secondary unreachable or not entitled. Record WHY on the snapshot notes so
+    // a stale-feed incident shows whether failover engaged and what it hit
+    // (e.g. a 403 from an options-only Polygon key), instead of a silent swallow.
+    const reason = error instanceof ChainError ? (error.hint ?? error.message) : error instanceof Error ? error.message : String(error);
+    return {
+      ...primaryRaw,
+      notes: [
+        ...primaryRaw.notes,
+        `${SOURCE_LABELS[primary]} was stale, so ${SOURCE_LABELS[secondary]} was tried as a fallback — but it failed: ${reason}`,
+      ],
+    };
   }
-  return primaryRaw;
 }
 
 async function fetchSnapshot(): Promise<RawSnapshot> {
