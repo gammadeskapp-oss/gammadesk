@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { createJsonStore } from '../jsonStore';
-import { nextDueAfter, type IntradayState, type TriggerKey } from './intradaySchedule';
+import { nextDueAfter, type IntradayState, type LockedLevels, type TriggerKey } from './intradaySchedule';
 
 /**
  * Durable state for the intraday cadence: when the next timed update may fire,
@@ -37,24 +37,56 @@ export async function readIntradayState(date: string): Promise<IntradayState> {
   return { date, nextDueIso: null, triggersPosted: [], usedPhrases: [], summarySent: false };
 }
 
-/** Record that an intraday post went out: advance the timer, mark the break and phrase. */
+/**
+ * Record that an intraday post went out: advance the timer, mark the break and
+ * phrase, throttle the wild wording, and lock the day's levels if not already.
+ */
 export async function recordIntradayPost(
   date: string,
   now: Date,
-  trigger: TriggerKey | null,
-  phraseId?: string | null,
+  opts: {
+    trigger: TriggerKey | null;
+    phraseId?: string | null;
+    /** True when the post used "wild/bigger moves" wording — anchors the 1/hour throttle. */
+    wild?: boolean;
+    /** The day's levels to lock, if the morning post did not already lock them. */
+    lockedLevels?: LockedLevels;
+  },
 ): Promise<void> {
   try {
     const current = await readIntradayState(date);
-    const triggersPosted = trigger
-      ? [...new Set([...current.triggersPosted, trigger])]
+    const triggersPosted = opts.trigger
+      ? [...new Set([...current.triggersPosted, opts.trigger])]
       : current.triggersPosted;
-    const usedPhrases = phraseId
-      ? [...new Set([...current.usedPhrases, phraseId])]
+    const usedPhrases = opts.phraseId
+      ? [...new Set([...current.usedPhrases, opts.phraseId])]
       : current.usedPhrases;
-    await stateStore.write({ ...current, date, nextDueIso: nextDueAfter(now), triggersPosted, usedPhrases });
+    await stateStore.write({
+      ...current,
+      date,
+      nextDueIso: nextDueAfter(now),
+      triggersPosted,
+      usedPhrases,
+      // Lock the levels once — the first post of the day that carries them wins.
+      lockedLevels: current.lockedLevels ?? opts.lockedLevels,
+      lastWildIso: opts.wild ? now.toISOString() : current.lastWildIso,
+    });
   } catch {
     // Best effort — the log's once-a-day guard still stops a same-key repost.
+  }
+}
+
+/**
+ * Lock the day's flip/support/resistance at the morning post. Locks once: a
+ * later call (e.g. a redeploy replaying the morning) does not move them.
+ */
+export async function recordLockedLevels(date: string, levels: LockedLevels): Promise<void> {
+  try {
+    const current = await readIntradayState(date);
+    if (current.lockedLevels) return;
+    await stateStore.write({ ...current, date, lockedLevels: levels });
+  } catch {
+    // Best effort — an unlocked day just falls back to the live levels.
   }
 }
 

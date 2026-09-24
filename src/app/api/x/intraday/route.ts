@@ -4,7 +4,7 @@ import { marketSessionRules } from '@/lib/events';
 import { marketToday } from '@/lib/time';
 import { chicagoNow, isTradingDay } from '@/lib/x/schedule';
 import { loadDeskSnapshot } from '@/lib/x/deskData';
-import { decideIntraday, pendingTrigger, phraseUsage } from '@/lib/x/intradaySchedule';
+import { applyLockedLevels, decideIntraday, lockableLevels, pendingTrigger, phraseUsage } from '@/lib/x/intradaySchedule';
 import { readIntradayState, recordIntradayPost } from '@/lib/x/intradayStore';
 import { runSlot } from '@/lib/x/run';
 import { readLog, storeStatus } from '@/lib/x/store';
@@ -54,7 +54,12 @@ export async function GET(request: Request) {
   }
 
   const state = await readIntradayState(date);
-  const decision = decideIntraday(snapshot, state, now);
+  // Same locked-levels overlay and wild throttle as the autonomous tick.
+  const locked = state.lockedLevels ?? lockableLevels(snapshot);
+  const intradaySnapshot = applyLockedLevels(snapshot, locked);
+  const lastWild = Date.parse(state.lastWildIso ?? '');
+  const allowWild = !Number.isFinite(lastWild) || now.getTime() - lastWild >= 60 * 60 * 1000;
+  const decision = decideIntraday(intradaySnapshot, state, now);
 
   // Preview and force both compose regardless of the timer.
   if (!decision.post && !preview && !force) {
@@ -63,7 +68,7 @@ export async function GET(request: Request) {
 
   const c = chicagoNow(now);
   const hhmm = `${String(c.hour).padStart(2, '0')}${String(c.minute).padStart(2, '0')}`;
-  const trigger = decision.post ? decision.trigger : pendingTrigger(snapshot, state.triggersPosted);
+  const trigger = decision.post ? decision.trigger : pendingTrigger(intradaySnapshot, state.triggersPosted);
   const slotKey = decision.post ? decision.slotKey : `intraday-${hhmm}`;
   const slot: PostSlot = {
     kind: 'intraday',
@@ -75,12 +80,17 @@ export async function GET(request: Request) {
     now,
     force,
     dry: dry || preview,
-    ctx: { snapshot, usedPhrases: state.usedPhrases, phraseUsage: usage },
+    ctx: { snapshot: intradaySnapshot, usedPhrases: state.usedPhrases, phraseUsage: usage, allowWild },
   });
 
   // Advance the pacing timer and mark the break/phrase only on a real send.
   if (outcome.status === 'sent') {
-    await recordIntradayPost(date, now, trigger, outcome.phraseId);
+    await recordIntradayPost(date, now, {
+      trigger,
+      phraseId: outcome.phraseId,
+      wild: outcome.wild,
+      lockedLevels: locked,
+    });
   }
 
   return NextResponse.json({ ...outcome, trigger, store: storeStatus() });

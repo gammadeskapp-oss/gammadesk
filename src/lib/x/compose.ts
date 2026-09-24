@@ -85,6 +85,30 @@ export function moodEmoji(mood: Mood): string {
   return mood === 'calm' ? '🟡' : '🔴';
 }
 
+/**
+ * A level rounded to a whole number for a post, e.g. 767.54 → "768".
+ *
+ * The intraday posts quote levels as round numbers on purpose — "the 769
+ * ceiling" reads like a person talking, "the 768.54 ceiling" reads like a
+ * machine. The chart on /decision keeps the exact strike; only the prose rounds.
+ */
+export function roundLevel(n: number): string {
+  return String(Math.round(n));
+}
+
+/**
+ * The day change as plain words: "Up 0.3% on the day." / "Down 0.2% on the
+ * day." / "Flat on the day." One decimal, and a flat reading never renders as
+ * "-0.0%". This is the intraday context line's opener, the spoken cousin of
+ * `changeText`'s arrowed form.
+ */
+export function dayChangeWords(fraction: number): string {
+  const rounded = Math.round(fraction * 1000) / 10; // percent, one decimal
+  if (rounded === 0) return 'Flat on the day.';
+  const dir = rounded > 0 ? 'Up' : 'Down';
+  return `${dir} ${Math.abs(rounded).toFixed(1)}% on the day.`;
+}
+
 /** A cashtag list: ["META","MU"] -> "$META $MU". */
 function cashtags(names: ScoredName[]): string {
   return names.map((n) => `$${n.symbol}`).join(' ');

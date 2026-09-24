@@ -40,6 +40,8 @@ export interface BuildContext {
   usedPhrases?: string[];
   /** Intraday phrase id → uses over the last ~5 days, for the self-varying selector. */
   phraseUsage?: Record<string, number>;
+  /** False suppresses "wild/bigger moves" intraday wording (throttled to 1/hour). */
+  allowWild?: boolean;
 }
 
 export interface BuiltPost {
@@ -62,6 +64,8 @@ export interface BuiltPost {
   situation?: string;
   /** For an intraday post: the phrase id used, recorded for self-varying. */
   phraseId?: string;
+  /** For an intraday post: true when it used "wild/bigger moves" wording. */
+  wild?: boolean;
 }
 
 function fromComposed(c: Composed, note?: string): BuiltPost {
@@ -89,12 +93,14 @@ async function buildIntraday(ctx: BuildContext, now: Date): Promise<BuiltPost> {
   const picked = composeIntradayPhrase(snapshot, {
     used: ctx.usedPhrases ?? [],
     usage: ctx.phraseUsage ?? {},
+    allowWild: ctx.allowWild ?? true,
   });
   if (picked) {
     return {
       ...fromComposed(picked.composed, `phrase: ${picked.situation}`),
       situation: picked.situation,
       phraseId: picked.phraseId,
+      wild: picked.wild,
     };
   }
   return fromComposed(composeIntradayFallback(snapshot), 'no renderable phrase, used fallback');

@@ -1,4 +1,5 @@
 import type { DeskSnapshot } from './compose';
+import { NEAR_PCT } from './phrases';
 import { chicagoNow } from './schedule';
 
 /**
@@ -19,6 +20,13 @@ export const INTRADAY_LAST = { hour: 14, minute: 45 };
 const GAP_MIN = 30;
 const GAP_MAX = 45;
 
+/** The day's flip/support/resistance, locked at the morning post. */
+export interface LockedLevels {
+  flip: number | null;
+  support: number | null;
+  resistance: number | null;
+}
+
 export interface IntradayState {
   /** Chicago `YYYY-MM-DD` this state describes. */
   date: string;
@@ -28,10 +36,35 @@ export interface IntradayState {
   triggersPosted: string[];
   /** Phrase-bank ids already posted today, so none repeats within the day. */
   usedPhrases: string[];
+  /**
+   * The flip/support/resistance the whole day's intraday posts measure against,
+   * locked at the 8:30 morning post (or the first intraday post if the morning
+   * one was missed). Levels are not recomputed per post, so a chain that
+   * re-reads a slightly different flip mid-session does not move the goalposts
+   * or re-fire an alert. Absent until the day's first post locks it.
+   */
+  lockedLevels?: LockedLevels;
+  /** When a "wild/bigger moves" line last posted, ISO — throttles it to 1/hour. */
+  lastWildIso?: string;
   /** True once the 4:30 CT daily summary email has gone out for this day. */
   summarySent?: boolean;
   /** When the "stale during market hours" alert last fired, ISO — throttles it. */
   staleAlertedAt?: string;
+}
+
+/**
+ * Overlay the day's locked levels onto a live snapshot: the price and movers
+ * stay live, the flip/support/resistance come from the lock. Used for every
+ * intraday decision and post so the levels are the morning's, all day.
+ */
+export function applyLockedLevels(s: DeskSnapshot, locked: LockedLevels | null): DeskSnapshot {
+  if (!locked) return s;
+  return { ...s, flip: locked.flip, support: locked.support, resistance: locked.resistance };
+}
+
+/** The levels to lock from a snapshot at the day's first post. */
+export function lockableLevels(s: DeskSnapshot): LockedLevels {
+  return { flip: s.flip, support: s.support, resistance: s.resistance };
 }
 
 function minutesOfDay(hour: number, minute: number): number {
@@ -84,11 +117,14 @@ export type TriggerKey = 'below-flip' | 'above-resistance' | 'below-support';
  * checked first, then a break above resistance, then below support.
  */
 export function pendingTrigger(s: DeskSnapshot, posted: string[]): TriggerKey | null {
-  if (s.flip !== null && s.spot < s.flip && !posted.includes('below-flip')) return 'below-flip';
-  if (s.resistance !== null && s.spot > s.resistance && !posted.includes('above-resistance')) {
+  // A cross counts only once price is at least NEAR_PCT (0.15%) past the level,
+  // so a hair over the line is not an alert. Each key fires at most once a day
+  // (it is then in `posted`), so a level re-crossed later does not re-alert.
+  if (s.flip !== null && s.spot < s.flip * (1 - NEAR_PCT) && !posted.includes('below-flip')) return 'below-flip';
+  if (s.resistance !== null && s.spot > s.resistance * (1 + NEAR_PCT) && !posted.includes('above-resistance')) {
     return 'above-resistance';
   }
-  if (s.support !== null && s.spot < s.support && !posted.includes('below-support')) return 'below-support';
+  if (s.support !== null && s.spot < s.support * (1 - NEAR_PCT) && !posted.includes('below-support')) return 'below-support';
   return null;
 }
 
