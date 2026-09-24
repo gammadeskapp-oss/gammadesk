@@ -1,250 +1,165 @@
 import 'server-only';
 
-import { getPositioning } from '../positioning';
 import { formatClockEt, marketToday } from '../time';
-import { fetchCboeQuote, fetchCboeQuotes } from './cboeQuote';
-import { readBriefForDate, readClosingBriefForDate, readWeeklyBriefForWeek } from './brief';
-import { formatClockCt, mostRecentFriday } from './schedule';
+import { readBriefForDate, readWeeklyBriefForWeek } from './brief';
+import { mostRecentFriday } from './schedule';
 import {
-  composeBriefMorning,
-  composeClosing,
-  composeClosingBrief,
   composeEarningsPost,
-  composeFallbackMorning,
-  composeGamma,
-  composePulse,
   composeWeeklyBrief,
   selectEarningsNames,
-  type ComposedPost,
 } from './text';
-import type { PostSlotKind } from './types';
-import { X_LIMIT } from './text';
-import { readScanForDate } from '../news/store';
-import { xLine } from '../news/view';
-import type { PickedStory } from '../news/types';
+import {
+  composeClosing,
+  composeIntradayFallback,
+  composeMorning,
+  type Composed,
+  type DeskSnapshot,
+} from './compose';
+import { composeIntradayPhrase } from './phrases';
+import { loadDeskSnapshot } from './deskData';
+import type { PostNumbers, PostSlotKind } from './types';
 
 /**
- * The data-fetching side of composition: pull the dealer-positioning book and
- * the Cboe quotes, then hand the primitives to the pure composers in `text.ts`.
+ * The composition side of the poster: turn a slot into finished text.
  *
- * The plain-English translation of the levels (balance point / ceiling / floor
- * / calm-choppy) and every wording rule live in `text.ts`, where they are
- * unit-tested; this file only decides which numbers go in.
- */
-
-export { X_LIMIT, DISCLAIMER } from './text';
-export type { ComposedPost } from './text';
-
-export const PULSE_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'VIX'] as const;
-
-/**
- * The day's top scanned story, if the news scanner has one for `date`. Used to
- * feed the morning and closing posts from the scanner rather than leaving them
- * to rely only on the Cowork brief. Never throws — the post always goes out even
- * if the scan store is unreachable.
- */
-async function topNewsStory(date: string): Promise<PickedStory | null> {
-  const scan = await readScanForDate(date).catch(() => null);
-  return scan?.top?.[0] ?? null;
-}
-
-/**
- * Splice a "Top story" line into an already-composed post, just before its final
- * footer line, but only when it still fits under the X limit. If it would
- * overrun, the post is returned unchanged — a market update is never dropped or
- * truncated for the sake of a news line.
- */
-export function withNewsLine(composed: ComposedPost, story: PickedStory | null): ComposedPost {
-  if (!story) return composed;
-  const line = `📰 ${xLine(story)}`;
-  const lines = composed.text.split('\n');
-  if (lines.length < 1) return composed;
-  const footer = lines[lines.length - 1];
-  const body = lines.slice(0, -1);
-  const text = [...body, line, footer].join('\n');
-  if ([...text].length > X_LIMIT) return composed;
-  return { ...composed, text, length: [...text].length };
-}
-
-/**
- * The 8:25 CT morning post now leads with the Cowork "Morning Desk" brief.
+ * The three market slots (morning, intraday, closing) are built from one
+ * `DeskSnapshot` — the same figures /decision shows for SPY. Morning and closing
+ * are fixed templates; intraday picks a line from the free phrase bank
+ * (`phrases.ts`) for the current situation, and falls back to a fixed line if no
+ * phrase can be rendered. Weekly and earnings are the editorial recaps, still
+ * driven by the Cowork briefs.
  *
- * If today's brief has arrived it drives the post (SPY/QQQ/VIX, top story,
- * earnings). If not, it falls back to a simple live SPY/QQQ/VIX snapshot and
- * carries a "brief missing" note so the log records the miss. Either way the
- * post is stamped in Central time, carries no gamma levels and no link — those
- * belong to the 8:30 post.
+ * Everything here returns a single normalised `BuiltPost` so `run.ts` can
+ * deliver any slot the same way.
  */
-export async function buildMorning(now: Date = new Date()): Promise<ComposedPost> {
-  const asOf = formatClockCt(now);
-  const date = marketToday(now);
-  const [brief, story] = await Promise.all([
-    readBriefForDate(date).catch(() => null),
-    topNewsStory(date),
-  ]);
-  if (brief) {
-    return withNewsLine(composeBriefMorning(brief, asOf), story);
-  }
 
-  // Fallback: a plain SPY/QQQ/VIX snapshot from live Cboe quotes.
-  const quotes = await fetchCboeQuotes(['SPY', 'QQQ', 'VIX']);
-  const spy = quotes.get('SPY');
-  const qqq = quotes.get('QQQ');
-  const vix = quotes.get('VIX');
-  const isos = [spy, qqq, vix].filter(Boolean).map((q) => q!.quoteIso).sort();
-  const dataIso = isos.slice(-1)[0] ?? now.toISOString();
-  return withNewsLine(
-    composeFallbackMorning(
-      {
-        spy: spy && { price: spy.price, changePct: spy.changePct, quoteIso: spy.quoteIso },
-        qqq: qqq && { price: qqq.price, changePct: qqq.changePct, quoteIso: qqq.quoteIso },
-        vix: vix && { price: vix.price, changePct: vix.changePct, quoteIso: vix.quoteIso },
-      },
-      asOf,
-      dataIso,
-    ),
-    story,
-  );
+export interface BuildContext {
+  /** A pre-loaded snapshot, so a route that already fetched one avoids a second fetch. */
+  snapshot?: DeskSnapshot;
+  /** Intraday phrase ids already posted today — never reused while alternatives exist. */
+  usedPhrases?: string[];
+  /** Intraday phrase id → uses over the last ~5 days, for the self-varying selector. */
+  phraseUsage?: Record<string, number>;
 }
 
-export async function buildGamma(): Promise<ComposedPost> {
-  const data = await getPositioning();
-  const s = data.summary;
-  return composeGamma({
-    spot: s.spot,
-    regime: s.regime,
-    flipLevel: s.flipLevel,
-    wallAbove: s.magnetAbove?.strike ?? null,
-    floorBelow: s.magnetBelow?.strike ?? null,
-    asOfLabel: formatClockEt(new Date(data.meta.quoteDateIso)),
-    dataIso: data.meta.quoteDateIso,
+export interface BuiltPost {
+  text: string;
+  length: number;
+  numbers: PostNumbers;
+  dataIso: string;
+  /**
+   * Weekly and earnings are editorial recaps: no "as of" freshness clock, and
+   * graded by the older wording rules rather than the market-slot self-checks.
+   */
+  editorial: boolean;
+  /** Editorial "as of" label, for the log. */
+  asOfLabel?: string;
+  /** A stored poster image to try to attach (editorial slots only now). */
+  image?: { date: string; type: 'weekly' | 'earnings' };
+  /** An operational note folded into a successful post's log line. */
+  note?: string;
+  /** For an intraday post: which situation the phrase bank matched. */
+  situation?: string;
+  /** For an intraday post: the phrase id used, recorded for self-varying. */
+  phraseId?: string;
+}
+
+function fromComposed(c: Composed, note?: string): BuiltPost {
+  return { text: c.text, length: c.length, numbers: c.numbers, dataIso: c.dataIso, editorial: false, note };
+}
+
+async function buildMorning(ctx: BuildContext, now: Date): Promise<BuiltPost> {
+  const snapshot = ctx.snapshot ?? (await loadDeskSnapshot(now));
+  return fromComposed(composeMorning(snapshot));
+}
+
+async function buildClosing(ctx: BuildContext, now: Date): Promise<BuiltPost> {
+  const snapshot = ctx.snapshot ?? (await loadDeskSnapshot(now));
+  return fromComposed(composeClosing(snapshot));
+}
+
+/**
+ * The intraday update. Picks a line from the free phrase bank for the current
+ * situation (below flip, near a level, broke out, in range), never a phrase
+ * already used today, preferring the least-used over recent days. Falls back to
+ * the fixed line only when no phrase can be rendered from this snapshot.
+ */
+async function buildIntraday(ctx: BuildContext, now: Date): Promise<BuiltPost> {
+  const snapshot = ctx.snapshot ?? (await loadDeskSnapshot(now));
+  const picked = composeIntradayPhrase(snapshot, {
+    used: ctx.usedPhrases ?? [],
+    usage: ctx.phraseUsage ?? {},
   });
-}
-
-export async function buildPulse(): Promise<ComposedPost> {
-  const quotes = await fetchCboeQuotes([...PULSE_SYMBOLS]);
-  const spy = quotes.get('SPY');
-  const qqq = quotes.get('QQQ');
-  const iwm = quotes.get('IWM');
-  const vix = quotes.get('VIX');
-
-  // The freshest of the symbol timestamps is what the post is "as of".
-  const isos = [spy, qqq, iwm, vix]
-    .filter(Boolean)
-    .map((q) => q!.quoteIso)
-    .sort();
-  const dataIso = isos.slice(-1)[0] ?? new Date().toISOString();
-
-  return composePulse(
-    {
-      spy: spy && { price: spy.price, changePct: spy.changePct, quoteIso: spy.quoteIso },
-      qqq: qqq && { price: qqq.price, changePct: qqq.changePct, quoteIso: qqq.quoteIso },
-      iwm: iwm && { price: iwm.price, changePct: iwm.changePct, quoteIso: iwm.quoteIso },
-      vix: vix && { price: vix.price, changePct: vix.changePct, quoteIso: vix.quoteIso },
-    },
-    formatClockEt(new Date(dataIso)),
-    dataIso,
-  );
+  if (picked) {
+    return {
+      ...fromComposed(picked.composed, `phrase: ${picked.situation}`),
+      situation: picked.situation,
+      phraseId: picked.phraseId,
+    };
+  }
+  return fromComposed(composeIntradayFallback(snapshot), 'no renderable phrase, used fallback');
 }
 
 /**
- * The 3:20 CT closing post now leads with the Cowork "Closing Bell" brief.
- *
- * If today's closing brief has arrived it drives the post (index changes, VIX,
- * what drove the day, top movers). If not, it falls back to the original
- * dealer-positioning closing post and carries a "closing brief missing" note.
- * No link either way.
+ * The Sunday weekly recap, from the Cowork "Week in review" brief. No live
+ * fallback: a missing brief throws and the runner logs a skip.
  */
-export async function buildClosing(now: Date = new Date()): Promise<ComposedPost> {
-  const date = marketToday(now);
-  const [brief, story] = await Promise.all([
-    readClosingBriefForDate(date).catch(() => null),
-    topNewsStory(date),
-  ]);
-  if (brief) {
-    return withNewsLine(composeClosingBrief(brief), story);
-  }
-
-  const data = await getPositioning();
-  const s = data.summary;
-
-  // Day change from Cboe's compact SPY quote; levels from the book. If the
-  // quote fails, the post still goes out without the percentage.
-  let spyChangePct: number | null = null;
-  let spyPrice: number | null = null;
-  let quoteIso: string | null = null;
-  try {
-    const q = await fetchCboeQuote('SPY');
-    spyChangePct = q.changePct;
-    spyPrice = q.price;
-    quoteIso = q.quoteIso;
-  } catch {
-    // Levels-only closing post.
-  }
-
-  const dataIso = quoteIso ?? data.meta.quoteDateIso;
-  const composed = composeClosing({
-    spot: s.spot,
-    regime: s.regime,
-    flipLevel: s.flipLevel,
-    wallAbove: s.magnetAbove?.strike ?? null,
-    floorBelow: s.magnetBelow?.strike ?? null,
-    asOfLabel: formatClockEt(new Date(dataIso)),
-    dataIso,
-    spyChangePct,
-    spyPrice,
-  });
-  return withNewsLine({ ...composed, note: 'closing brief missing' }, story);
-}
-
-/**
- * The Sunday 5:00 CT weekly recap, driven entirely by the Cowork "Week in
- * review" brief. There is no live fallback: if this week's brief has not
- * arrived, the build throws and `runSlot` logs a skip — exactly the required
- * "no weekly brief by 5:00 PM CT → skip and log it" behaviour.
- */
-export async function buildWeekly(now: Date = new Date()): Promise<ComposedPost> {
+async function buildWeekly(now: Date): Promise<BuiltPost> {
   const weekEnding = mostRecentFriday(now);
   const brief = await readWeeklyBriefForWeek(weekEnding).catch(() => null);
-  if (!brief) {
-    throw new Error(`No weekly brief for the week ending ${weekEnding} has arrived.`);
-  }
-  return composeWeeklyBrief(brief);
+  if (!brief) throw new Error(`No weekly brief for the week ending ${weekEnding} has arrived.`);
+  const c = composeWeeklyBrief(brief);
+  return {
+    text: c.text,
+    length: c.length,
+    numbers: c.numbers,
+    dataIso: c.dataIso,
+    editorial: true,
+    asOfLabel: c.asOfLabel,
+    image: c.image ? { date: c.image.date, type: 'weekly' } : undefined,
+  };
 }
 
 /**
- * The 7:30 CT earnings-day post, built from the morning brief's earnings list
- * filtered to well-known large companies. Throws (→ silent skip) when no morning
- * brief has arrived yet, or when nobody the broad market cares about reports.
+ * The 7:30 CT earnings-day heads-up, from the morning brief's earnings list
+ * filtered to well-known large companies. Throws (→ silent skip) when there is
+ * no brief yet, or nobody the broad market cares about reports.
  */
-export async function buildEarnings(now: Date = new Date()): Promise<ComposedPost> {
+async function buildEarnings(now: Date): Promise<BuiltPost> {
   const date = marketToday(now);
   const brief = await readBriefForDate(date).catch(() => null);
-  if (!brief) {
-    throw new Error('No morning brief yet, so no earnings names to post.');
-  }
+  if (!brief) throw new Error('No morning brief yet, so no earnings names to post.');
   const picks = selectEarningsNames(brief.earningsToday, 3);
-  if (picks.length === 0) {
-    throw new Error('No well-known large company reports today.');
-  }
-  return composeEarningsPost(
+  if (picks.length === 0) throw new Error('No well-known large company reports today.');
+  const c = composeEarningsPost(
     picks.map((p) => p.display),
     formatClockEt(new Date(brief.receivedAt ?? now.toISOString())),
     brief.receivedAt ?? now.toISOString(),
     { date, type: 'earnings' },
   );
+  return {
+    text: c.text,
+    length: c.length,
+    numbers: c.numbers,
+    dataIso: c.dataIso,
+    editorial: true,
+    asOfLabel: c.asOfLabel,
+    image: { date, type: 'earnings' },
+  };
 }
 
-export function buildForSlot(slot: PostSlotKind, now: Date = new Date()): Promise<ComposedPost> {
+export function buildForSlot(
+  slot: PostSlotKind,
+  now: Date = new Date(),
+  ctx: BuildContext = {},
+): Promise<BuiltPost> {
   switch (slot) {
     case 'morning':
-      return buildMorning(now);
-    case 'gamma':
-      return buildGamma();
-    case 'pulse':
-      return buildPulse();
+      return buildMorning(ctx, now);
+    case 'intraday':
+      return buildIntraday(ctx, now);
     case 'closing':
-      return buildClosing(now);
+      return buildClosing(ctx, now);
     case 'weekly':
       return buildWeekly(now);
     case 'earnings':

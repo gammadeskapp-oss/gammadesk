@@ -89,25 +89,25 @@ ok('weekend passes with a reason', evaluateExpectedPosts([], '2026-09-19', { tra
 ok('posting off passes with a reason', evaluateExpectedPosts([], '2026-09-18', { tradingDay: true, postingEnabled: false }).ok === true);
 {
   const rows = [
-    { slot: 'gamma', date: '2026-09-18', outcome: 'sent' },
-    { slot: 'pulse', date: '2026-09-18', outcome: 'sent' },
+    { slot: 'morning', date: '2026-09-18', outcome: 'sent' },
+    { slot: 'intraday', date: '2026-09-18', outcome: 'sent' },
     { slot: 'closing', date: '2026-09-18', outcome: 'sent' },
   ];
   ok('all three sent passes', evaluateExpectedPosts(rows, '2026-09-18', { tradingDay: true, postingEnabled: true }).ok === true);
 }
 {
-  const rows = [{ slot: 'gamma', date: '2026-09-18', outcome: 'sent' }];
+  const rows = [{ slot: 'morning', date: '2026-09-18', outcome: 'sent' }];
   const r = evaluateExpectedPosts(rows, '2026-09-18', { tradingDay: true, postingEnabled: true });
-  ok('missing closing + pulse fails', r.ok === false);
-  ok('names what is missing', r.detail.includes('closing') && r.detail.includes('pulse'), r.detail);
+  ok('missing closing + intraday fails', r.ok === false);
+  ok('names what is missing', r.detail.includes('closing') && r.detail.includes('intraday'), r.detail);
 }
 ok('a skipped post does not count as sent', evaluateExpectedPosts(
-  [{ slot: 'gamma', date: '2026-09-18', outcome: 'skipped' }, { slot: 'closing', date: '2026-09-18', outcome: 'sent' }, { slot: 'pulse', date: '2026-09-18', outcome: 'sent' }],
+  [{ slot: 'morning', date: '2026-09-18', outcome: 'skipped' }, { slot: 'closing', date: '2026-09-18', outcome: 'sent' }, { slot: 'intraday', date: '2026-09-18', outcome: 'sent' }],
   '2026-09-18',
   { tradingDay: true, postingEnabled: true },
 ).ok === false);
 ok('yesterday\'s sends do not satisfy today', evaluateExpectedPosts(
-  [{ slot: 'gamma', date: '2026-09-17', outcome: 'sent' }],
+  [{ slot: 'morning', date: '2026-09-17', outcome: 'sent' }],
   '2026-09-18',
   { tradingDay: true, postingEnabled: true },
 ).ok === false);

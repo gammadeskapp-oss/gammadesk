@@ -88,9 +88,16 @@ export function chicagoNow(now: Date = new Date()): ChicagoClock {
  */
 export interface ClosedCheck {
   isClosed(date: string): boolean;
+  /** The NYSE close hour (ET) for the date; 16 on a full day, earlier on a
+   * shortened session. Optional so callers that only need the holiday check can
+   * pass a minimal shape. */
+  closeHour?(date: string): number;
 }
 
 const NEVER_CLOSED: ClosedCheck = { isClosed: () => false };
+
+/** The regular NYSE close hour; anything earlier is a shortened session. */
+export const REGULAR_CLOSE_HOUR = 16;
 
 /** Monday–Friday and not a calendar holiday. */
 export function isTradingDay(
@@ -103,18 +110,26 @@ export function isTradingDay(
   return !rules.isClosed(date);
 }
 
-/** The Chicago hour at which the morning post fires (8:25 AM CT). */
+/** A shortened NYSE session (e.g. the 1:00 PM ET half-days). */
+export function isEarlyClose(date: string, rules: ClosedCheck = NEVER_CLOSED): boolean {
+  const closeHour = rules.closeHour?.(date) ?? REGULAR_CLOSE_HOUR;
+  return closeHour !== REGULAR_CLOSE_HOUR;
+}
+
+/**
+ * A day the poster runs on: a normal full-length trading day. Weekends,
+ * holidays, and early-close half-days are all skipped — a shortened, low-signal
+ * session is not worth a scheduled post.
+ */
+export function isPostingDay(date: string, rules: ClosedCheck = NEVER_CLOSED): boolean {
+  return isTradingDay(date, rules) && !isEarlyClose(date, rules);
+}
+
+/** The Chicago hour at which the morning post fires (8:30 AM CT). */
 export const MORNING_HOUR_CT = 8;
 
-/** The Chicago hour at which the daily gamma post fires. */
-export const GAMMA_HOUR_CT = 8;
-
-/** The Chicago hour at which the closing post fires (3:20 PM CT). */
+/** The Chicago hour at which the closing post fires (3:15 PM CT). */
 export const CLOSING_HOUR_CT = 15;
-
-/** First and last Chicago hours of the hourly market-pulse window (inclusive). */
-export const PULSE_FIRST_HOUR_CT = 9;
-export const PULSE_LAST_HOUR_CT = 14;
 
 /** The Chicago hour at which the Sunday weekly-recap post fires (5:00 PM CT). */
 export const WEEKLY_HOUR_CT = 17;
@@ -166,13 +181,11 @@ export function dueEarningsSlot(
 
 /**
  * The morning slot if this firing is the 8:xx CT one on a trading day, else
- * null — the 8:25 CT snapshot that leads with the Cowork "Morning Desk" brief.
+ * null — the 8:30 CT fixed-template snapshot built from the /decision SPY data.
  *
- * Gated on the hour (8 CT) like gamma, so a cron delayed a few minutes still
- * posts and a firing pushed into the 9 o'clock hour is rejected. The morning
- * cron fires at :25 and the gamma cron at :30, so they never land on the same
- * firing even though both accept the 8 o'clock hour; the once-a-day ledger keys
- * ('morning' vs 'gamma') keep them independent.
+ * Gated on the hour (8 CT) so a cron delayed a few minutes still posts and a
+ * firing pushed into the 9 o'clock hour is rejected; the once-a-day ledger
+ * stops a second 8:xx firing.
  */
 export function dueMorningSlot(
   now: Date = new Date(),
@@ -181,30 +194,12 @@ export function dueMorningSlot(
   const clock = chicagoNow(now);
   if (!isTradingDay(clock.date, rules)) return null;
   if (clock.hour !== MORNING_HOUR_CT) return null;
-  return { kind: 'morning', key: 'morning', label: 'Morning snapshot (8:25 CT)' };
+  return { kind: 'morning', key: 'morning', label: 'Morning post (8:30 CT)' };
 }
 
 /**
- * The gamma slot if this firing is the 8:xx CT one on a trading day, else null.
- *
- * Gated on the hour rather than the exact minute so a cron delayed a few
- * minutes past 8:30 still posts; a firing pushed into the 9 o'clock hour is
- * rejected rather than posted under a misleading time, and the once-a-day
- * ledger stops a second 8:xx firing.
- */
-export function dueGammaSlot(
-  now: Date = new Date(),
-  rules: ClosedCheck = NEVER_CLOSED,
-): PostSlot | null {
-  const clock = chicagoNow(now);
-  if (!isTradingDay(clock.date, rules)) return null;
-  if (clock.hour !== GAMMA_HOUR_CT) return null;
-  return { kind: 'gamma', key: 'gamma', label: 'SPY daily gamma levels (8:30 CT)' };
-}
-
-/**
- * The closing slot if this firing is the 3:20 PM CT one on a trading day, else
- * null. Gated on the hour (15 CT) so a cron delayed a few minutes past 3:20
+ * The closing slot if this firing is the 3:xx PM CT one on a trading day, else
+ * null. Gated on the hour (15 CT) so a cron delayed a few minutes past 3:15
  * still posts; the once-a-day ledger stops a second firing in the same hour.
  */
 export function dueClosingSlot(
@@ -214,27 +209,5 @@ export function dueClosingSlot(
   const clock = chicagoNow(now);
   if (!isTradingDay(clock.date, rules)) return null;
   if (clock.hour !== CLOSING_HOUR_CT) return null;
-  return { kind: 'closing', key: 'closing', label: 'Closing snapshot (3:20 CT)' };
-}
-
-/**
- * The market-pulse slot for this firing, or null when outside the 9:30–2:30 CT
- * window (or not a trading day).
- *
- * The slot key carries the Chicago hour so the six firings a day are six
- * distinct ledger rows, each posted at most once.
- */
-export function duePulseSlot(
-  now: Date = new Date(),
-  rules: ClosedCheck = NEVER_CLOSED,
-): PostSlot | null {
-  const clock = chicagoNow(now);
-  if (!isTradingDay(clock.date, rules)) return null;
-  if (clock.hour < PULSE_FIRST_HOUR_CT || clock.hour > PULSE_LAST_HOUR_CT) return null;
-  const hh = String(clock.hour).padStart(2, '0');
-  return {
-    kind: 'pulse',
-    key: `pulse-${hh}`,
-    label: `Market pulse (${hh}:30 CT)`,
-  };
+  return { kind: 'closing', key: 'closing', label: 'Closing post (3:15 CT)' };
 }

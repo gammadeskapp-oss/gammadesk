@@ -4,7 +4,8 @@ import { marketSessionRules, snapshotStaleness } from '../events';
 import { sendAutoPauseAlert, sendSkipAlert } from '../health/email';
 import { marketToday } from '../time';
 import { readCredentials, postTweet, uploadMedia } from './client';
-import { buildForSlot, type ComposedPost } from './content';
+import { buildForSlot, type BuildContext, type BuiltPost } from './content';
+import { ageMinutes, checkPost, MAX_DATA_AGE_MIN } from './compose';
 import { postingEnabledFromValue } from './flags';
 import { checkNumbers, checkText } from './guard';
 import { markImagePosted, readImageBytes } from './imageStore';
@@ -27,6 +28,11 @@ import type { PostLogEntry, PostSlot } from './types';
  * can only be judged from the composed text and figures. Only a post that
  * clears all of them is sent.
  *
+ * The three market slots (morning, intraday, closing) are graded by the shared
+ * `checkPost` rules and a 90-minute freshness gate on the SPY data. Weekly and
+ * earnings are editorial: no freshness clock, the older wording rules, and a
+ * stored poster image when one is present.
+ *
  * Nothing here throws: every path returns a `RunOutcome` and writes at most one
  * log line, so a cron calling it can report cleanly whatever happened.
  */
@@ -36,12 +42,19 @@ export interface RunOutcome {
   slotKey: string;
   status: 'sent' | 'skipped' | 'failed' | 'preview';
   reason?: string;
-  /** Self-check failures, when that is why it was skipped (or on a preview). */
   checks?: string[];
   text?: string;
   length?: number;
   tweetId?: string;
   asOfLabel?: string;
+  /** For an intraday post: the phrase-bank situation and id. */
+  situation?: string;
+  phraseId?: string;
+}
+
+/** A short wait between transient X retries. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export interface RunOptions {
@@ -51,30 +64,19 @@ export interface RunOptions {
    * or the quality checks. */
   force?: boolean;
   now?: Date;
+  /** Build context — a pre-loaded snapshot and the day's recent intraday posts. */
+  ctx?: BuildContext;
 }
 
 /**
  * The env kill switch: posting is off unless X_POSTING_ENABLED is set to a
- * truthy value.
- *
- * Forgiving on purpose, the same way the unlock password is (see
- * `lib/tos/auth.ts`): a value pasted into a Vercel env var routinely arrives
- * wrapped in quotes or with a trailing newline, and "I set it to true but it
- * says disabled" is almost always that. Wrapping quotes and surrounding
- * whitespace are stripped, and the common truthy spellings are accepted, so a
- * correct intent is not defeated by formatting. Anything else — unset, empty,
- * `false`, `0`, `no`, `off` — leaves posting off, which is the safe default.
+ * truthy value. Forgiving on formatting, the same way the unlock password is.
  */
 export function postingEnabled(): boolean {
   return postingEnabledFromValue(process.env['X_POSTING_ENABLED']);
 }
 
-/**
- * Owner-facing diagnostic for why posting is or is not enabled. The value is
- * non-sensitive config, and this is only ever surfaced on the owner-only admin
- * page — so it can show the actual value, which is what makes a typo or a
- * stray-quote mistake obvious rather than a silent "disabled".
- */
+/** Owner-facing diagnostic for why posting is or is not enabled. */
 export function postingEnabledDiagnostic(): {
   enabled: boolean;
   present: boolean;
@@ -92,6 +94,29 @@ async function log(entry: PostLogEntry): Promise<void> {
   await appendLog(entry);
 }
 
+/** The self-check failures for a built post, market or editorial. */
+function gradePost(built: BuiltPost, last: PostLogEntry | null, now: Date): string[] {
+  if (built.editorial) {
+    const checks = checkText(built.text, { requireStamp: false });
+    if (Object.keys(built.numbers).length > 0) {
+      checks.push(...checkNumbers(built.numbers, last?.numbers ?? null));
+    }
+    const staleness = snapshotStaleness(built.dataIso, now);
+    if (staleness.stale) checks.push(`Data is stale (${staleness.expectedNote}).`);
+    return checks;
+  }
+
+  // Market slot: shared wording/length rules, a figure sanity/jump check, and
+  // the 90-minute freshness gate on the SPY data.
+  const checks = checkPost(built.text);
+  checks.push(...checkNumbers(built.numbers, last?.numbers ?? null));
+  const age = ageMinutes(built.dataIso, now);
+  if (age > MAX_DATA_AGE_MIN) {
+    checks.push(`SPY data is ${Number.isFinite(age) ? `${Math.round(age)} min` : 'of unknown age'} old (limit ${MAX_DATA_AGE_MIN} min).`);
+  }
+  return checks;
+}
+
 export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise<RunOutcome> {
   const now = options.now ?? new Date();
   const dry = options.dry ?? false;
@@ -107,8 +132,6 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     if (!postingEnabled()) {
       return { ...base, status: 'skipped', reason: 'Posting is disabled (X_POSTING_ENABLED is not true).' };
     }
-    // The weekly recap fires on a Sunday by design, so it is exempt from the
-    // trading-day gate; every other slot requires a live session.
     if (slot.kind !== 'weekly' && !isTradingDay(date, rules)) {
       return { ...base, status: 'skipped', reason: 'Not a trading day (weekend or market holiday).' };
     }
@@ -122,17 +145,14 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
 
   // --- compose ----------------------------------------------------------------
 
-  let composed: ComposedPost;
+  let built: BuiltPost;
   try {
-    composed = await buildForSlot(slot.kind, now);
+    built = await buildForSlot(slot.kind, now, options.ctx ?? {});
   } catch (error) {
     const reason = `Could not build the post: ${error instanceof Error ? error.message : String(error)}`;
     if (!dry) {
       await log({ at: now.toISOString(), date, slot: slot.kind, slotKey: slot.key, text: '', length: 0, outcome: 'skipped', reason });
-      // The earnings heads-up legitimately has nothing to post on many days;
-      // that is routine editorial emptiness, not a delivery problem, so it does
-      // not warrant an email. Every other build failure does.
-      const routineEmpty = slot.kind === 'earnings' && /no earnings names|no morning brief/i.test(reason);
+      const routineEmpty = slot.kind === 'earnings' && /no earnings names|no morning brief|no well-known/i.test(reason);
       if (!routineEmpty) void sendSkipAlert(slot.kind, reason, now).catch(() => {});
     }
     return { ...base, status: 'skipped', reason };
@@ -140,67 +160,40 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
 
   // --- quality gates (force does not override these) --------------------------
 
-  // The weekly recap and the earnings heads-up are editorial: they carry no
-  // "as of" clock (they link to /daily instead), and the earnings post carries
-  // no figures at all. Exempt them from the stamp and empty-figure checks — the
-  // wording and length rules still apply, as does the jump check on any figure
-  // they do carry (the weekly's VIX).
-  const editorial = slot.kind === 'weekly' || slot.kind === 'earnings';
-  const checks: string[] = [];
-  checks.push(...checkText(composed.text, { requireStamp: !editorial }));
-
   const last = await lastSentForSlot(slot.kind).catch(() => null);
-  if (Object.keys(composed.numbers).length > 0 || !editorial) {
-    checks.push(...checkNumbers(composed.numbers, last?.numbers ?? null));
-  }
-
-  const staleness = snapshotStaleness(composed.dataIso, now);
-  if (staleness.stale) {
-    checks.push(`Data is stale (${staleness.expectedNote}).`);
-  }
+  const checks = gradePost(built, last, now);
 
   if (checks.length > 0) {
     if (!dry) {
       await log({
-        at: now.toISOString(),
-        date,
-        slot: slot.kind,
-        slotKey: slot.key,
-        text: composed.text,
-        length: composed.length,
-        outcome: 'skipped',
+        at: now.toISOString(), date, slot: slot.kind, slotKey: slot.key,
+        text: built.text, length: built.length, outcome: 'skipped',
         reason: `Self-check failed: ${checks.join(' ')}`,
-        asOfLabel: composed.asOfLabel,
-        numbers: composed.numbers,
+        asOfLabel: built.asOfLabel, numbers: built.numbers, phraseId: built.phraseId,
       });
     }
-    return { ...base, status: dry ? 'preview' : 'skipped', reason: 'Self-check failed.', checks, text: composed.text, length: composed.length, asOfLabel: composed.asOfLabel };
+    return { ...base, status: dry ? 'preview' : 'skipped', reason: 'Self-check failed.', checks, text: built.text, length: built.length, asOfLabel: built.asOfLabel, situation: built.situation, phraseId: built.phraseId };
   }
 
   // --- preview: everything passed, but do not post ---------------------------
 
   if (dry) {
-    return { ...base, status: 'preview', text: composed.text, length: composed.length, asOfLabel: composed.asOfLabel, checks: [] };
+    return { ...base, status: 'preview', text: built.text, length: built.length, asOfLabel: built.asOfLabel, checks: [], situation: built.situation, phraseId: built.phraseId };
   }
 
   // --- credentials -----------------------------------------------------------
 
   if (!readCredentials()) {
     const reason = 'X credentials are not configured.';
-    await log({ at: now.toISOString(), date, slot: slot.kind, slotKey: slot.key, text: composed.text, length: composed.length, outcome: 'skipped', reason, asOfLabel: composed.asOfLabel, numbers: composed.numbers });
-    return { ...base, status: 'skipped', reason, text: composed.text };
+    await log({ at: now.toISOString(), date, slot: slot.kind, slotKey: slot.key, text: built.text, length: built.length, outcome: 'skipped', reason, asOfLabel: built.asOfLabel, numbers: built.numbers });
+    return { ...base, status: 'skipped', reason, text: built.text };
   }
 
-  // --- attach the poster image, when one was supplied ------------------------
+  // --- attach the poster image, when one was supplied (editorial only) --------
 
-  // Morning and closing derive their image from the slot + trading date; weekly
-  // and earnings name their own image key (its date is not the trading date), so
-  // the composer supplies it. gamma/pulse never carry one.
-  const imageRef: { date: string; type: 'morning' | 'closing' | 'weekly' | 'earnings' } | null =
-    composed.image ??
-    (slot.kind === 'morning' || slot.kind === 'closing' ? { date, type: slot.kind } : null);
   let mediaId: string | undefined;
   let imageNote: string | undefined;
+  const imageRef = built.image ?? null;
   if (imageRef) {
     const bytes = await readImageBytes(imageRef.date, imageRef.type).catch(() => null);
     if (bytes) {
@@ -216,88 +209,60 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
 
   // --- send, with a single retry on a transient failure ----------------------
 
-  // The retry reuses the already-uploaded media id — no re-upload.
-  let result = await postTweet(composed.text, mediaId);
-  if (!result.ok && (result.kind === 'rate' || result.kind === 'other')) {
-    result = await postTweet(composed.text, mediaId);
+  // A temporary X error (rate limit, 5xx, timeout) is retried up to 3 times
+  // total with a short wait; auth/billing/duplicate never retry.
+  let result = await postTweet(built.text, mediaId);
+  for (let attempt = 1; attempt < 3 && !result.ok && (result.kind === 'rate' || result.kind === 'other'); attempt += 1) {
+    await delay(800);
+    result = await postTweet(built.text, mediaId);
   }
 
-  // If a tweet carrying an image fails for any reason other than a duplicate,
-  // the image is the likely culprit (the text-only slots post fine with the same
-  // credentials). Retry once without the image so the update still goes out,
-  // rather than losing the post over an optional poster. X media upload needs a
-  // paid API tier; until then the image simply cannot attach and text-only is
-  // the right graceful result.
+  // A tweet carrying an image that fails for anything but a duplicate: retry
+  // once without the image so the update still goes out (X media needs a paid
+  // tier; until then text-only is the right graceful result).
   if (!result.ok && mediaId && result.kind !== 'duplicate') {
-    const textOnly = await postTweet(composed.text);
+    const textOnly = await postTweet(built.text);
     if (textOnly.ok) {
       result = textOnly;
       imageNote = 'image rejected by X, posted text-only';
-      mediaId = undefined; // the image did not post — don't let cleanup retire it.
+      mediaId = undefined;
     }
   }
 
   if (result.ok) {
-    // A posted image is marked so the daily cleanup may later retire it.
     if (mediaId && imageRef) await markImagePosted(imageRef.date, imageRef.type);
-    const reason = [composed.note, imageNote].filter(Boolean).join('; ') || undefined;
+    const reason = [built.note, imageNote].filter(Boolean).join('; ') || undefined;
     await log({
-      at: now.toISOString(),
-      date,
-      slot: slot.kind,
-      slotKey: slot.key,
-      text: composed.text,
-      length: composed.length,
-      outcome: 'sent',
-      reason,
-      tweetId: result.tweetId,
-      asOfLabel: composed.asOfLabel,
-      numbers: composed.numbers,
+      at: now.toISOString(), date, slot: slot.kind, slotKey: slot.key,
+      text: built.text, length: built.length, outcome: 'sent', reason,
+      tweetId: result.tweetId, asOfLabel: built.asOfLabel, numbers: built.numbers, phraseId: built.phraseId,
     });
-    return { ...base, status: 'sent', reason, text: composed.text, length: composed.length, tweetId: result.tweetId, asOfLabel: composed.asOfLabel };
+    return { ...base, status: 'sent', reason, text: built.text, length: built.length, tweetId: result.tweetId, asOfLabel: built.asOfLabel, situation: built.situation, phraseId: built.phraseId };
   }
 
-  // Only two failures ever pause the poster: genuinely bad credentials (`auth`)
-  // and out-of-credit / quota (`billing`). Retrying those just burns attempts
-  // against a problem only a human can fix, so we pause and email at once.
+  // Only genuinely bad credentials (`auth`) and out-of-credit (`billing`) pause
+  // the poster. Everything else skips this one post and lets later slots run.
   if (result.kind === 'auth' || result.kind === 'billing') {
     const pauseReason = `Auto-paused after an X ${result.kind} error: ${result.error ?? 'unknown'}`;
     await autoPause(pauseReason);
     void sendAutoPauseAlert(pauseReason, now).catch(() => {});
     await log({
-      at: now.toISOString(),
-      date,
-      slot: slot.kind,
-      slotKey: slot.key,
-      text: composed.text,
-      length: composed.length,
-      outcome: 'failed',
-      reason: result.error ?? 'X post failed.',
-      asOfLabel: composed.asOfLabel,
-      numbers: composed.numbers,
+      at: now.toISOString(), date, slot: slot.kind, slotKey: slot.key,
+      text: built.text, length: built.length, outcome: 'failed',
+      reason: result.error ?? 'X post failed.', asOfLabel: built.asOfLabel, numbers: built.numbers,
     });
-    return { ...base, status: 'failed', reason: result.error, text: composed.text, length: composed.length };
+    return { ...base, status: 'failed', reason: result.error, text: built.text, length: built.length };
   }
 
-  // Everything else — a duplicate, a 403 the account cannot perform, a rate
-  // limit, a timeout — is NOT a reason to pause. Skip this one post, email the
-  // reason, and let every later slot run untouched.
   const reason =
     result.kind === 'duplicate'
       ? 'Skipped: X already has an identical post (duplicate content).'
       : `Skipped: ${result.error ?? 'X post failed.'}`;
   await log({
-    at: now.toISOString(),
-    date,
-    slot: slot.kind,
-    slotKey: slot.key,
-    text: composed.text,
-    length: composed.length,
-    outcome: 'skipped',
-    reason,
-    asOfLabel: composed.asOfLabel,
-    numbers: composed.numbers,
+    at: now.toISOString(), date, slot: slot.kind, slotKey: slot.key,
+    text: built.text, length: built.length, outcome: 'skipped', reason,
+    asOfLabel: built.asOfLabel, numbers: built.numbers,
   });
   void sendSkipAlert(slot.kind, reason, now).catch(() => {});
-  return { ...base, status: 'skipped', reason, text: composed.text, length: composed.length, asOfLabel: composed.asOfLabel };
+  return { ...base, status: 'skipped', reason, text: built.text, length: built.length, asOfLabel: built.asOfLabel };
 }

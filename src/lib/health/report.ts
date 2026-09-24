@@ -76,8 +76,8 @@ export interface PostRow {
  *
  * Only meaningful on a trading day with posting switched on — otherwise there is
  * nothing to expect, and the check passes with a reason rather than a red mark.
- * When it does apply, the day's spine is the 8:30 gamma post, the closing post,
- * and at least one market-pulse post; the check names whichever are missing.
+ * When it does apply, the day's spine is the 8:30 morning post, the closing
+ * post, and at least one intraday update; the check names whichever are missing.
  */
 export function evaluateExpectedPosts(
   rows: PostRow[],
@@ -91,12 +91,12 @@ export function evaluateExpectedPosts(
     rows.filter((r) => r.date === date && r.outcome === 'sent').map((r) => r.slot),
   );
   const missing: string[] = [];
-  if (!sentToday.has('gamma')) missing.push('gamma (8:30)');
-  if (!sentToday.has('closing')) missing.push('closing (3:20)');
-  if (!sentToday.has('pulse')) missing.push('market pulse');
+  if (!sentToday.has('morning')) missing.push('morning (8:30)');
+  if (!sentToday.has('closing')) missing.push('closing (3:15)');
+  if (!sentToday.has('intraday')) missing.push('intraday update');
 
   return missing.length === 0
-    ? { ok: true, detail: 'Gamma, closing and pulse posts all went out today.' }
+    ? { ok: true, detail: 'Morning, closing and intraday posts all went out today.' }
     : { ok: false, detail: `Expected posts not sent today: ${missing.join(', ')}.` };
 }
 

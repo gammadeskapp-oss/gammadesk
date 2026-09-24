@@ -21,15 +21,53 @@ const { buildAuthHeader, classify, rfc3986 } = await import('../src/lib/x/oauth.
 const {
   chicagoNow,
   isTradingDay,
+  isEarlyClose,
+  isPostingDay,
   dueMorningSlot,
-  dueGammaSlot,
-  duePulseSlot,
   dueClosingSlot,
   dueWeeklySlot,
   dueEarningsSlot,
   mostRecentFriday,
   formatClockCt,
 } = await import('../src/lib/x/schedule.ts');
+const {
+  PHRASES,
+  MOVERS,
+  pickSituation,
+  render,
+  composeIntradayPhrase,
+  phraseId,
+} = await import('../src/lib/x/phrases.ts');
+const {
+  nextAction,
+  shouldAutoResume,
+  summariseDay,
+  consecutiveSkips,
+} = await import('../src/lib/x/dispatch.ts');
+const { phraseUsage } = await import('../src/lib/x/intradaySchedule.ts');
+const {
+  composeMorning: composeMarketMorning,
+  composeClosing: composeMarketClosing,
+  composeIntradayFallback,
+  finishIntraday,
+  changeText,
+  moodEmoji,
+  money,
+  xLen,
+  plainEnglish,
+  checkPost,
+  ageMinutes,
+  MAX_DATA_AGE_MIN,
+  NFA,
+  DAILY_LINK: MARKET_DAILY_LINK,
+} = await import('../src/lib/x/compose.ts');
+const {
+  inIntradayWindow,
+  randomGapMinutes,
+  nextDueAfter,
+  pendingTrigger,
+  decideIntraday,
+} = await import('../src/lib/x/intradaySchedule.ts');
 const { checkText, checkNumbers } = await import('../src/lib/x/guard.ts');
 const { postingEnabledFromValue } = await import('../src/lib/x/flags.ts');
 const { decodeImageField, selectImagesToDelete, MAX_IMAGE_BYTES } = await import('../src/lib/x/media.ts');
@@ -151,53 +189,19 @@ ok('timeout-ish 408 → other', classify(408, 'request timeout') === 'other');
 
 // --- Chicago-clock schedule (DST must not shift the posts) -------------------
 
-section('The gamma slot fires at 8:30 CT in both summer and winter');
+section('The morning slot is 8:30 CT year-round (fixed template)');
 
 const closedRules = { isClosed: (d) => d === '2026-07-03' }; // a made-up holiday
 
-// Summer: CDT = UTC-5, so 13:30 UTC is 08:30 Central.
-ok('summer 13:30 UTC → gamma', dueGammaSlot(new Date('2026-07-01T13:30:00Z')) !== null);
-ok('summer 14:30 UTC → not gamma (that is 9:30 CT)', dueGammaSlot(new Date('2026-07-01T14:30:00Z')) === null);
-// Winter: CST = UTC-6, so 14:30 UTC is 08:30 Central.
-ok('winter 14:30 UTC → gamma', dueGammaSlot(new Date('2026-01-05T14:30:00Z')) !== null);
-ok('winter 13:30 UTC → not gamma (that is 7:30 CT)', dueGammaSlot(new Date('2026-01-05T13:30:00Z')) === null);
-// Weekend and holiday are skipped.
-ok('Saturday → no gamma', dueGammaSlot(new Date('2026-07-04T13:30:00Z')) === null);
-ok('holiday → no gamma', dueGammaSlot(new Date('2026-07-03T13:30:00Z'), closedRules) === null);
-ok('gamma slot key is stable', dueGammaSlot(new Date('2026-07-01T13:30:00Z')).key === 'gamma');
-
-section('The morning slot is 8:25 CT year-round (cron fires at :25)');
-// Summer: CDT = UTC-5, so 13:25 UTC is 08:25 Central; 14:25 UTC is 09:25.
-ok('summer 13:25 UTC → morning', dueMorningSlot(new Date('2026-07-01T13:25:00Z')) !== null);
-ok('summer 14:25 UTC → not morning (that is 9:25 CT)', dueMorningSlot(new Date('2026-07-01T14:25:00Z')) === null);
-// Winter: CST = UTC-6, so 14:25 UTC is 08:25 Central; 13:25 UTC is 07:25.
-ok('winter 14:25 UTC → morning', dueMorningSlot(new Date('2026-01-05T14:25:00Z')) !== null);
-ok('winter 13:25 UTC → not morning (that is 7:25 CT)', dueMorningSlot(new Date('2026-01-05T13:25:00Z')) === null);
-ok('Saturday → no morning', dueMorningSlot(new Date('2026-07-04T13:25:00Z')) === null);
-ok('holiday → no morning', dueMorningSlot(new Date('2026-07-03T13:25:00Z'), closedRules) === null);
-ok('morning slot key is stable', dueMorningSlot(new Date('2026-07-01T13:25:00Z')).key === 'morning');
-
-section('The pulse window is 9:30–2:30 CT, and the slot key carries the hour');
-
-// Summer boundaries.
-ok('summer 14:30 UTC → pulse-09', duePulseSlot(new Date('2026-07-01T14:30:00Z'))?.key === 'pulse-09');
-ok('summer 19:30 UTC → pulse-14 (2:30 CT, last slot)', duePulseSlot(new Date('2026-07-01T19:30:00Z'))?.key === 'pulse-14');
-ok('summer 20:30 UTC → null (3:30 CT, past the window)', duePulseSlot(new Date('2026-07-01T20:30:00Z')) === null);
-ok('summer 13:30 UTC → null (8:30 CT, before the window)', duePulseSlot(new Date('2026-07-01T13:30:00Z')) === null);
-// Winter boundaries.
-ok('winter 15:30 UTC → pulse-09', duePulseSlot(new Date('2026-01-05T15:30:00Z'))?.key === 'pulse-09');
-ok('winter 20:30 UTC → pulse-14', duePulseSlot(new Date('2026-01-05T20:30:00Z'))?.key === 'pulse-14');
-ok('winter 21:30 UTC → null (3:30 CT)', duePulseSlot(new Date('2026-01-05T21:30:00Z')) === null);
-// Six distinct slots across the summer session — no duplicates.
-{
-  const keys = new Set();
-  for (let utc = 14; utc <= 19; utc += 1) {
-    const slot = duePulseSlot(new Date(`2026-07-01T${String(utc).padStart(2, '0')}:30:00Z`));
-    if (slot) keys.add(slot.key);
-  }
-  ok('summer session yields exactly 6 pulse slots', keys.size === 6, [...keys].join(','));
-}
-ok('weekend → no pulse', duePulseSlot(new Date('2026-07-04T15:30:00Z')) === null);
+// Summer: CDT = UTC-5, so 13:30 UTC is 08:30 Central; 14:30 UTC is 09:30.
+ok('summer 13:30 UTC → morning', dueMorningSlot(new Date('2026-07-01T13:30:00Z')) !== null);
+ok('summer 14:30 UTC → not morning (that is 9:30 CT)', dueMorningSlot(new Date('2026-07-01T14:30:00Z')) === null);
+// Winter: CST = UTC-6, so 14:30 UTC is 08:30 Central; 13:30 UTC is 07:30.
+ok('winter 14:30 UTC → morning', dueMorningSlot(new Date('2026-01-05T14:30:00Z')) !== null);
+ok('winter 13:30 UTC → not morning (that is 7:30 CT)', dueMorningSlot(new Date('2026-01-05T13:30:00Z')) === null);
+ok('Saturday → no morning', dueMorningSlot(new Date('2026-07-04T13:30:00Z')) === null);
+ok('holiday → no morning', dueMorningSlot(new Date('2026-07-03T13:30:00Z'), closedRules) === null);
+ok('morning slot key is stable', dueMorningSlot(new Date('2026-07-01T13:30:00Z')).key === 'morning');
 
 section('isTradingDay knows weekends and holidays');
 ok('a weekday trades', isTradingDay('2026-07-01') === true);
@@ -637,6 +641,327 @@ section('composeEarningsPost is rule-clean, prediction-free and links to /daily'
   ok('carries no figures', JSON.stringify(p.numbers) === '{}');
   ok('no banned wording (no buy/sell/expected-move)', checkText(p.text, { requireStamp: false }).every((f) => !/banned/i.test(f)));
   ok('image key is the trading date', p.image && p.image.date === '2026-09-16' && p.image.type === 'earnings');
+}
+
+// --- Reworked poster: formatting, fixed templates, intraday cadence ----------
+
+section('changeText: one decimal, ▲/▼, never -0.0%');
+ok('+0.4% → ▲0.4%', changeText(0.004) === '▲0.4%', changeText(0.004));
+ok('-1.2% → ▼1.2%', changeText(-0.012) === '▼1.2%', changeText(-0.012));
+ok('flat → 0.0%', changeText(0) === '0.0%');
+ok('a -0.04% that rounds to zero → 0.0% (never -0.0%)', changeText(-0.0004) === '0.0%', changeText(-0.0004));
+ok('money to two decimals', money(773.4) === '773.40');
+ok('moodEmoji calm → 🟡', moodEmoji('calm') === '🟡');
+ok('moodEmoji wild → 🔴', moodEmoji('wild') === '🔴');
+
+section('xLen counts the gammadesk.app link as 23');
+ok('a bare link weighs 23', xLen('gammadesk.app/daily') === 23, String(xLen('gammadesk.app/daily')));
+ok('text + link weighs text + 23', xLen(`hi\n${DAILY_LINK}`) === 3 + 23, String(xLen(`hi\n${DAILY_LINK}`)));
+
+const snap = {
+  spot: 773.4,
+  changePct: 0.004,
+  dayHigh: 775.1,
+  dayLow: 771.2,
+  mood: 'wild',
+  resistance: 775,
+  support: 772,
+  flip: 770,
+  strong: [{ symbol: 'META', score: 89 }, { symbol: 'MU', score: 78 }, { symbol: 'NVDA', score: 67 }],
+  weak: [{ symbol: 'TSLA', score: 12 }, { symbol: 'F', score: 22 }],
+  headline: 'KO: raised its full-year guidance',
+  dataIso: new Date().toISOString(),
+};
+
+section('composeMorning matches the fixed template and passes every rule');
+{
+  const p = composeMarketMorning(snap);
+  ok('passes checkPost', checkPost(p.text).length === 0, checkPost(p.text).join(' | '));
+  ok('within 280 (link-weighted)', p.length <= 280, String(p.length));
+  ok('opens with $SPY spot + emoji', p.text.startsWith('$SPY 773.40 this morning 🔴'), p.text.split('\n')[0]);
+  ok('has the Mood line', p.text.includes('\nMood: wild'));
+  ok('has Wall/Floor', /Wall above: .* · Floor below: /.test(p.text));
+  ok('has the "Gets wild only under" line', p.text.includes('Gets wild only under: '));
+  ok('has Plain English', p.text.includes('Plain English: '));
+  ok('has 💪 Strong with three cashtags', /💪 Strong: \$META \$MU \$NVDA/.test(p.text));
+  ok('has 🐢 Weak with two cashtags', /🐢 Weak: \$TSLA \$F/.test(p.text));
+  ok('ends with disclaimer then /daily link', p.text.endsWith(`${NFA}\n${MARKET_DAILY_LINK}`));
+  ok('never a vercel.app link', !/vercel\.app/i.test(p.text));
+}
+
+section('composeClosing matches the fixed template');
+{
+  const held = composeMarketClosing(snap); // spot 773.4 >= flip 770
+  ok('passes checkPost', checkPost(held.text).length === 0, checkPost(held.text).join(' | '));
+  ok('opens with 🔔 close + change', /^🔔 \$SPY closed 773\.40 \(▲0\.4%\)/.test(held.text), held.text.split('\n')[0]);
+  ok('says Held above when spot ≥ flip', held.text.includes('Held above 770 → day read wild'));
+  ok('shows the range', held.text.includes('Range today: 771.20–775.10'));
+  ok('shows Top and Worst', held.text.includes('💪 Top: $META · 🐢 Worst: $TSLA'));
+  ok('shows the headline', held.text.includes('📰 KO: raised its full-year guidance'));
+
+  const below = composeMarketClosing({ ...snap, spot: 768 });
+  ok('says Closed below when spot < flip', below.text.includes('Closed below 770 → day read wild'));
+}
+
+section('Long closing drops the news line first, then the weak line');
+{
+  const longHeadline = { ...snap, headline: 'X'.repeat(240) };
+  const p = composeMarketClosing(longHeadline);
+  ok('fits under 280', p.length <= 280, String(p.length));
+  ok('the news line was dropped to fit', !p.text.includes('📰'));
+}
+
+section('composeIntradayFallback and finishIntraday');
+{
+  const fb = composeIntradayFallback(snap);
+  ok('fallback passes checkPost', checkPost(fb.text).length === 0, checkPost(fb.text).join(' | '));
+  ok('fallback names spot + the box', /\$SPY at 773\.40 between 772 and 775\./.test(fb.text));
+  ok('fallback ends with the disclaimer', fb.text.endsWith(NFA));
+
+  const fin = finishIntraday('SPY drifting around 773, quiet so far.', snap);
+  ok('finish appends the disclaimer once', fin.text === `SPY drifting around 773, quiet so far.\n${NFA}`);
+  const doubled = finishIntraday('Holding the floor.\nNot financial advice', snap);
+  ok('finish strips a disclaimer the model already added', doubled.text === `Holding the floor.\n${NFA}`);
+}
+
+section('checkPost catches the banned words and the vercel.app rule');
+for (const [word, sample] of [
+  ['buy', `time to buy. ${NFA}`],
+  ['sell', `selling now. ${NFA}`],
+  ['target', `price target 780. ${NFA}`],
+  ['guaranteed', `guaranteed gains. ${NFA}`],
+  ['delayed', `quotes delayed. ${NFA}`],
+  ['live', `live prices. ${NFA}`],
+  ['gamma', `gamma flip below. ${NFA}`],
+  ['GEX', `GEX is negative. ${NFA}`],
+  ['dealer', `dealers are short. ${NFA}`],
+  ['hedging', `hedging flows. ${NFA}`],
+  ['hashtag', `nice day #SPY ${NFA}`],
+]) {
+  ok(`banned "${word}" is caught`, checkPost(sample).some((f) => /banned/i.test(f)), sample);
+}
+ok('a vercel.app link is rejected', checkPost(`see foo.vercel.app ${NFA}`).some((f) => /vercel/i.test(f)));
+ok('missing disclaimer is caught', checkPost('just a market note').some((f) => /disclaimer/i.test(f)));
+ok('over 280 is caught', checkPost('x'.repeat(300) + `\n${NFA}`).some((f) => /Too long/i.test(f)));
+ok('a clean intraday line passes', checkPost(`SPY hugging 773, quiet. ${NFA}`).length === 0);
+
+section('ageMinutes / the 90-minute freshness gate');
+{
+  const now = new Date('2026-09-21T15:00:00Z');
+  ok('a 30-min-old stamp is ~30', Math.round(ageMinutes('2026-09-21T14:30:00Z', now)) === 30);
+  ok('a fresh stamp is under the limit', ageMinutes(new Date(now.getTime() - 10 * 60000).toISOString(), now) < MAX_DATA_AGE_MIN);
+  ok('a 2h-old stamp is over the limit', ageMinutes('2026-09-21T13:00:00Z', now) > MAX_DATA_AGE_MIN);
+  ok('an unparseable stamp is Infinity', ageMinutes('nonsense', now) === Infinity);
+}
+
+section('plainEnglish reads the box');
+ok('between support and resistance', /stuck between .* expect sharp swings\.$/.test(plainEnglish(snap)));
+
+// --- Intraday cadence --------------------------------------------------------
+
+section('inIntradayWindow: 9:00–2:45 CT, summer and winter');
+// Summer (CDT, UTC-5): 14:00 UTC = 9:00 CT; 19:45 UTC = 2:45 CT.
+ok('summer 14:00 UTC → in window (9:00 CT)', inIntradayWindow(new Date('2026-07-01T14:00:00Z')) === true);
+ok('summer 19:45 UTC → in window (2:45 CT)', inIntradayWindow(new Date('2026-07-01T19:45:00Z')) === true);
+ok('summer 20:00 UTC → out (3:00 CT)', inIntradayWindow(new Date('2026-07-01T20:00:00Z')) === false);
+ok('summer 13:45 UTC → out (8:45 CT)', inIntradayWindow(new Date('2026-07-01T13:45:00Z')) === false);
+// Winter (CST, UTC-6): 15:00 UTC = 9:00 CT.
+ok('winter 15:00 UTC → in window', inIntradayWindow(new Date('2026-01-05T15:00:00Z')) === true);
+ok('winter 20:45 UTC → in window (2:45 CT)', inIntradayWindow(new Date('2026-01-05T20:45:00Z')) === true);
+
+section('randomGapMinutes stays in [30, 45]');
+ok('always 30–45', [...Array(200)].every(() => { const g = randomGapMinutes(); return g >= 30 && g <= 45; }));
+ok('min bound reachable', randomGapMinutes(() => 0) === 30);
+ok('max bound reachable', randomGapMinutes(() => 0.999) === 45);
+ok('nextDueAfter adds the gap', (() => {
+  const now = new Date('2026-07-01T14:00:00Z');
+  const due = Date.parse(nextDueAfter(now, () => 0));
+  return due - now.getTime() === 30 * 60000;
+})());
+
+section('pendingTrigger fires once per level per day');
+// spot below flip but still above support, so below-flip is the only break.
+ok('spot below flip → below-flip', pendingTrigger({ ...snap, spot: 769, support: 765 }, []) === 'below-flip');
+ok('already posted below-flip → skip', pendingTrigger({ ...snap, spot: 769, support: 765 }, ['below-flip']) === null);
+ok('spot above resistance → above-resistance', pendingTrigger({ ...snap, spot: 776 }, []) === 'above-resistance');
+ok('spot below support (but above flip) → below-support', pendingTrigger({ ...snap, spot: 771, flip: 765 }, []) === 'below-support');
+ok('inside the range → no trigger', pendingTrigger({ ...snap, spot: 773 }, []) === null);
+
+section('decideIntraday: break fires now; timer gates the rest');
+{
+  const inWindow = new Date('2026-07-01T15:00:00Z'); // 10:00 CT
+  const broke = decideIntraday({ ...snap, spot: 769 }, { date: 'x', nextDueIso: null, triggersPosted: [] }, inWindow);
+  ok('a break posts immediately', broke.post === true && broke.trigger === 'below-flip');
+  ok('break slot key names the level', broke.slotKey === 'intraday-trigger-below-flip');
+
+  const firstTimed = decideIntraday({ ...snap, spot: 773 }, { date: 'x', nextDueIso: null, triggersPosted: [] }, inWindow);
+  ok('first timed update posts when no next-due set', firstTimed.post === true && firstTimed.trigger === null);
+
+  const notYet = decideIntraday(
+    { ...snap, spot: 773 },
+    { date: 'x', nextDueIso: '2026-07-01T15:30:00Z', triggersPosted: [] },
+    inWindow,
+  );
+  ok('a timed update waits for the gap', notYet.post === false);
+
+  const due = decideIntraday(
+    { ...snap, spot: 773 },
+    { date: 'x', nextDueIso: '2026-07-01T14:50:00Z', triggersPosted: [] },
+    inWindow,
+  );
+  ok('a timed update posts once the gap has elapsed', due.post === true);
+
+  const outside = decideIntraday(
+    { ...snap, spot: 773 },
+    { date: 'x', nextDueIso: null, triggersPosted: [] },
+    new Date('2026-07-01T21:00:00Z'), // 4:00 CT
+  );
+  ok('outside the window, a non-break firing does not post', outside.post === false);
+
+  const breakOutside = decideIntraday(
+    { ...snap, spot: 769 },
+    { date: 'x', nextDueIso: null, triggersPosted: [] },
+    new Date('2026-07-01T21:00:00Z'),
+  );
+  ok('a break still fires outside the window', breakOutside.post === true && breakOutside.trigger === 'below-flip');
+}
+
+// --- Posting-day gates: holidays and early closes ----------------------------
+
+section('isPostingDay skips weekends, holidays, and early-close half-days');
+{
+  const holiday = { isClosed: (d) => d === '2026-07-03', closeHour: () => 16 };
+  const early = { isClosed: () => false, closeHour: (d) => (d === '2026-11-27' ? 13 : 16) };
+  ok('a normal weekday is a posting day', isPostingDay('2026-07-01', holiday) === true);
+  ok('a holiday is skipped', isPostingDay('2026-07-03', holiday) === false);
+  ok('a Saturday is skipped', isPostingDay('2026-07-04', holiday) === false);
+  ok('an early-close half-day is skipped', isPostingDay('2026-11-27', early) === false);
+  ok('isEarlyClose true when the close is before 16:00', isEarlyClose('2026-11-27', early) === true);
+  ok('isEarlyClose false on a full day', isEarlyClose('2026-07-01', early) === false);
+  ok('a still-open full trading day posts', isTradingDay('2026-11-27', early) === true && isPostingDay('2026-11-27', early) === false);
+}
+
+// --- Phrase bank -------------------------------------------------------------
+
+section('Every phrase (with long numbers + the longest mover) fits 280 and is clean');
+{
+  const V = { spot: '8888.88', sup: '8888', res: '8888', flip: '8888', strong: '$WWWWW', weak: '$WWWWW' };
+  const longSnap = { spot: 8888.88, changePct: 0, dayHigh: null, dayLow: null, mood: 'wild', resistance: 8888, support: 8888, flip: 8888, strong: [{ symbol: 'WWWWW', score: 99 }], weak: [{ symbol: 'WWWWW', score: 1 }], headline: null, dataIso: '2026-09-21T15:00:00Z' };
+  const longestMover = MOVERS.map((m) => render(m, V)).filter(Boolean).sort((a, b) => b.length - a.length)[0];
+  let allFit = true;
+  for (const [sit, arr] of Object.entries(PHRASES)) {
+    arr.forEach((t, i) => {
+      const body = render(t, V);
+      if (body === null) { allFit = false; ok(`${sit}#${i} renders`, false, t); return; }
+      const full = finishIntraday(`${body}\n${longestMover}`, longSnap);
+      if (full.length > 280 || checkPost(full.text).length > 0) allFit = false;
+    });
+  }
+  ok('all phrases + mover fit 280 and pass checkPost', allFit);
+  ok('the disclaimer is on every finished phrase', finishIntraday(render(PHRASES.IN_RANGE[0], V), longSnap).text.endsWith(NFA));
+}
+
+section('pickSituation picks the first matching situation in order');
+ok('below flip', pickSituation({ ...snap, spot: 769 }) === 'BELOW_FLIP');
+ok('near support', pickSituation({ ...snap, spot: 772.5 }) === 'NEAR_SUPPORT');
+ok('near resistance', pickSituation({ ...snap, spot: 774.6 }) === 'NEAR_RESIST');
+ok('broke up (clear of the ceiling)', pickSituation({ ...snap, spot: 780 }) === 'BROKE_UP');
+ok('broke down (below support, above flip)', pickSituation({ ...snap, spot: 770.5 }) === 'BROKE_DOWN');
+ok('in range', pickSituation({ ...snap, spot: 773.4 }) === 'IN_RANGE');
+
+section('composeIntradayPhrase: no reuse today, prefer least-used, fallback on nulls');
+{
+  const inRange = { ...snap, spot: 773.4 };
+  const p = composeIntradayPhrase(inRange, { rand: () => 0 });
+  ok('returns a phrase for the situation', p !== null && p.situation === 'IN_RANGE');
+  ok('phraseId has the SITUATION#index shape', /^IN_RANGE#\d+$/.test(p.phraseId), p.phraseId);
+  ok('the finished text carries the disclaimer', p.composed.text.endsWith(NFA));
+
+  // All IN_RANGE ids used except #2 → the fresh #2 is the only candidate.
+  const nAll = PHRASES.IN_RANGE.length;
+  const usedAllBut2 = [...Array(nAll).keys()].filter((i) => i !== 2).map((i) => phraseId('IN_RANGE', i));
+  const only2 = composeIntradayPhrase(inRange, { used: usedAllBut2, rand: () => 0 });
+  ok('never reuses a phrase used today while one is fresh', only2.phraseId === 'IN_RANGE#2', only2.phraseId);
+
+  // All fresh, but usage says every phrase ran a lot except #5 → least-used wins.
+  const usage = {};
+  for (let i = 0; i < nAll; i += 1) usage[phraseId('IN_RANGE', i)] = i === 5 ? 0 : 9;
+  const least = composeIntradayPhrase(inRange, { usage, rand: () => 0 });
+  ok('prefers the least-used phrase over recent days', least.phraseId === 'IN_RANGE#5', least.phraseId);
+
+  // No levels at all → only the spot-only IN_RANGE lines render; still clean, no
+  // stray "{sup}" placeholder, disclaimer intact.
+  const bare = composeIntradayPhrase({ ...snap, spot: 773.4, support: null, resistance: null, flip: null });
+  ok('still returns a clean spot-only phrase with no levels', bare !== null && !/\{[a-z]+\}/.test(bare.composed.text) && checkPost(bare.composed.text).length === 0, bare && bare.composed.text);
+}
+
+section('phraseUsage counts only sent intraday rows in the window');
+{
+  const since = Date.parse('2026-09-16T00:00:00Z');
+  const rows = [
+    { slot: 'intraday', outcome: 'sent', at: '2026-09-18T15:00:00Z', phraseId: 'IN_RANGE#1' },
+    { slot: 'intraday', outcome: 'sent', at: '2026-09-19T15:00:00Z', phraseId: 'IN_RANGE#1' },
+    { slot: 'intraday', outcome: 'skipped', at: '2026-09-19T16:00:00Z', phraseId: 'IN_RANGE#2' }, // skipped: ignored
+    { slot: 'morning', outcome: 'sent', at: '2026-09-19T13:30:00Z' }, // not intraday: ignored
+    { slot: 'intraday', outcome: 'sent', at: '2026-09-10T15:00:00Z', phraseId: 'IN_RANGE#1' }, // before window
+  ];
+  const u = phraseUsage(rows, since);
+  ok('counts two in-window sends of #1', u['IN_RANGE#1'] === 2, JSON.stringify(u));
+  ok('ignores skips and out-of-window', u['IN_RANGE#2'] === undefined);
+}
+
+// --- Autonomous dispatch: nextAction -----------------------------------------
+
+section('nextAction decides the tick (and never double-posts a slot)');
+const idleIntraday = { post: false, reason: 'not due' };
+const dueIntraday = { post: true, trigger: null, slotKey: 'intraday-1000' };
+function tick(over) {
+  return nextAction({ hour: 10, minute: 0, morningPosted: false, closingPosted: false, summarySent: false, stale: false, intraday: idleIntraday, ...over });
+}
+ok('morning due, fresh → morning', tick({ hour: 8, minute: 30 }).kind === 'morning');
+ok('morning already posted → idle (no double post)', tick({ hour: 8, minute: 35, morningPosted: true }).kind === 'idle');
+ok('morning due but stale → wait (retry next tick)', tick({ hour: 8, minute: 30, stale: true }).kind === 'wait');
+ok('before 8:30 → idle', tick({ hour: 8, minute: 20 }).kind === 'idle');
+ok('closing due, fresh → closing', tick({ hour: 15, minute: 15 }).kind === 'closing');
+ok('closing already posted → idle', tick({ hour: 15, minute: 20, closingPosted: true }).kind === 'idle');
+ok('closing due but stale → wait', tick({ hour: 15, minute: 15, stale: true }).kind === 'wait');
+ok('intraday due, fresh → intraday', tick({ intraday: dueIntraday }).kind === 'intraday');
+ok('intraday due but stale → wait', tick({ intraday: dueIntraday, stale: true }).kind === 'wait');
+ok('nothing due → idle', tick({}).kind === 'idle');
+ok('4:30 CT, summary not sent → summary', tick({ hour: 16, minute: 30 }).kind === 'summary');
+ok('4:30 CT, summary already sent → idle', tick({ hour: 16, minute: 30, summarySent: true }).kind === 'idle');
+ok('a level break is named in the reason', tick({ intraday: { post: true, trigger: 'below-flip', slotKey: 'intraday-trigger-below-flip' } }).reason.includes('below-flip'));
+
+// --- Self-healing: auto-resume -----------------------------------------------
+
+section('shouldAutoResume: pause-today next day, hourly auth re-test, never open-ended');
+{
+  const now = new Date('2026-09-21T15:00:00Z');
+  ok('a "pause today" resumes on a later trading day', shouldAutoResume({ paused: true, by: 'owner', scope: 'today', date: '2026-09-18' }, '2026-09-21', now).resume === true);
+  ok('a "pause today" stays paused the same day', shouldAutoResume({ paused: true, by: 'owner', scope: 'today', date: '2026-09-21' }, '2026-09-21', now).resume === false);
+  ok('an auto-pause older than an hour re-tests', shouldAutoResume({ paused: true, by: 'auto', at: '2026-09-21T13:30:00Z' }, '2026-09-21', now).resume === true);
+  ok('an auto-pause under an hour waits', shouldAutoResume({ paused: true, by: 'auto', at: '2026-09-21T14:30:00Z' }, '2026-09-21', now).resume === false);
+  ok('an open-ended owner pause never auto-resumes', shouldAutoResume({ paused: true, by: 'owner', scope: 'until-fixed' }, '2026-09-21', now).resume === false);
+  ok('a poster that is not paused stays that way', shouldAutoResume({ paused: false }, '2026-09-21', now).resume === false);
+}
+
+// --- Self-reporting ----------------------------------------------------------
+
+section('consecutiveSkips and summariseDay');
+{
+  const rows = [
+    { slot: 'morning', slotKey: 'morning', outcome: 'sent', at: '2026-09-21T13:30:00Z' },
+    { slot: 'intraday', slotKey: 'intraday-1000', outcome: 'skipped', reason: 'stale', at: '2026-09-21T15:00:00Z' },
+    { slot: 'intraday', slotKey: 'intraday-1040', outcome: 'skipped', reason: 'stale', at: '2026-09-21T15:40:00Z' },
+    { slot: 'intraday', slotKey: 'intraday-1120', outcome: 'skipped', reason: 'stale', at: '2026-09-21T16:20:00Z' },
+  ];
+  ok('three trailing skips count as 3 in a row', consecutiveSkips(rows) === 3);
+  ok('a sent post resets the streak', consecutiveSkips([...rows, { slot: 'closing', slotKey: 'closing', outcome: 'sent', at: '2026-09-21T20:20:00Z' }]) === 0);
+
+  const sum = summariseDay(rows, '2026-09-21');
+  ok('summary counts sends and skips', sum.sent === 1 && sum.skipped === 3);
+  ok('summary subject names the counts', /1 posted, 3 skipped/.test(sum.subject), sum.subject);
+  ok('summary body lists a skip reason', sum.text.includes('stale'));
 }
 
 // --- result ------------------------------------------------------------------
