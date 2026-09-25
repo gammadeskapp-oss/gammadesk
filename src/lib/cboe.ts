@@ -30,7 +30,7 @@ import type { OptionType } from './types';
  *    what the "data as of" stamp in the UI reports.
  */
 
-const CDN = 'https://cdn.cboe.com/api/global/delayed_quotes/options';
+const CDN = 'https://cdn-api.cboe.com/api/global/delayed_quotes/options';
 
 /**
  * Cboe files index-option chains under a leading underscore and everything
