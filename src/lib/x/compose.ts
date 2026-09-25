@@ -115,6 +115,38 @@ function cashtags(names: ScoredName[]): string {
 }
 
 /**
+ * A `$SYMBOL` cashtag: a dollar sign, an uppercase letter, then up to five more
+ * uppercase letters or a class dot (`$BRK.B`). Deliberately narrow so it never
+ * matches a bare dollar amount — no price in any post is written with a leading
+ * `$`, but requiring a letter after the sign guarantees it.
+ */
+const CASHTAG_RE = /\$[A-Z][A-Z.]{0,5}/g;
+
+/** How many `$SYMBOL` cashtags a finished post carries. */
+export function countCashtags(text: string): number {
+  return (text.match(CASHTAG_RE) ?? []).length;
+}
+
+/**
+ * X now rejects any post carrying more than one cashtag with HTTP 403
+ * ("Posts are limited to a maximum of one cashtag"). Our morning and closing
+ * templates name several tickers ($SPY plus the strong/weak lists), and the
+ * model-written intraday body can too. Keep the first cashtag — always $SPY at
+ * the top of every template — and drop the leading `$` from the rest, so the
+ * names still read ("Strong: META MU AVGO") without tripping the limit.
+ */
+export function limitCashtags(text: string): string {
+  let kept = false;
+  return text.replace(CASHTAG_RE, (match) => {
+    if (!kept) {
+      kept = true;
+      return match;
+    }
+    return match.slice(1);
+  });
+}
+
+/**
  * X counts every link as 23 characters regardless of its literal length, so the
  * 280 budget must weight the gammadesk.app link that way. Everything else is
  * counted by code point.
@@ -203,7 +235,8 @@ export function composeMorning(s: DeskSnapshot): Composed {
   lines.push({ text: DAILY_LINK });
 
   const { text } = fit(lines);
-  return { text, length: xLen(text), numbers: morningNumbers(s), dataIso: s.dataIso };
+  const capped = limitCashtags(text);
+  return { text: capped, length: xLen(capped), numbers: morningNumbers(s), dataIso: s.dataIso };
 }
 
 /** The 3:15 CT closing post — the exact template from the brief. */
@@ -233,7 +266,8 @@ export function composeClosing(s: DeskSnapshot): Composed {
   lines.push({ text: DAILY_LINK });
 
   const { text } = fit(lines);
-  return { text, length: xLen(text), numbers: closingNumbers(s), dataIso: s.dataIso };
+  const capped = limitCashtags(text);
+  return { text: capped, length: xLen(capped), numbers: closingNumbers(s), dataIso: s.dataIso };
 }
 
 /**
@@ -258,7 +292,7 @@ export function finishIntraday(body: string, s: DeskSnapshot): Composed {
   let clean = body.trim();
   // Strip a disclaimer the model added anyway, so it is never doubled.
   clean = clean.replace(/\n*not financial advice\.?\s*$/i, '').trim();
-  const text = `${clean}\n${NFA}`;
+  const text = limitCashtags(`${clean}\n${NFA}`);
   return { text, length: xLen(text), numbers: { spot: s.spot }, dataIso: s.dataIso };
 }
 
@@ -308,6 +342,7 @@ export function checkPost(text: string): string[] {
   if (xLen(text) > X_LIMIT) failures.push(`Too long: ${xLen(text)} of ${X_LIMIT}.`);
   if (!text.includes(NFA)) failures.push(`Missing the "${NFA}" disclaimer.`);
   if (/\bvercel\.app\b/i.test(text)) failures.push('Contains a vercel.app link (must be gammadesk.app).');
+  if (countCashtags(text) > 1) failures.push('More than one cashtag ($SYMBOL); X allows only one.');
   for (const { re, label } of BANNED) {
     if (re.test(text)) failures.push(`Contains banned wording (${label}).`);
   }

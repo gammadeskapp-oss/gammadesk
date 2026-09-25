@@ -5,7 +5,7 @@ import { sendAutoPauseAlert, sendSkipAlert } from '../health/email';
 import { marketToday } from '../time';
 import { readCredentials, postTweet, uploadMedia } from './client';
 import { buildForSlot, type BuildContext, type BuiltPost } from './content';
-import { ageMinutes, checkPost, MAX_DATA_AGE_MIN } from './compose';
+import { ageMinutes, checkPost, limitCashtags, MAX_DATA_AGE_MIN, xLen } from './compose';
 import { postingEnabledFromValue } from './flags';
 import { checkNumbers, checkText } from './guard';
 import { markImagePosted, readImageBytes } from './imageStore';
@@ -158,6 +158,14 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
       if (!routineEmpty) void sendSkipAlert(slot.kind, reason, now).catch(() => {});
     }
     return { ...base, status: 'skipped', reason };
+  }
+
+  // X allows only one cashtag per post (surplus ones draw a 403). Strip them
+  // here, once, before any grading, logging or preview — so every slot and the
+  // model-written intraday body are covered in a single place.
+  const limited = limitCashtags(built.text);
+  if (limited !== built.text) {
+    built = { ...built, text: limited, length: xLen(limited) };
   }
 
   // --- quality gates (force does not override these) --------------------------

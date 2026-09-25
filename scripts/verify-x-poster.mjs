@@ -62,6 +62,8 @@ const {
   xLen,
   plainEnglish,
   checkPost,
+  countCashtags,
+  limitCashtags,
   ageMinutes,
   stalestIso,
   MAX_DATA_AGE_MIN,
@@ -692,8 +694,11 @@ section('composeMorning matches the fixed template and passes every rule');
   ok('has Wall/Floor', /Wall above: .* · Floor below: /.test(p.text));
   ok('has the "Gets wild only under" line', p.text.includes('Gets wild only under: '));
   ok('has Plain English', p.text.includes('Plain English: '));
-  ok('has 💪 Strong with three cashtags', /💪 Strong: \$META \$MU \$NVDA/.test(p.text));
-  ok('has 🐢 Weak with two cashtags', /🐢 Weak: \$TSLA \$F/.test(p.text));
+  // Only the leading $SPY stays a cashtag; the rest are de-$'d so X accepts the
+  // post (max one cashtag). Names still read in full.
+  ok('has 💪 Strong with the three names', /💪 Strong: META MU NVDA/.test(p.text));
+  ok('has 🐢 Weak with the two names', /🐢 Weak: TSLA F/.test(p.text));
+  ok('carries exactly one cashtag', countCashtags(p.text) === 1, String(countCashtags(p.text)));
   ok('ends with disclaimer then /daily link', p.text.endsWith(`${NFA}\n${MARKET_DAILY_LINK}`));
   ok('never a vercel.app link', !/vercel\.app/i.test(p.text));
 }
@@ -705,11 +710,21 @@ section('composeClosing matches the fixed template');
   ok('opens with 🔔 close + change', /^🔔 \$SPY closed 773\.40 \(▲0\.4%\)/.test(held.text), held.text.split('\n')[0]);
   ok('says Held above when spot ≥ flip', held.text.includes('Held above 770 → day read wild'));
   ok('shows the range', held.text.includes('Range today: 771.20–775.10'));
-  ok('shows Top and Worst', held.text.includes('💪 Top: $META · 🐢 Worst: $TSLA'));
+  ok('shows Top and Worst', held.text.includes('💪 Top: META · 🐢 Worst: TSLA'));
+  ok('carries exactly one cashtag', countCashtags(held.text) === 1, String(countCashtags(held.text)));
   ok('shows the headline', held.text.includes('📰 KO: raised its full-year guidance'));
 
   const below = composeMarketClosing({ ...snap, spot: 768 });
   ok('says Closed below when spot < flip', below.text.includes('Closed below 770 → day read wild'));
+}
+
+section('limitCashtags keeps the first cashtag and de-$es the rest');
+{
+  ok('keeps a lone cashtag', limitCashtags('$SPY at 773') === '$SPY at 773');
+  ok('de-$es all but the first', limitCashtags('$SPY $META $MU') === '$SPY META MU');
+  ok('leaves non-cashtag text alone', limitCashtags('Range 771 to 775') === 'Range 771 to 775');
+  ok('handles a class dot ($BRK.B)', limitCashtags('$SPY $BRK.B') === '$SPY BRK.B');
+  ok('countCashtags counts them', countCashtags('$SPY $META $MU') === 3);
 }
 
 section('Long closing drops the news line first, then the weak line');
@@ -906,7 +921,7 @@ section('Intraday post structure: three parts + disclaimer, longer body');
   ok('has line 1 (phrase), line 2 (context), line 3 (mover), + disclaimer', lines.length === 4, JSON.stringify(lines));
   ok('line 2 carries the day change words', /Up|Down|Flat/.test(lines[1]), lines[1]);
   ok('line 2 carries the range', /Range to watch: \d+ to \d+\.|Ceiling at \d+\.|Floor at \d+\./.test(lines[1]), lines[1]);
-  ok('line 3 is a mover line', /\$[A-Z]/.test(lines[2]) && /(leading|lagging|front|laggard|trailing|strongest|weakest)/.test(lines[2]), lines[2]);
+  ok('line 3 is a mover line', /[A-Z]{2,}/.test(lines[2]) && /(leading|lagging|front|laggard|trailing|strongest|weakest)/.test(lines[2]), lines[2]);
   ok('ends with the disclaimer', lines[3] === NFA);
   ok('the body is meatier than a one-liner (>120 chars)', p.composed.text.length > 120, String(p.composed.text.length));
   ok('range levels render as whole numbers', /Range to watch: 772 to 775\./.test(lines[1]), lines[1]);
