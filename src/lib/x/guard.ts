@@ -8,6 +8,7 @@
  * `run.ts`, which has the store and the clock.
  */
 
+import { countCashtags } from './compose';
 import { DISCLAIMER, X_LIMIT } from './text';
 import type { PostNumbers } from './types';
 
@@ -60,6 +61,11 @@ export function checkText(text: string, opts: { requireStamp?: boolean } = {}): 
   }
   for (const { re, label } of BANNED) {
     if (re.test(text)) failures.push(`Contains banned wording (${label}).`);
+  }
+  // X rejects a post with more than one cashtag (HTTP 403). The runner strips
+  // the surplus before grading, so a hit here means something bypassed that.
+  if (countCashtags(text) > 1) {
+    failures.push('More than one cashtag ($SYMBOL); X allows only one.');
   }
   return failures;
 }
