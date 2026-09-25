@@ -14,7 +14,7 @@ import 'server-only';
  * chain adapter uses — VIX is `_VIX`.
  */
 
-const CDN = 'https://cdn.cboe.com/api/global/delayed_quotes/quotes';
+const CDN = 'https://cdn-api.cboe.com/api/global/delayed_quotes/quotes';
 
 const INDEX_ROOTS = new Set(['VIX', 'SPX', 'NDX', 'RUT', 'DJX', 'OEX', 'XSP']);
 

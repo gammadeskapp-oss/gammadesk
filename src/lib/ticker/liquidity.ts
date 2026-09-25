@@ -162,7 +162,7 @@ function nearMoneyContracts(
 async function fetchChainActivity(symbol: string): Promise<ChainActivity | null> {
   try {
     const res = await fetch(
-      `https://cdn.cboe.com/api/global/delayed_quotes/options/${symbol}.json`,
+      `https://cdn-api.cboe.com/api/global/delayed_quotes/options/${symbol}.json`,
       {
         headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' },
         signal: AbortSignal.timeout(15_000),

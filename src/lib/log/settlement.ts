@@ -78,7 +78,7 @@ interface CboeUnderlying {
  */
 async function fromCboe(symbol: string, date: string): Promise<DailyBar | null> {
   const res = await fetch(
-    `https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(symbol)}.json`,
+    `https://cdn-api.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(symbol)}.json`,
     {
       headers: {
         'User-Agent':
