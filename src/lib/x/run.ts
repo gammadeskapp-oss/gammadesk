@@ -50,6 +50,8 @@ export interface RunOutcome {
   /** For an intraday post: the phrase-bank situation and id. */
   situation?: string;
   phraseId?: string;
+  /** For an intraday post: true when it used "wild/bigger moves" wording. */
+  wild?: boolean;
 }
 
 /** A short wait between transient X retries. */
@@ -237,7 +239,7 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
       text: built.text, length: built.length, outcome: 'sent', reason,
       tweetId: result.tweetId, asOfLabel: built.asOfLabel, numbers: built.numbers, phraseId: built.phraseId,
     });
-    return { ...base, status: 'sent', reason, text: built.text, length: built.length, tweetId: result.tweetId, asOfLabel: built.asOfLabel, situation: built.situation, phraseId: built.phraseId };
+    return { ...base, status: 'sent', reason, text: built.text, length: built.length, tweetId: result.tweetId, asOfLabel: built.asOfLabel, situation: built.situation, phraseId: built.phraseId, wild: built.wild };
   }
 
   // Only genuinely bad credentials (`auth`) and out-of-credit (`billing`) pause

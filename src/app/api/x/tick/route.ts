@@ -13,8 +13,8 @@ import {
   type DayRow,
 } from '@/lib/x/dispatch';
 import { loadDeskSnapshot } from '@/lib/x/deskData';
-import { decideIntraday, phraseUsage } from '@/lib/x/intradaySchedule';
-import { readIntradayState, recordIntradayPost, markSummarySent, markStaleAlerted } from '@/lib/x/intradayStore';
+import { applyLockedLevels, decideIntraday, lockableLevels, phraseUsage } from '@/lib/x/intradaySchedule';
+import { readIntradayState, recordIntradayPost, recordLockedLevels, markSummarySent, markStaleAlerted } from '@/lib/x/intradayStore';
 import { postingEnabled, runSlot, type RunOutcome } from '@/lib/x/run';
 import { chicagoNow, isPostingDay } from '@/lib/x/schedule';
 import { alreadyPosted, readLog, readPause, resume, storeStatus } from '@/lib/x/store';
@@ -26,6 +26,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
 
 /**
  * The autonomous heartbeat. One Vercel cron wakes this every 5 minutes across
@@ -65,6 +66,17 @@ export async function GET(request: Request) {
 
   const state = await readIntradayState(date);
 
+  // The intraday levels are the morning's, locked for the day (or the first
+  // intraday post's, if the morning was missed). Overlay them on the live
+  // snapshot — price and movers stay live, the flip/support/resistance do not
+  // drift per post and cannot re-fire an alert.
+  const locked = state.lockedLevels ?? (snapshot ? lockableLevels(snapshot) : null);
+  const intradaySnapshot = snapshot ? applyLockedLevels(snapshot, locked) : null;
+
+  // "Wild/bigger moves" wording is allowed at most once an hour.
+  const lastWild = Date.parse(state.lastWildIso ?? '');
+  const allowWild = !Number.isFinite(lastWild) || now.getTime() - lastWild >= ONE_HOUR_MS;
+
   // Market-hours freshness alarm: SPY data over 90 min old while the regular
   // session is open, even though every fetch returned 200 and the nightly
   // health check reads "OK". Throttled to once an hour.
@@ -86,8 +98,8 @@ export async function GET(request: Request) {
     await markStaleAlerted(date, now);
   }
 
-  const intraday = snapshot
-    ? decideIntraday(snapshot, state, now)
+  const intraday = intradaySnapshot
+    ? decideIntraday(intradaySnapshot, state, now)
     : { post: false as const, reason: 'No snapshot.' };
 
   const action = nextAction({
@@ -120,6 +132,11 @@ export async function GET(request: Request) {
   if (action.kind === 'morning' || action.kind === 'closing') {
     const slot: PostSlot = { kind: action.kind, key: action.kind, label: action.kind === 'morning' ? 'Morning post (8:30 CT)' : 'Closing post (3:15 CT)' };
     outcome = await runSlot(slot, { now, ctx: { snapshot: snapshot ?? undefined } });
+    // Lock the day's levels at the morning post: every intraday post after this
+    // measures against these same numbers, rounded, all day.
+    if (action.kind === 'morning' && outcome.status === 'sent' && snapshot) {
+      await recordLockedLevels(date, lockableLevels(snapshot));
+    }
     if (action.kind === 'closing' && outcome.status === 'sent') {
       await cleanupOldImages(now).catch(() => null);
     }
@@ -135,10 +152,17 @@ export async function GET(request: Request) {
     };
     outcome = await runSlot(slot, {
       now,
-      ctx: { snapshot: snapshot ?? undefined, usedPhrases: state.usedPhrases, phraseUsage: usage },
+      ctx: { snapshot: intradaySnapshot ?? undefined, usedPhrases: state.usedPhrases, phraseUsage: usage, allowWild },
     });
     if (outcome.status === 'sent') {
-      await recordIntradayPost(date, now, intraday.trigger, outcome.phraseId);
+      await recordIntradayPost(date, now, {
+        trigger: intraday.trigger,
+        phraseId: outcome.phraseId,
+        wild: outcome.wild,
+        // Lock the levels here too, in case the poster started mid-day and the
+        // morning post never ran. `recordLockedLevels`/this both lock once.
+        lockedLevels: locked ?? undefined,
+      });
     }
   } else {
     return NextResponse.json({ status: action.kind, reason: action.reason, store: storeStatus() });

@@ -33,10 +33,13 @@ const {
 const {
   PHRASES,
   MOVERS,
+  AT_LEVEL,
+  WILD_INDICES,
   pickSituation,
   render,
   composeIntradayPhrase,
   phraseId,
+  NEAR_PCT,
 } = await import('../src/lib/x/phrases.ts');
 const {
   nextAction,
@@ -52,6 +55,8 @@ const {
   composeIntradayFallback,
   finishIntraday,
   changeText,
+  dayChangeWords,
+  roundLevel,
   moodEmoji,
   money,
   xLen,
@@ -69,6 +74,8 @@ const {
   nextDueAfter,
   pendingTrigger,
   decideIntraday,
+  applyLockedLevels,
+  lockableLevels,
 } = await import('../src/lib/x/intradaySchedule.ts');
 const { checkText, checkNumbers } = await import('../src/lib/x/guard.ts');
 const { postingEnabledFromValue } = await import('../src/lib/x/flags.ts');
@@ -796,18 +803,23 @@ ok('nextDueAfter adds the gap', (() => {
   return due - now.getTime() === 30 * 60000;
 })());
 
-section('pendingTrigger fires once per level per day');
-// spot below flip but still above support, so below-flip is the only break.
-ok('spot below flip → below-flip', pendingTrigger({ ...snap, spot: 769, support: 765 }, []) === 'below-flip');
-ok('already posted below-flip → skip', pendingTrigger({ ...snap, spot: 769, support: 765 }, ['below-flip']) === null);
-ok('spot above resistance → above-resistance', pendingTrigger({ ...snap, spot: 776 }, []) === 'above-resistance');
-ok('spot below support (but above flip) → below-support', pendingTrigger({ ...snap, spot: 771, flip: 765 }, []) === 'below-support');
+section('pendingTrigger fires once per level per day, only past the 0.15% margin');
+// flip 770 → margin 770*0.9985 ≈ 768.85. 768 is past it; 769 is not.
+ok('spot clearly below flip → below-flip', pendingTrigger({ ...snap, spot: 768, support: 763 }, []) === 'below-flip');
+ok('a hair below flip (inside 0.15%) → no trigger', pendingTrigger({ ...snap, spot: 769, support: 763 }, []) === null);
+ok('already posted below-flip → skip', pendingTrigger({ ...snap, spot: 768, support: 763 }, ['below-flip']) === null);
+// resistance 775 → break needs > 775*1.0015 ≈ 776.16.
+ok('spot clearly above resistance → above-resistance', pendingTrigger({ ...snap, spot: 777 }, []) === 'above-resistance');
+ok('a hair above resistance (inside 0.15%) → no trigger', pendingTrigger({ ...snap, spot: 776 }, []) === null);
+// support 772 → break needs < 772*0.9985 ≈ 770.84; keep flip low so below-support wins.
+ok('spot clearly below support (above flip) → below-support', pendingTrigger({ ...snap, spot: 770, flip: 763 }, []) === 'below-support');
+ok('a hair below support (inside 0.15%) → no trigger', pendingTrigger({ ...snap, spot: 771, flip: 763 }, []) === null);
 ok('inside the range → no trigger', pendingTrigger({ ...snap, spot: 773 }, []) === null);
 
 section('decideIntraday: break fires now; timer gates the rest');
 {
   const inWindow = new Date('2026-07-01T15:00:00Z'); // 10:00 CT
-  const broke = decideIntraday({ ...snap, spot: 769 }, { date: 'x', nextDueIso: null, triggersPosted: [] }, inWindow);
+  const broke = decideIntraday({ ...snap, spot: 768 }, { date: 'x', nextDueIso: null, triggersPosted: [] }, inWindow);
   ok('a break posts immediately', broke.post === true && broke.trigger === 'below-flip');
   ok('break slot key names the level', broke.slotKey === 'intraday-trigger-below-flip');
 
@@ -836,7 +848,7 @@ section('decideIntraday: break fires now; timer gates the rest');
   ok('outside the window, a non-break firing does not post', outside.post === false);
 
   const breakOutside = decideIntraday(
-    { ...snap, spot: 769 },
+    { ...snap, spot: 768 },
     { date: 'x', nextDueIso: null, triggersPosted: [] },
     new Date('2026-07-01T21:00:00Z'),
   );
@@ -862,11 +874,12 @@ section('isPostingDay skips weekends, holidays, and early-close half-days');
 
 section('Every phrase (with long numbers + the longest mover) fits 280 and is clean');
 {
-  const V = { spot: '8888.88', sup: '8888', res: '8888', flip: '8888', strong: '$WWWWW', weak: '$WWWWW' };
-  const longSnap = { spot: 8888.88, changePct: 0, dayHigh: null, dayLow: null, mood: 'wild', resistance: 8888, support: 8888, flip: 8888, strong: [{ symbol: 'WWWWW', score: 99 }], weak: [{ symbol: 'WWWWW', score: 1 }], headline: null, dataIso: '2026-09-21T15:00:00Z' };
+  const V = { spot: '8888.88', sup: '8888', res: '8888', flip: '8888', strong: '$WWWWW', strong2: '$WWWWW', weak: '$WWWWW' };
+  const longSnap = { spot: 8888.88, changePct: 0.1234, dayHigh: null, dayLow: null, mood: 'wild', resistance: 8888, support: 8888, flip: 8888, strong: [{ symbol: 'WWWWW', score: 99 }, { symbol: 'WWWWW', score: 88 }], weak: [{ symbol: 'WWWWW', score: 1 }], headline: null, dataIso: '2026-09-21T15:00:00Z' };
   const longestMover = MOVERS.map((m) => render(m, V)).filter(Boolean).sort((a, b) => b.length - a.length)[0];
   let allFit = true;
-  for (const [sit, arr] of Object.entries(PHRASES)) {
+  const allPools = [...Object.entries(PHRASES), ...Object.entries(AT_LEVEL)];
+  for (const [sit, arr] of allPools) {
     arr.forEach((t, i) => {
       const body = render(t, V);
       if (body === null) { allFit = false; ok(`${sit}#${i} renders`, false, t); return; }
@@ -876,10 +889,80 @@ section('Every phrase (with long numbers + the longest mover) fits 280 and is cl
   }
   ok('all phrases + mover fit 280 and pass checkPost', allFit);
   ok('the disclaimer is on every finished phrase', finishIntraday(render(PHRASES.IN_RANGE[0], V), longSnap).text.endsWith(NFA));
+
+  // The full three-part composed post fits 280 in the worst case too.
+  let composedFit = true;
+  for (const spot of [8888.88, 8871, 8905, 8850, 8888.88]) {
+    const p = composeIntradayPhrase({ ...longSnap, spot }, { rand: () => 0, moverRand: () => 0 });
+    if (!p || p.composed.length > 280 || checkPost(p.composed.text).length > 0) composedFit = false;
+  }
+  ok('a full 3-part post fits 280 and is clean across situations', composedFit);
 }
 
-section('pickSituation picks the first matching situation in order');
-ok('below flip', pickSituation({ ...snap, spot: 769 }) === 'BELOW_FLIP');
+section('Intraday post structure: three parts + disclaimer, longer body');
+{
+  const p = composeIntradayPhrase(snap, { rand: () => 0, moverRand: () => 0 });
+  const lines = p.composed.text.split('\n');
+  ok('has line 1 (phrase), line 2 (context), line 3 (mover), + disclaimer', lines.length === 4, JSON.stringify(lines));
+  ok('line 2 carries the day change words', /Up|Down|Flat/.test(lines[1]), lines[1]);
+  ok('line 2 carries the range', /Range to watch: \d+ to \d+\.|Ceiling at \d+\.|Floor at \d+\./.test(lines[1]), lines[1]);
+  ok('line 3 is a mover line', /\$[A-Z]/.test(lines[2]) && /(leading|lagging|front|laggard|trailing|strongest|weakest)/.test(lines[2]), lines[2]);
+  ok('ends with the disclaimer', lines[3] === NFA);
+  ok('the body is meatier than a one-liner (>120 chars)', p.composed.text.length > 120, String(p.composed.text.length));
+  ok('range levels render as whole numbers', /Range to watch: 772 to 775\./.test(lines[1]), lines[1]);
+}
+
+section('roundLevel and dayChangeWords');
+ok('roundLevel rounds to whole', roundLevel(767.54) === '768' && roundLevel(767.4) === '767');
+ok('dayChangeWords up', dayChangeWords(0.0032) === 'Up 0.3% on the day.');
+ok('dayChangeWords down', dayChangeWords(-0.0021) === 'Down 0.2% on the day.');
+ok('dayChangeWords flat never -0.0%', dayChangeWords(-0.0003) === 'Flat on the day.');
+
+section('At-level: within 0.1% of a wall names the next level, not "the level to watch"');
+{
+  // spot right on resistance 775 (within 0.1% → |Δ| ≤ 0.775).
+  const atRes = composeIntradayPhrase({ ...snap, spot: 775.2 }, { rand: () => 0, moverRand: () => 1 });
+  ok('at-resistance uses the AT pool', atRes.phraseId.startsWith('NEAR_RESIST_AT#'), atRes.phraseId);
+  ok('names the other-side level, not "level to watch"', !/level to watch/i.test(atRes.composed.text));
+  // spot right on support 772 (within 0.1% → |Δ| ≤ 0.772), flip present as the next level.
+  const atSup = composeIntradayPhrase({ ...snap, spot: 772.3 }, { rand: () => 0, moverRand: () => 1 });
+  ok('at-support uses the AT pool and names the flip below', atSup.phraseId.startsWith('NEAR_SUPPORT_AT#') && /770/.test(atSup.composed.text), atSup.composed.text);
+}
+
+section('Wild wording is held back when not allowed');
+{
+  // Under the flip → BELOW_FLIP. With allowWild:false, only neutral phrases (0–2).
+  const belowFlip = { ...snap, spot: 760 };
+  let sawWild = false;
+  for (let i = 0; i < 40; i += 1) {
+    const p = composeIntradayPhrase(belowFlip, { allowWild: false, rand: Math.random, moverRand: () => 1 });
+    if (p.wild) sawWild = true;
+    const idx = Number(p.phraseId.split('#')[1]);
+    if ((WILD_INDICES.BELOW_FLIP ?? []).includes(idx)) sawWild = true;
+  }
+  ok('no wild phrase is ever chosen when allowWild is false', sawWild === false);
+  // With allowWild:true the wild phrases are reachable.
+  const reachable = [...Array(60)].some(() => {
+    const p = composeIntradayPhrase(belowFlip, { allowWild: true, rand: Math.random, moverRand: () => 1 });
+    return p.wild === true;
+  });
+  ok('wild phrases are reachable when allowWild is true', reachable);
+}
+
+section('applyLockedLevels overlays the day levels, keeps price and movers live');
+{
+  const live = { ...snap, spot: 800, changePct: 0.02, flip: 795, support: 798, resistance: 803, strong: [{ symbol: 'AAA', score: 9 }], weak: [{ symbol: 'ZZZ', score: 1 }] };
+  const locked = { flip: 770, support: 772, resistance: 775 };
+  const eff = applyLockedLevels(live, locked);
+  ok('levels come from the lock', eff.flip === 770 && eff.support === 772 && eff.resistance === 775);
+  ok('price and movers stay live', eff.spot === 800 && eff.changePct === 0.02 && eff.strong[0].symbol === 'AAA');
+  ok('null lock is a no-op', applyLockedLevels(live, null) === live);
+  ok('lockableLevels reads the three levels', JSON.stringify(lockableLevels(live)) === JSON.stringify({ flip: 795, support: 798, resistance: 803 }));
+}
+
+section('pickSituation picks the first matching situation in order (0.15% cross margin)');
+ok('below flip (clear of the margin)', pickSituation({ ...snap, spot: 768 }) === 'BELOW_FLIP');
+ok('a hair below flip is not BELOW_FLIP', pickSituation({ ...snap, spot: 769.5 }) !== 'BELOW_FLIP');
 ok('near support', pickSituation({ ...snap, spot: 772.5 }) === 'NEAR_SUPPORT');
 ok('near resistance', pickSituation({ ...snap, spot: 774.6 }) === 'NEAR_RESIST');
 ok('broke up (clear of the ceiling)', pickSituation({ ...snap, spot: 780 }) === 'BROKE_UP');
