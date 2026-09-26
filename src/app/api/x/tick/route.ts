@@ -23,7 +23,7 @@ import type { PostSlot } from '@/lib/x/types';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;

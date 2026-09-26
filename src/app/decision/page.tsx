@@ -54,6 +54,11 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = 'force-dynamic';
+// A cold render fetches and parses the full option chain (~6 MB) and resolves the
+// IV surface, which can run well past the platform's 60s default on a cold
+// instance. 300s (the Pro-plan ceiling) keeps the page from being killed
+// mid-render while the snapshot cache (see /api/x/snapshot) removes the cost.
+export const maxDuration = 300;
 
 interface PageProps {
   /**
