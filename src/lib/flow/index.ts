@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { cached } from '../cache';
+import { currentMarketStatus } from '../events';
 import { createJsonStore } from '../jsonStore';
 import { computeFlowSnapshot } from './compute';
 import { FLOW_SCHEMA, type FlowSnapshot } from './types';
@@ -58,7 +59,14 @@ export async function refreshFlowSnapshot(): Promise<FlowSnapshot> {
 export function getFlowSnapshot(): Promise<FlowSnapshot | null> {
   return cached('flow:snapshot', MEMO_SECONDS, async () => {
     const stored = await store.read().catch(() => null);
-    if (stored && ageMs(stored) < MAX_AGE_MS) return stored;
+    // While the market is closed the last snapshot is the whole answer — flow is
+    // computed once a day and nothing new prints overnight or at the weekend — so
+    // serve it however old rather than recomputing the chain on a cold request.
+    if (stored) {
+      const status = currentMarketStatus();
+      const marketClosed = status.phase === 'after-close' || status.phase === 'closed-day';
+      if (marketClosed || ageMs(stored) < MAX_AGE_MS) return stored;
+    }
 
     try {
       return await refreshFlowSnapshot();
