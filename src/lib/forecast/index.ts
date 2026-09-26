@@ -3,6 +3,7 @@ import 'server-only';
 import { cached, invalidate } from '../cache';
 import { config } from '../config';
 import { currentMarketStatus } from '../events';
+import { schedulePopulate } from '../schedulePopulate';
 import { readCachedForecast, writeCachedForecast } from './forecastCache';
 import { peekBreadth } from '../groups';
 import { getForecastPositioning, getPositioningForSymbol } from '../positioning';
@@ -235,6 +236,6 @@ export async function peekForecast(rawSymbol?: string): Promise<ForecastResult |
   const cachedPayload = await readCachedForecast();
   if (cachedPayload) return cachedPayload.data;
 
-  void getForecast().catch(() => {});
+  schedulePopulate(() => getForecast());
   return null;
 }

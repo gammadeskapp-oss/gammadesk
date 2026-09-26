@@ -9,6 +9,7 @@ import { currentMarketStatus, snapshotStaleness } from './events';
 import { buildPositioning } from './exposure';
 import { readLastGoodSnapshot, saveLastGoodSnapshot } from './lastSnapshot';
 import { readCachedPositioning, writeCachedPositioning } from './positioningCache';
+import { schedulePopulate } from './schedulePopulate';
 import { fetchPolygonChain } from './polygon';
 import { formatAsOf } from './time';
 import type { DataSource, PositioningData, WeightBasis } from './types';
@@ -452,9 +453,10 @@ export async function peekPositioningView(symbol: string): Promise<PositioningDa
   const cachedPayload = await readCachedPositioning();
   if (cachedPayload) return cachedPayload.data;
 
-  // Empty cache: do not block the page on a chain parse. Kick a background
-  // populate (best-effort) and report "no snapshot yet".
-  void getPositioning().catch(() => {});
+  // Empty cache: do not block the page on a chain parse. Populate it after the
+  // response returns (Next's `after` runs reliably post-render, unlike a bare
+  // fire-and-forget promise), so the next load is warm; report "no snapshot yet".
+  schedulePopulate(() => getPositioning());
   return null;
 }
 

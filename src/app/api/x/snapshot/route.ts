@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
+import { config } from '@/lib/config';
+import { getDecision } from '@/lib/decision';
 import { getForecast } from '@/lib/forecast';
 import { getPositioning } from '@/lib/positioning';
 import { computeDeskSnapshotForCache } from '@/lib/x/deskData';
@@ -39,6 +41,7 @@ export async function GET(request: Request) {
     if (!dry) {
       await getPositioning({ force: true });
       await getForecast(undefined, { force: true }).catch(() => null);
+      await getDecision(config.symbol, { force: true }).catch(() => null);
     }
     const cached = await computeDeskSnapshotForCache(now);
     if (!dry) await writeCachedDeskSnapshot(cached);

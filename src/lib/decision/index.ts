@@ -2,8 +2,12 @@ import 'server-only';
 
 import { getBars } from '../bars/intraday';
 import type { PositioningData } from '../types';
-import { cached } from '../cache';
+import { cached, invalidate } from '../cache';
+import { config } from '../config';
+import { currentMarketStatus } from '../events';
 import { getPositioningForSymbol } from '../positioning';
+import { schedulePopulate } from '../schedulePopulate';
+import { readCachedDecision, writeCachedDecision } from './decisionCache';
 import { getSpotQuote } from '../spot';
 import { clearsSpotDeadZone, nearestStrongWall } from '../simple/walls';
 import { formatExpiryLabel } from '../time';
@@ -312,9 +316,67 @@ async function build(symbol: string): Promise<DecisionResult> {
 
 export class DecisionError extends Error {}
 
-export async function getDecision(rawSymbol: string): Promise<DecisionResult> {
+export async function getDecision(
+  rawSymbol: string,
+  options: { force?: boolean } = {},
+): Promise<DecisionResult> {
   const symbol = normaliseSymbol(rawSymbol);
   if (!symbol) throw new DecisionError('That does not look like a US ticker.');
 
-  return cached(`decision:${symbol}`, CACHE_SECONDS, () => build(symbol));
+  const key = `decision:${symbol}`;
+  const isConfigured = symbol === config.symbol;
+
+  const buildAndCache = async (): Promise<DecisionResult> => {
+    const data = await build(symbol);
+    // Warm the cross-instance Blob cache so the next cold lambda skips the two
+    // chain fetches — only the configured symbol, which the cron refreshes.
+    if (isConfigured) await writeCachedDecision(data);
+    return data;
+  };
+
+  if (options.force && isConfigured) {
+    invalidate(key);
+    return cached(key, CACHE_SECONDS, buildAndCache);
+  }
+
+  return cached(key, CACHE_SECONDS, async () => {
+    // Serve the cron's written decision rather than refetching. While the market
+    // is closed the last result stands as-is; while open the age is enforced so
+    // a cold instance rebuilds a genuinely stale one — but the cron keeps it
+    // fresh. Same rule as getPositioning / getForecast.
+    if (isConfigured) {
+      const cachedPayload = await readCachedDecision();
+      if (cachedPayload) {
+        const status = currentMarketStatus();
+        const marketClosed = status.phase === 'after-close' || status.phase === 'closed-day';
+        if (marketClosed) return cachedPayload.data;
+        const ageSeconds = (Date.now() - Date.parse(cachedPayload.builtAtIso)) / 1000;
+        if (Number.isFinite(ageSeconds) && ageSeconds <= CACHE_SECONDS) {
+          return cachedPayload.data;
+        }
+      }
+    }
+    return buildAndCache();
+  });
+}
+
+/**
+ * The /decision entry point that never parses a chain during the request.
+ *
+ * For the configured symbol it reads only the cron-written cache — a present
+ * result is served, an empty one returns null so the page shows "Updating…"
+ * rather than blocking on the build — and kicks a best-effort background
+ * populate. On-demand tickers still build on request (the reader typed that
+ * symbol and is waiting for it).
+ */
+export async function peekDecision(rawSymbol: string): Promise<DecisionResult | null> {
+  const symbol = normaliseSymbol(rawSymbol);
+  if (!symbol) throw new DecisionError('That does not look like a US ticker.');
+  if (symbol !== config.symbol) return getDecision(symbol);
+
+  const cachedPayload = await readCachedDecision();
+  if (cachedPayload) return cachedPayload.data;
+
+  schedulePopulate(() => getDecision(config.symbol));
+  return null;
 }

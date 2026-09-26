@@ -25,17 +25,17 @@ import { buildContextBand, type ContextBand as ContextBandData } from '@/lib/dec
 import type { LogEntry } from '@/lib/log/types';
 import { TradeabilityPanel } from '@/components/TradeabilityPanel';
 import { ChainError } from '@/lib/chainSource';
-import { DecisionError, getDecision, type DecisionResult } from '@/lib/decision';
+import { DecisionError, peekDecision, type DecisionResult } from '@/lib/decision';
 import { exposureIsReliable, type Check, type Grade } from '@/lib/decision/types';
 import { readLog } from '@/lib/log/store';
 import {
   summarisePositioningRecord,
   type PositioningRecord,
 } from '@/lib/log/positioningRecord';
-import { getForecast } from '@/lib/forecast';
+import { peekForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatStrike } from '@/lib/format';
-import { getPositioningView } from '@/lib/positioning';
+import { peekPositioningView } from '@/lib/positioning';
 import { eventsBetween, snapshotStaleness } from '@/lib/events';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { MethodologyDrawer } from '@/components/MethodologyDrawer';
@@ -388,13 +388,18 @@ export default async function DecisionPage({ searchParams }: PageProps) {
    * because only this page knows what else is still on screen.
    */
   let error: { message: string; detail: React.ReactNode } | null = null;
+  // The snapshot cache is not built yet (a fresh deploy before the refresher
+  // cron's first run) — distinct from a failure. Shows "Updating…" rather than
+  // blocking on a cold build. Only reachable for the configured symbol.
+  let updating = false;
 
   /** The paragraph under the headline: what to do, given what went wrong. */
   const chartStillBelow =
     'The context, levels and conviction checks all come from the option chain, so they are unavailable — but the chart does not need options and is still below.';
 
   try {
-    data = await getDecision(query);
+    data = await peekDecision(query);
+    if (data === null) updating = true;
   } catch (e) {
     if (e instanceof DecisionError) {
       error = { message: e.message, detail: 'Check the spelling and try again.' };
@@ -441,8 +446,8 @@ export default async function DecisionPage({ searchParams }: PageProps) {
    */
   const [forecast, positioning, breadth, retests, dailyBars] = symbol
     ? await Promise.all([
-        getForecast(symbol).catch((): ForecastResult | null => null),
-        getPositioningView(symbol).catch((): PositioningData | null => null),
+        peekForecast(symbol).catch((): ForecastResult | null => null),
+        peekPositioningView(symbol).catch((): PositioningData | null => null),
         /*
          * Both read stored documents only — the upstream work happens on a
          * cron. So they cost a storage read, never an API call, and a page
@@ -630,6 +635,17 @@ export default async function DecisionPage({ searchParams }: PageProps) {
         </div>
 
         <DecisionSearch initial={data?.context.symbol ?? query} />
+
+        {updating && (
+          <div className="panel border-l-2 border-l-term-dim/60 px-4 py-4">
+            <p className="text-xs font-bold text-term-text">Updating…</p>
+            <p className="mt-1.5 text-2xs leading-relaxed text-term-faint">
+              The latest snapshot is being built. This page reads a pre-computed
+              snapshot rather than parsing the option chain on each visit, so it
+              will fill in within a minute or two — refresh shortly.
+            </p>
+          </div>
+        )}
 
         {error && (
           <div className="panel border-l-2 border-l-bear/60 px-4 py-4">
