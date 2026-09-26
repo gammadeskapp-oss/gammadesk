@@ -8,6 +8,7 @@ import { fetchCboeSnapshot } from './cboe';
 import { snapshotStaleness } from './events';
 import { buildPositioning } from './exposure';
 import { readLastGoodSnapshot, saveLastGoodSnapshot } from './lastSnapshot';
+import { readFreshCachedPositioning, writeCachedPositioning } from './positioningCache';
 import { fetchPolygonChain } from './polygon';
 import { formatAsOf } from './time';
 import type { DataSource, PositioningData, WeightBasis } from './types';
@@ -256,13 +257,32 @@ function toPositioning(
 export async function getPositioning(
   options: { force?: boolean } = {},
 ): Promise<PositioningData> {
+  const compute = async (): Promise<PositioningData> => {
+    const data = toPositioning(await cachedSnapshot(), config.expirationCount);
+    // Warm the cross-instance Blob cache so the next cold lambda skips the parse.
+    await writeCachedPositioning(data);
+    return data;
+  };
+
   if (options.force) {
     invalidate(snapshotCacheKey());
     invalidate(viewCacheKey(config.expirationCount));
+    // A forced refresh always recomputes fresh and rewrites the Blob — this is
+    // the refresher cron's path (see /api/x/snapshot).
+    return cached(viewCacheKey(config.expirationCount), config.cacheSeconds, compute);
   }
-  return cached(viewCacheKey(config.expirationCount), config.cacheSeconds, async () =>
-    toPositioning(await cachedSnapshot(), config.expirationCount),
-  );
+
+  return cached(viewCacheKey(config.expirationCount), config.cacheSeconds, async () => {
+    // Cold-start shortcut: serve the refresher cron's recently written payload
+    // (survives cold instances, loads in well under a second) rather than paying
+    // the full chain fetch + IV-surface parse. Only when it is missing or older
+    // than the cache window does this instance recompute — and it writes the
+    // result back so the next cold instance is fast too. Bounded by cacheSeconds,
+    // so market-hours freshness is unchanged.
+    const fresh = await readFreshCachedPositioning(config.cacheSeconds);
+    if (fresh) return fresh;
+    return compute();
+  });
 }
 
 /**

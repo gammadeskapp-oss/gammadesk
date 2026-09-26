@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
+import { getForecast } from '@/lib/forecast';
+import { getPositioning } from '@/lib/positioning';
 import { computeDeskSnapshotForCache } from '@/lib/x/deskData';
 import { writeCachedDeskSnapshot } from '@/lib/x/snapshotStore';
 
@@ -29,6 +31,15 @@ export async function GET(request: Request) {
   const now = new Date();
 
   try {
+    // Keep the /decision Blob caches warm. These are the non-force paths: each
+    // refreshes and rewrites its Blob only when the stored copy has aged past its
+    // own TTL, so Polygon (15-min delayed) is not refetched every 5 minutes and
+    // the forecast cone does not re-simulate needlessly. The desk snapshot below
+    // then reuses the same in-process positioning and overlays a fresh spot.
+    if (!dry) {
+      await getPositioning();
+      await getForecast().catch(() => null);
+    }
     const cached = await computeDeskSnapshotForCache(now);
     if (!dry) await writeCachedDeskSnapshot(cached);
     return NextResponse.json({

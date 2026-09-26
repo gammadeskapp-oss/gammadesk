@@ -1,7 +1,8 @@
 import 'server-only';
 
-import { cached } from '../cache';
+import { cached, invalidate } from '../cache';
 import { config } from '../config';
+import { readFreshCachedForecast, writeCachedForecast } from './forecastCache';
 import { peekBreadth } from '../groups';
 import { getForecastPositioning, getPositioningForSymbol } from '../positioning';
 import { fetchBars, normaliseSymbol, TickerError } from '../ticker/bars';
@@ -166,7 +167,10 @@ async function build(symbol: string): Promise<ForecastResult> {
 /**
  * Cached forecast, per symbol. Re-simulating is cheap; refetching is not.
  */
-export function getForecast(rawSymbol?: string): Promise<ForecastResult> {
+export function getForecast(
+  rawSymbol?: string,
+  options: { force?: boolean } = {},
+): Promise<ForecastResult> {
   const symbol = rawSymbol ? normaliseSymbol(rawSymbol) : config.symbol;
   if (!symbol) {
     throw new TickerError(
@@ -176,9 +180,30 @@ export function getForecast(rawSymbol?: string): Promise<ForecastResult> {
     );
   }
 
-  return cached(
-    `forecast:${symbol}:${config.forecastHorizon}:${config.forecastPaths}`,
-    config.forecastCacheSeconds,
-    () => build(symbol),
-  );
+  const key = `forecast:${symbol}:${config.forecastHorizon}:${config.forecastPaths}`;
+  const isConfigured = symbol === config.symbol;
+
+  const buildAndCache = async (): Promise<ForecastResult> => {
+    const data = await build(symbol);
+    // Warm the cross-instance Blob cache so the next cold lambda skips the
+    // fetch + simulation — only the configured symbol, which the cron refreshes.
+    if (isConfigured) await writeCachedForecast(data);
+    return data;
+  };
+
+  if (options.force && isConfigured) {
+    invalidate(key);
+    return cached(key, config.forecastCacheSeconds, buildAndCache);
+  }
+
+  return cached(key, config.forecastCacheSeconds, async () => {
+    // Cold-start shortcut for the configured symbol: serve the cron's recently
+    // written forecast rather than refetching and re-simulating. Bounded by
+    // forecastCacheSeconds, so freshness is unchanged.
+    if (isConfigured) {
+      const fresh = await readFreshCachedForecast(config.forecastCacheSeconds);
+      if (fresh) return fresh;
+    }
+    return buildAndCache();
+  });
 }
