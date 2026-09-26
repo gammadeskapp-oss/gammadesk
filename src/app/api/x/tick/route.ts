@@ -12,9 +12,9 @@ import {
   summariseDay,
   type DayRow,
 } from '@/lib/x/dispatch';
-import { loadDeskSnapshot } from '@/lib/x/deskData';
 import { applyLockedLevels, decideIntraday, lockableLevels, phraseUsage } from '@/lib/x/intradaySchedule';
 import { readIntradayState, recordIntradayPost, recordLockedLevels, markSummarySent, markStaleAlerted } from '@/lib/x/intradayStore';
+import { readCachedDeskSnapshot, writeTickHeartbeat, type TickHeartbeat } from '@/lib/x/snapshotStore';
 import { postingEnabled, runSlot, type RunOutcome } from '@/lib/x/run';
 import { chicagoNow, isPostingDay } from '@/lib/x/schedule';
 import { alreadyPosted, readLog, readPause, resume, storeStatus } from '@/lib/x/store';
@@ -49,7 +49,14 @@ export async function GET(request: Request) {
   const clock = chicagoNow(now);
 
   if (!isPostingDay(date, rules)) {
-    return NextResponse.json({ status: 'skipped', reason: 'Not a full trading day (weekend, holiday, or early close).' });
+    const reason = 'Not a full trading day (weekend, holiday, or early close).';
+    if (!dry) {
+      await writeTickHeartbeat({
+        at: now.toISOString(), decision: 'idle', reason, outcome: null,
+        stale: false, dataAgeMin: null, snapshotBuiltAt: null,
+      });
+    }
+    return NextResponse.json({ status: 'skipped', reason });
   }
 
   // --- self-heal: auto-resume a stale "pause today" or an hourly auth re-test -
@@ -61,8 +68,15 @@ export async function GET(request: Request) {
 
   // --- gather the day's state -------------------------------------------------
   const log = await readLog().catch(() => []);
-  const snapshot = await loadDeskSnapshot(now).catch(() => null);
-  const stale = !snapshot || ageMinutes(snapshot.dataIso, now) > MAX_DATA_AGE_MIN;
+  // Read the ready-made snapshot the `/api/x/snapshot` cron writes — a fast Blob
+  // read, no chain fetch or parse inside the tick. If it is missing or its market
+  // data is past the freshness limit, the tick treats the feed as stale (which
+  // surfaces in the heartbeat and holds any due post), rather than parsing a
+  // chain inline and risking its own timeout.
+  const cached = await readCachedDeskSnapshot().catch(() => null);
+  const snapshot = cached?.snapshot ?? null;
+  const dataAgeMin = snapshot ? ageMinutes(snapshot.dataIso, now) : null;
+  const stale = dataAgeMin === null || dataAgeMin > MAX_DATA_AGE_MIN;
 
   const state = await readIntradayState(date);
 
@@ -116,6 +130,20 @@ export async function GET(request: Request) {
     return NextResponse.json({ status: 'dry', action, stale, paused: pause.paused, autoResume });
   }
 
+  // Every non-dry tick records a heartbeat, so there are no more silent gaps:
+  // "not due", "stale", and an actual post outcome are all visible from the
+  // outside (surfaced in /api/health). The post log still holds only genuine
+  // post attempts.
+  const beat = (decision: string, reason: string, outcomeStr: string | null): TickHeartbeat => ({
+    at: now.toISOString(),
+    decision,
+    reason,
+    outcome: outcomeStr,
+    stale,
+    dataAgeMin: dataAgeMin === null ? null : Math.round(dataAgeMin),
+    snapshotBuiltAt: cached?.builtAtIso ?? null,
+  });
+
   // --- run the chosen action --------------------------------------------------
   let outcome: RunOutcome | null = null;
 
@@ -126,6 +154,7 @@ export async function GET(request: Request) {
     const summary = summariseDay(rows, date);
     await sendOwnerEmail(summary.subject, summary.text).catch(() => ({ sent: false }));
     await markSummarySent(date);
+    await writeTickHeartbeat(beat('summary', 'Daily summary sent.', 'sent'));
     return NextResponse.json({ status: 'summary-sent', summary: { sent: summary.sent, skipped: summary.skipped, failed: summary.failed }, store: storeStatus() });
   }
 
@@ -165,6 +194,8 @@ export async function GET(request: Request) {
       });
     }
   } else {
+    // Nothing due (or waiting on stale data) — the common case, every 5 minutes.
+    await writeTickHeartbeat(beat(action.kind, action.reason, null));
     return NextResponse.json({ status: action.kind, reason: action.reason, store: storeStatus() });
   }
 
@@ -182,5 +213,6 @@ export async function GET(request: Request) {
     }
   }
 
+  await writeTickHeartbeat(beat(action.kind, action.reason, outcome?.status ?? null));
   return NextResponse.json({ action, ...outcome, store: storeStatus() });
 }

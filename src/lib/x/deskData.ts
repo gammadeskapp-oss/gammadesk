@@ -76,3 +76,20 @@ export async function loadDeskSnapshot(now: Date = new Date()): Promise<DeskSnap
     dataIso: stalestIso(priceIso, positioning.meta.quoteDateIso) ?? new Date().toISOString(),
   };
 }
+
+/**
+ * Compute the desk snapshot together with the source that served the chain,
+ * ready to persist for the tick to read. Only the `/api/x/snapshot` cron calls
+ * this — it is the one place that pays the full chain-fetch + IV-surface cost.
+ *
+ * `getPositioning()` is cached in-process, so the second call here is a cache
+ * hit off the fetch `loadDeskSnapshot` just made — it reads the source label
+ * without a second upstream request.
+ */
+export async function computeDeskSnapshotForCache(
+  now: Date = new Date(),
+): Promise<{ snapshot: DeskSnapshot; source: 'cboe' | 'polygon'; builtAtIso: string }> {
+  const snapshot = await loadDeskSnapshot(now);
+  const positioning = await getPositioning();
+  return { snapshot, source: positioning.meta.source, builtAtIso: new Date().toISOString() };
+}

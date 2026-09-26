@@ -98,6 +98,10 @@
       "schedule": "30 22 * * 6"
     },
     {
+      "path": "/api/x/snapshot",
+      "schedule": "4-59/5 13-22 * * 1-5"
+    },
+    {
       "path": "/api/x/tick",
       "schedule": "*/5 13-22 * * 1-5"
     },

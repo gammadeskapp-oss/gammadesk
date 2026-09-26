@@ -6,7 +6,9 @@ import { peekStoredGroups } from '@/lib/groups';
 import { detectedBlobAccess, storeStatus } from '@/lib/jsonStore';
 import { readLog } from '@/lib/log/store';
 import { readLog as readXLog, readPause as readXPause } from '@/lib/x/store';
+import { readCachedDeskSnapshot, readTickHeartbeat } from '@/lib/x/snapshotStore';
 import { postingEnabledFromValue } from '@/lib/x/flags';
+import { config } from '@/lib/config';
 import { emailConfig, MAILING_ADDRESS_PLACEHOLDER } from '@/lib/email/config';
 import { marketToday } from '@/lib/time';
 
@@ -156,10 +158,15 @@ export async function GET(request: Request) {
    * state (whose reason reveals an auth/billing auto-pause), whether the four
    * X credentials are present, and each slot's outcome for today.
    */
-  const [xLog, xPause] = await Promise.all([
+  const [xLog, xPause, xCachedSnap, xTick] = await Promise.all([
     readXLog().catch(() => []),
     readXPause().catch(() => ({ paused: false as boolean })),
+    readCachedDeskSnapshot().catch(() => null),
+    readTickHeartbeat().catch(() => null),
   ]);
+  const snapAgeMin = xCachedSnap
+    ? Math.round((Date.now() - Date.parse(xCachedSnap.snapshot.dataIso)) / 60_000)
+    : null;
   const xEnabled = postingEnabledFromValue(process.env['X_POSTING_ENABLED']);
   const xCredsPresent =
     present('X_API_KEY') && present('X_API_SECRET') && present('X_ACCESS_TOKEN') && present('X_ACCESS_SECRET');
@@ -180,6 +187,16 @@ export async function GET(request: Request) {
     lastEntry: xLog[0]
       ? { date: xLog[0].date, slot: xLog[0].slot, outcome: xLog[0].outcome, reason: xLog[0].reason ?? null, at: xLog[0].at }
       : null,
+    // Which upstream the chain behind the levels comes from (GAMMADESK_DATA_SOURCE).
+    dataSource: config.dataSource,
+    // The cache the /api/x/snapshot cron writes and the tick reads. A null or
+    // aged snapshot here explains a poster that is live but not posting.
+    snapshotCache: xCachedSnap
+      ? { source: xCachedSnap.source, dataIso: xCachedSnap.snapshot.dataIso, builtAtIso: xCachedSnap.builtAtIso, dataAgeMin: snapAgeMin }
+      : null,
+    // The heartbeat every tick writes — "the cron ran and here is what it
+    // decided", so a stale or not-due tick is never a silent gap.
+    lastTick: xTick,
   };
 
   const jobs = {
