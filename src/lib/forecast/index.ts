@@ -2,7 +2,8 @@ import 'server-only';
 
 import { cached, invalidate } from '../cache';
 import { config } from '../config';
-import { readFreshCachedForecast, writeCachedForecast } from './forecastCache';
+import { currentMarketStatus } from '../events';
+import { readCachedForecast, writeCachedForecast } from './forecastCache';
 import { peekBreadth } from '../groups';
 import { getForecastPositioning, getPositioningForSymbol } from '../positioning';
 import { fetchBars, normaliseSymbol, TickerError } from '../ticker/bars';
@@ -197,12 +198,22 @@ export function getForecast(
   }
 
   return cached(key, config.forecastCacheSeconds, async () => {
-    // Cold-start shortcut for the configured symbol: serve the cron's recently
-    // written forecast rather than refetching and re-simulating. Bounded by
-    // forecastCacheSeconds, so freshness is unchanged.
+    // Serve the cron's written forecast rather than refetching and re-simulating.
+    // While the market is closed the last forecast stands as-is (no recompute,
+    // however old); while it is open the age is enforced so a cold instance
+    // rebuilds a genuinely stale one — but the cron keeps it fresh. Same rule as
+    // getPositioning in lib/positioning.ts.
     if (isConfigured) {
-      const fresh = await readFreshCachedForecast(config.forecastCacheSeconds);
-      if (fresh) return fresh;
+      const cachedPayload = await readCachedForecast();
+      if (cachedPayload) {
+        const status = currentMarketStatus();
+        const marketClosed = status.phase === 'after-close' || status.phase === 'closed-day';
+        if (marketClosed) return cachedPayload.data;
+        const ageSeconds = (Date.now() - Date.parse(cachedPayload.builtAtIso)) / 1000;
+        if (Number.isFinite(ageSeconds) && ageSeconds <= config.forecastCacheSeconds) {
+          return cachedPayload.data;
+        }
+      }
     }
     return buildAndCache();
   });

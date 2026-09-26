@@ -47,20 +47,7 @@ export async function writeCachedPositioning(data: PositioningData): Promise<voi
   await store.write({ data, builtAtIso: new Date().toISOString() }).catch(() => {});
 }
 
-/**
- * The cached payload if it was written within `maxAgeSeconds`, else null. The
- * age bound keeps this from serving data older than the in-process cache would,
- * so freshness during market hours is unchanged — the Blob only shortcuts the
- * cold-start recompute.
- */
-export async function readFreshCachedPositioning(
-  maxAgeSeconds: number,
-  now: Date = new Date(),
-): Promise<PositioningData | null> {
-  const cached = await store.read().catch(() => null);
-  if (!cached) return null;
-  const builtMs = Date.parse(cached.builtAtIso);
-  if (!Number.isFinite(builtMs)) return null;
-  if ((now.getTime() - builtMs) / 1000 > maxAgeSeconds) return null;
-  return cached.data;
+/** The raw cached payload with the time it was built, or null when never written. */
+export async function readCachedPositioning(): Promise<{ data: PositioningData; builtAtIso: string } | null> {
+  return store.read().catch(() => null);
 }

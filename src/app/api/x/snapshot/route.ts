@@ -31,14 +31,14 @@ export async function GET(request: Request) {
   const now = new Date();
 
   try {
-    // Keep the /decision Blob caches warm. These are the non-force paths: each
-    // refreshes and rewrites its Blob only when the stored copy has aged past its
-    // own TTL, so Polygon (15-min delayed) is not refetched every 5 minutes and
-    // the forecast cone does not re-simulate needlessly. The desk snapshot below
-    // then reuses the same in-process positioning and overlays a fresh spot.
+    // Force a fresh compute of the /decision caches. Forcing (not the read-cache
+    // path the pages use) is what makes this cron the single writer: the pages
+    // serve whatever Blob this leaves — including all evening and, after close,
+    // the settled snapshot — and never recompute while the market is closed. One
+    // chain fetch feeds positioning, the forecast, and the desk snapshot below.
     if (!dry) {
-      await getPositioning();
-      await getForecast().catch(() => null);
+      await getPositioning({ force: true });
+      await getForecast(undefined, { force: true }).catch(() => null);
     }
     const cached = await computeDeskSnapshotForCache(now);
     if (!dry) await writeCachedDeskSnapshot(cached);

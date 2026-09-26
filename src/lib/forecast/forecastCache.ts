@@ -38,15 +38,7 @@ export async function writeCachedForecast(data: ForecastResult): Promise<void> {
   await store.write({ data, builtAtIso: new Date().toISOString() }).catch(() => {});
 }
 
-/** The cached forecast if written within `maxAgeSeconds`, else null. */
-export async function readFreshCachedForecast(
-  maxAgeSeconds: number,
-  now: Date = new Date(),
-): Promise<ForecastResult | null> {
-  const cached = await store.read().catch(() => null);
-  if (!cached) return null;
-  const builtMs = Date.parse(cached.builtAtIso);
-  if (!Number.isFinite(builtMs)) return null;
-  if ((now.getTime() - builtMs) / 1000 > maxAgeSeconds) return null;
-  return cached.data;
+/** The raw cached forecast with the time it was built, or null when never written. */
+export async function readCachedForecast(): Promise<{ data: ForecastResult; builtAtIso: string } | null> {
+  return store.read().catch(() => null);
 }
