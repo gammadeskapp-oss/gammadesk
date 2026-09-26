@@ -218,3 +218,23 @@ export function getForecast(
     return buildAndCache();
   });
 }
+
+/**
+ * The /decision entry point that never rebuilds a forecast during the request.
+ *
+ * For the configured symbol it reads only the cron-written cache — a present
+ * forecast is served, an empty one returns null so the page shows "Updating…"
+ * rather than blocking on a fetch + simulation — and kicks a best-effort
+ * background populate. On-demand tickers still build on request.
+ */
+export async function peekForecast(rawSymbol?: string): Promise<ForecastResult | null> {
+  const symbol = rawSymbol ? normaliseSymbol(rawSymbol) : config.symbol;
+  if (!symbol) return null;
+  if (symbol !== config.symbol) return getForecast(symbol);
+
+  const cachedPayload = await readCachedForecast();
+  if (cachedPayload) return cachedPayload.data;
+
+  void getForecast().catch(() => {});
+  return null;
+}

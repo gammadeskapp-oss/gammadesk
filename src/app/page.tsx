@@ -9,7 +9,7 @@ import { ResearchCards } from '@/components/ResearchCards';
 import { ChainError } from '@/lib/chainSource';
 import { config } from '@/lib/config';
 import { buildGammaProfile } from '@/lib/gammaProfile';
-import { getPositioningView, normaliseSymbol } from '@/lib/positioning';
+import { peekPositioningView, normaliseSymbol } from '@/lib/positioning';
 import { getBreadth } from '@/lib/breadth';
 import { macroTranslatorEnabled } from '@/lib/pageFlag';
 import { getMacroSelection, type MacroSelection } from '@/lib/macro/consensus';
@@ -58,6 +58,11 @@ export default async function HomePage({ searchParams }: PageProps) {
 
   let data: PositioningData | null = null;
   let error: { message: string; hint?: string; upstream?: boolean } | null = null;
+  // Distinct from `error`: the snapshot cache is simply not built yet (a fresh
+  // deploy before the refresher cron's first run). The page renders "Updating…"
+  // rather than blocking on a cold chain parse; the background populate the peek
+  // kicked off, and the cron, fill it within a cycle.
+  let updating = false;
 
   /*
    * The market backdrop, fetched alongside the chain and allowed to fail on
@@ -119,7 +124,10 @@ export default async function HomePage({ searchParams }: PageProps) {
     };
   } else {
     try {
-      data = await getPositioningView(wanted);
+      data = await peekPositioningView(wanted);
+      // Null for the configured symbol means the cache is not populated yet, not
+      // a failure — show "Updating…" rather than an error card.
+      if (data === null && wanted === config.symbol) updating = true;
     } catch (e) {
       if (e instanceof ChainError) {
         /*
@@ -237,6 +245,18 @@ export default async function HomePage({ searchParams }: PageProps) {
               gaps={macroSelection?.gaps ?? []}
               overnight={overnight}
             />
+          )}
+
+          {updating && (
+            <div className="panel border-l-2 border-l-term-dim/60 px-4 py-4">
+              <p className="text-xs font-bold text-term-text">Updating…</p>
+              <p className="mt-1.5 text-2xs leading-relaxed text-term-faint">
+                The latest positioning snapshot is being built. This page reads a
+                pre-computed snapshot rather than parsing the chain on each visit,
+                so it will fill in within a minute or two — refresh shortly. The
+                market backdrop above is live in the meantime.
+              </p>
+            </div>
           )}
 
           {error && (

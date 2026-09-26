@@ -433,6 +433,31 @@ export async function getPositioningView(symbol: string): Promise<PositioningDat
   return getPositioningForSymbol(symbol, config.expirationCount);
 }
 
+/**
+ * The page entry point that never parses a chain during the request.
+ *
+ * For the configured symbol it reads only the cron-written cache: a present
+ * snapshot is served (however old — its own "as of" stamp tells the reader),
+ * and a genuinely empty cache returns null so the page can show "Updating…"
+ * instead of hanging on a cold compute. When it is empty it also kicks a
+ * best-effort background populate so the next load is warm, and during market
+ * hours the refresher cron fills it within one cycle.
+ *
+ * On-demand tickers are not cron-cached, so they keep computing on request —
+ * the reader typed that symbol and is waiting for it.
+ */
+export async function peekPositioningView(symbol: string): Promise<PositioningData | null> {
+  if (symbol !== config.symbol) return getPositioningForSymbol(symbol, config.expirationCount);
+
+  const cachedPayload = await readCachedPositioning();
+  if (cachedPayload) return cachedPayload.data;
+
+  // Empty cache: do not block the page on a chain parse. Kick a background
+  // populate (best-effort) and report "no snapshot yet".
+  void getPositioning().catch(() => {});
+  return null;
+}
+
 /** Seconds until the cached snapshot goes stale — shown next to "data as of". */
 export function secondsUntilRefresh(): number {
   return Math.ceil(ttlRemaining(viewCacheKey(config.expirationCount)) / 1000);
