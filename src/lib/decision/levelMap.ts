@@ -126,6 +126,15 @@ export function buildLevelMap(
   rows: StrikeGex[],
   spot: number,
   summary: Pick<Summary, 'netGex' | 'flipLevel' | 'frontFlipLevel'>,
+  /*
+   * The price everything is *measured against* — the one shared live spot. It
+   * defaults to `spot` (the chain's own price) but the page passes the fresh
+   * quote so the SPOT rung and every "from spot" percentage track the tape,
+   * while which strikes are walls stays classified off the stable chain `spot`
+   * above. Keeping the two apart is deliberate: levels should not flicker as
+   * price wobbles, but the price shown must be current.
+   */
+  refSpot: number = spot,
 ): LevelMap {
   const usable = rows.filter((r) => Number.isFinite(r.gex) && Math.abs(r.gex) > 0);
 
@@ -152,7 +161,7 @@ export function buildLevelMap(
       price,
       labels: [label],
       gex,
-      distancePct: spot > 0 ? ((price - spot) / spot) * 100 : 0,
+      distancePct: refSpot > 0 ? ((price - refSpot) / refSpot) * 100 : 0,
       isSpot: label === 'spot',
     });
   };
@@ -194,7 +203,9 @@ export function buildLevelMap(
   }
 
   // --- spot ---------------------------------------------------------------
-  add(spot, 'spot', null);
+  // The marker sits at the shared live price, not the chain's own spot, so the
+  // ladder shows where price actually is right now.
+  add(refSpot, 'spot', null);
 
   const rungs = [...byPrice.values()]
     .sort((a, b) => b.price - a.price)
@@ -205,7 +216,7 @@ export function buildLevelMap(
 
   return {
     rungs,
-    spot,
+    spot: refSpot,
     netGex: summary.netGex,
     levelCount: rungs.filter((r) => !r.isSpot).length,
     rule: { threshold: STRONG_ENOUGH, neighbourhood: NEIGHBOURHOOD },

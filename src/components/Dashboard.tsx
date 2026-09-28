@@ -26,6 +26,13 @@ import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 
 interface DashboardProps {
   data: PositioningData;
+  /**
+   * The shared live spot (same short-cached quote /decision uses), fetched on
+   * the server page and passed down so the dashboard's spot and flip distance
+   * track the tape while the chain levels stay on their longer cache. Null when
+   * the live quote could not be read — the strip falls back to the chain spot.
+   */
+  liveSpot?: number | null;
   /*
    * Graded on the server and passed down rather than computed here. This is a
    * client component, and "how old is this" depends on the current time — the
@@ -104,6 +111,7 @@ function CacheCountdown({ asOfIso, cacheSeconds }: { asOfIso: string; cacheSecon
 
 export function Dashboard({
   data,
+  liveSpot,
   staleness,
   methodology,
   profile,
@@ -126,6 +134,7 @@ export function Dashboard({
    * rather than written out twice, so the verdict at the top of the page and
    * the "what to watch" note further down can never describe different books.
    */
+  const sharedSpot = liveSpot ?? data.summary.spot;
   const simpleInput = {
     symbol: data.symbol,
     regime: data.summary.regime,
@@ -133,7 +142,7 @@ export function Dashboard({
     aboveFlip:
       data.summary.flipLevel === null
         ? null
-        : data.summary.spot > data.summary.flipLevel,
+        : sharedSpot > data.summary.flipLevel,
     // Same helper /decision uses, so both pages name the same level — the
     // summary's magnet is the *biggest* wall, which can sit far above the one
     // price actually runs into first.
@@ -273,7 +282,7 @@ export function Dashboard({
   function Advanced() {
     return (
       <div className="space-y-4">
-      <SummaryStrip summary={data.summary} symbol={data.symbol} />
+      <SummaryStrip summary={data.summary} symbol={data.symbol} liveSpot={liveSpot} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <TabBar active={metric} onChange={setMetric} />

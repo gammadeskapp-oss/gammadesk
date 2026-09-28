@@ -1,6 +1,7 @@
 import 'server-only';
 
 import type { ChartBar } from '../bars/types';
+import { ordinalOf } from '../ordinal';
 import type { Check, Conviction, Grade } from './types';
 
 /**
@@ -142,7 +143,7 @@ export function buildConviction(
     rangePerMinute >= 0.02 ? 'red' : rangePerMinute >= 0.008 ? 'amber' : 'green';
 
   const money = (n: number) => `$${n.toFixed(2)}`;
-  const ordinal = touches <= 1 ? '1st' : touches === 2 ? '2nd' : `${touches}th`;
+  const ordinal = ordinalOf(touches);
 
   const checks: Check[] = [
     {

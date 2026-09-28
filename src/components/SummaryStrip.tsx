@@ -45,11 +45,19 @@ function Tile({ label, value, sub, tone = 'neutral', tip }: TileProps) {
 interface SummaryStripProps {
   summary: Summary;
   symbol: string;
+  /**
+   * The shared live spot, from the same short-cached quote /decision's top box
+   * uses. When present it is the price shown and the price the flip distance is
+   * measured from, so the dashboard and /decision never disagree about spot.
+   * The chain levels (netGex, magnets, flip level itself) still come from the
+   * summary. Falls back to the chain spot when the live quote is unavailable.
+   */
+  liveSpot?: number | null;
 }
 
-export function SummaryStrip({ summary, symbol }: SummaryStripProps) {
+export function SummaryStrip({ summary, symbol, liveSpot }: SummaryStripProps) {
   const {
-    spot,
+    spot: chainSpot,
     netGex,
     regime,
     flipLevel,
@@ -57,6 +65,8 @@ export function SummaryStrip({ summary, symbol }: SummaryStripProps) {
     magnetBelow,
     putCallOiRatio,
   } = summary;
+
+  const spot = liveSpot ?? chainSpot;
 
   const flipDistance =
     flipLevel === null ? null : ((spot - flipLevel) / flipLevel) * 100;
