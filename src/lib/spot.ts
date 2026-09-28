@@ -37,27 +37,37 @@ export interface SpotQuote {
 }
 
 async function loadSpot(symbol: string): Promise<SpotQuote> {
-  if (config.dataSource === 'polygon' && config.apiKey) {
-    const { price, asOf } = await fetchPolygonSpot(symbol);
+  // Cboe's compact quote is the spot source of record, even when the chain is
+  // served by Polygon. Measured 28 Sep 2026: Polygon's options-snapshot echo
+  // was still frozen at Friday's close ~20 min after the open (the window the
+  // morning post fires in), while Cboe was already carrying the live session
+  // with its own trade timestamp — and, on an options-only plan, Polygon echoes
+  // no change%/range at all. Cboe is keyless, so this needs no entitlement.
+  // Polygon stands by only for a symbol Cboe does not list.
+  try {
+    const q = await fetchCboeQuote(symbol);
     return {
-      price,
-      asOfIso: asOf.toISOString(),
-      changePct: null,
-      dayHigh: null,
-      dayLow: null,
-      source: 'polygon',
+      price: q.price,
+      asOfIso: q.quoteIso,
+      changePct: q.changePct,
+      dayHigh: q.dayHigh,
+      dayLow: q.dayLow,
+      source: 'cboe',
     };
+  } catch (cboeError) {
+    if (config.dataSource === 'polygon' && config.apiKey) {
+      const { price, asOf } = await fetchPolygonSpot(symbol);
+      return {
+        price,
+        asOfIso: asOf.toISOString(),
+        changePct: null,
+        dayHigh: null,
+        dayLow: null,
+        source: 'polygon',
+      };
+    }
+    throw cboeError;
   }
-
-  const q = await fetchCboeQuote(symbol);
-  return {
-    price: q.price,
-    asOfIso: q.quoteIso,
-    changePct: q.changePct,
-    dayHigh: q.dayHigh,
-    dayLow: q.dayLow,
-    source: 'cboe',
-  };
 }
 
 /**
