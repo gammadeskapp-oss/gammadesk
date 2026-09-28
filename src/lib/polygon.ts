@@ -62,9 +62,13 @@ interface SnapshotResult {
   open_interest?: number;
   greeks?: { gamma?: number; delta?: number };
   day?: { close?: number; volume?: number };
-  last_quote?: { bid?: number; ask?: number; midpoint?: number };
-  last_trade?: { price?: number };
-  underlying_asset?: { price?: number };
+  last_quote?: { bid?: number; ask?: number; midpoint?: number; last_updated?: number };
+  last_trade?: { price?: number; sip_timestamp?: number };
+  // `last_updated` is the underlying's own quote time in nanoseconds; `timeframe`
+  // is Polygon's own honesty flag ("DELAYED" on a 15-minute options plan). These
+  // are the real recording time of the price, which is what the page must stamp
+  // — never the moment this job happened to run.
+  underlying_asset?: { price?: number; last_updated?: number; timeframe?: string };
 }
 
 interface SnapshotResponse {
@@ -513,6 +517,36 @@ export async function fetchPolygonSpot(
   return { price, asOf, source: source === 'caller' ? 'snapshot' : source };
 }
 
+/**
+ * Polygon reports quote/trade times in nanoseconds since the epoch. Convert to a
+ * Date, rejecting anything absent or implausible so a malformed field falls back
+ * to the caller's own default rather than stamping the year 1970 or 55000.
+ */
+function nsToDate(ns: number | undefined): Date | null {
+  if (typeof ns !== 'number' || !Number.isFinite(ns) || ns <= 0) return null;
+  const d = new Date(ns / 1e6);
+  const year = d.getUTCFullYear();
+  if (year < 2000 || year > 2100) return null;
+  return d;
+}
+
+/**
+ * The freshest real timestamp anywhere in a snapshot page — the latest option
+ * quote or trade time. Used when the underlying does not carry its own stamp
+ * (e.g. the put-call-parity path), so a derived spot is still dated by the data
+ * it came from and never by the wall clock.
+ */
+function freshestQuoteTime(results: SnapshotResult[]): Date | null {
+  let newest = 0;
+  for (const r of results) {
+    for (const ns of [r.last_quote?.last_updated, r.last_trade?.sip_timestamp]) {
+      const d = nsToDate(ns);
+      if (d && d.getTime() > newest) newest = d.getTime();
+    }
+  }
+  return newest > 0 ? new Date(newest) : null;
+}
+
 async function fetchChainSpot(
   symbol: string,
   counter: { count: number },
@@ -533,19 +567,29 @@ async function fetchChainSpot(
       counter,
     );
     const results = data.results ?? [];
-    const price = results.find(
+    const withPrice = results.find(
       (r) => typeof r.underlying_asset?.price === 'number' && r.underlying_asset.price > 0,
-    )?.underlying_asset?.price;
+    );
+    const price = withPrice?.underlying_asset?.price;
 
     if (typeof price === 'number' && price > 0) {
-      return { price, asOf: new Date(), source: 'snapshot' };
+      // Stamp the price with when Polygon says it was recorded, not now. On a
+      // delayed plan this is ~15 min ago intraday and, before the open, it is the
+      // prior session's close — which is exactly what the staleness check and the
+      // "Last close" label need to see to tell the truth.
+      const asOf =
+        nsToDate(withPrice?.underlying_asset?.last_updated) ??
+        freshestQuoteTime(results) ??
+        new Date();
+      return { price, asOf, source: 'snapshot' };
     }
 
     // Options-only plans don't echo the underlying price, so derive it from the
-    // chain by put-call parity — no stocks entitlement required.
+    // chain by put-call parity — no stocks entitlement required. Its timestamp is
+    // the freshest option quote the parity was built from.
     const parity = spotFromParity(results);
     if (parity !== null) {
-      return { price: parity, asOf: new Date(), source: 'snapshot' };
+      return { price: parity, asOf: freshestQuoteTime(results) ?? new Date(), source: 'snapshot' };
     }
   } catch {
     // Fall through to the stocks endpoint, which is reported by the caller.

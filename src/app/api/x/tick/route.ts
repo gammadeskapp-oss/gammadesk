@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
-import { marketSessionRules } from '@/lib/events';
+import { marketSessionRules, priorSessionLabel } from '@/lib/events';
 import { sendOwnerEmail } from '@/lib/health/email';
 import { marketToday } from '@/lib/time';
 import { ageMinutes, MAX_DATA_AGE_MIN } from '@/lib/x/compose';
@@ -27,6 +27,8 @@ export const maxDuration = 300;
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
+/** A post quotes a live-ish price; older than this and the slot is held. */
+const SPOT_POST_MAX_AGE_MIN = 30;
 
 /**
  * The autonomous heartbeat. One Vercel cron wakes this every 5 minutes across
@@ -78,6 +80,15 @@ export async function GET(request: Request) {
   const dataAgeMin = snapshot ? ageMinutes(snapshot.dataIso, now) : null;
   const stale = dataAgeMin === null || dataAgeMin > MAX_DATA_AGE_MIN;
 
+  // A post quotes a spot, so it holds to a tighter freshness bar than the 90-min
+  // chain alarm: never post a price from a previous session, and never one more
+  // than SPOT_POST_MAX_AGE_MIN old. Once the snapshot carries the price's real
+  // timestamp (not the job's run time), a prior-session close shows up here as a
+  // large age and is held — which is the whole point of the honest stamp.
+  const priorSession = snapshot ? priorSessionLabel(snapshot.dataIso, now) : null;
+  const postStale =
+    dataAgeMin === null || dataAgeMin > SPOT_POST_MAX_AGE_MIN || priorSession !== null;
+
   const state = await readIntradayState(date);
 
   // The intraday levels are the morning's, locked for the day (or the first
@@ -122,12 +133,20 @@ export async function GET(request: Request) {
     morningPosted: await alreadyPosted('morning', date),
     closingPosted: await alreadyPosted('closing', date),
     summarySent: Boolean(state.summarySent),
-    stale,
+    stale: postStale,
     intraday,
   });
 
   if (dry) {
-    return NextResponse.json({ status: 'dry', action, stale, paused: pause.paused, autoResume });
+    return NextResponse.json({
+      status: 'dry',
+      action,
+      stale: postStale,
+      priorSession,
+      dataAgeMin: dataAgeMin === null ? null : Math.round(dataAgeMin),
+      paused: pause.paused,
+      autoResume,
+    });
   }
 
   // Every non-dry tick records a heartbeat, so there are no more silent gaps:
@@ -139,7 +158,7 @@ export async function GET(request: Request) {
     decision,
     reason,
     outcome: outcomeStr,
-    stale,
+    stale: postStale,
     dataAgeMin: dataAgeMin === null ? null : Math.round(dataAgeMin),
     snapshotBuiltAt: cached?.builtAtIso ?? null,
   });
