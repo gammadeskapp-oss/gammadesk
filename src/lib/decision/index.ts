@@ -27,8 +27,13 @@ import type {
 
 export type { DecisionResult } from './types';
 
-/** Expirations folded into the wall list. The near book is what price feels. */
-const EXPIRATIONS = 5;
+/**
+ * Expirations folded into the wall list. The near book is what price feels.
+ * Read from config (not a separate hardcoded 5) so /decision and the dashboard
+ * always fold in the SAME expiries and cannot solve two different flip levels —
+ * the dashboard's positioning uses `config.expirationCount` too.
+ */
+const EXPIRATIONS = config.expirationCount;
 /** Walls listed each side. */
 const WALLS_PER_SIDE = 4;
 /** Timeframe the conviction checks are measured on. */
@@ -39,6 +44,9 @@ const CACHE_SECONDS = 120;
 function wallsFrom(
   rows: { strike: number; total: { gex: number } }[],
   spot: number,
+  // Distances are measured against the shared live spot; which strikes are
+  // walls stays classified off the stable chain `spot`.
+  refSpot: number = spot,
 ): { above: Wall[]; below: Wall[] } {
   const scored = rows
     .map((r) => ({ strike: r.strike, gex: r.total.gex }))
@@ -65,7 +73,7 @@ function wallsFrom(
       strike: c.strike,
       gex: c.gex,
       strength: biggest > 0 ? Math.abs(c.gex) / biggest : 0,
-      distancePct: spot > 0 ? ((c.strike - spot) / spot) * 100 : 0,
+      distancePct: refSpot > 0 ? ((c.strike - refSpot) / refSpot) * 100 : 0,
     }));
   };
 
@@ -165,7 +173,7 @@ function asWall(hit: { strike: number; gex: number } | null, spot: number): Wall
  * but nothing had traded this session, `available` is false and the walls and
  * ladder are simply empty — a normal pre-open state, not a failure.
  */
-function buildActivity(volume: PositioningData): ActivityLevels {
+function buildActivity(volume: PositioningData, refSpot: number): ActivityLevels {
   const { summary, spot } = volume;
   const strikeGex = volume.rows.map((r) => ({ strike: r.strike, gex: r.total.gex }));
   const available = strikeGex.some(
@@ -174,8 +182,11 @@ function buildActivity(volume: PositioningData): ActivityLevels {
 
   return {
     available,
-    walls: wallsFrom(volume.rows, spot),
-    levelMap: buildLevelMap(strikeGex, spot, summary),
+    // Levels classified off the volume snapshot's own spot; the SPOT marker and
+    // every distance measured against the shared live spot, same as the
+    // open-interest view — so both tabs agree on where price is.
+    walls: wallsFrom(volume.rows, spot, refSpot),
+    levelMap: buildLevelMap(strikeGex, spot, summary, refSpot),
     flipLevel: summary.flipLevel,
     frontFlipLevel: summary.frontFlipLevel,
     frontExpiryLabel: summary.frontExpiration
@@ -214,14 +225,14 @@ async function build(symbol: string): Promise<DecisionResult> {
   const live = await getSpotQuote(symbol).catch(() => null);
   const displaySpot = live?.price ?? spot;
 
-  const walls = wallsFrom(positioning.rows, spot);
+  const walls = wallsFrom(positioning.rows, spot, displaySpot);
   const strikeGex = positioning.rows.map((r) => ({
     strike: r.strike,
     gex: r.total.gex,
   }));
-  const levelMap = buildLevelMap(strikeGex, spot, summary);
+  const levelMap = buildLevelMap(strikeGex, spot, summary, displaySpot);
 
-  const activity = volumePositioning ? buildActivity(volumePositioning) : null;
+  const activity = volumePositioning ? buildActivity(volumePositioning, displaySpot) : null;
   const confirmed = confirmedByVolume(levelMap, activity?.levelMap ?? null, spot);
 
   const flipLevel = summary.flipLevel;
@@ -295,7 +306,9 @@ async function build(symbol: string): Promise<DecisionResult> {
     notes.push('Intraday bars were unavailable, so the conviction checks are blank.');
   }
 
-  const conviction = buildConviction(bars, spot, level, side);
+  // The travel and touch checks measure the current price against the level, so
+  // they use the shared live spot, not the older chain spot.
+  const conviction = buildConviction(bars, displaySpot, level, side);
   const verdict = buildVerdict(context, conviction.checks);
 
   return {

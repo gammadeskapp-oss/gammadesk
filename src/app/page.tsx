@@ -8,6 +8,7 @@ import { PositioningSearch } from '@/components/PositioningSearch';
 import { ResearchCards } from '@/components/ResearchCards';
 import { ChainError } from '@/lib/chainSource';
 import { config } from '@/lib/config';
+import { getSpotQuote } from '@/lib/spot';
 import { buildGammaProfile } from '@/lib/gammaProfile';
 import { peekPositioningView, normaliseSymbol } from '@/lib/positioning';
 import { getBreadth } from '@/lib/breadth';
@@ -63,6 +64,10 @@ export default async function HomePage({ searchParams }: PageProps) {
   // rather than blocking on a cold chain parse; the background populate the peek
   // kicked off, and the cron, fill it within a cycle.
   let updating = false;
+  // The shared live spot, on the same short cache /decision's top box uses, so
+  // both pages quote the same price while the chain levels stay on their longer
+  // cache. Best-effort: a failed quote leaves the dashboard on the chain spot.
+  let liveSpot: number | null = null;
 
   /*
    * The market backdrop, fetched alongside the chain and allowed to fail on
@@ -128,6 +133,8 @@ export default async function HomePage({ searchParams }: PageProps) {
       // Null for the configured symbol means the cache is not populated yet, not
       // a failure — show "Updating…" rather than an error card.
       if (data === null && wanted === config.symbol) updating = true;
+      // Overlay the shared live spot once there is a book to attach it to.
+      if (data) liveSpot = (await getSpotQuote(wanted).catch(() => null))?.price ?? null;
     } catch (e) {
       if (e instanceof ChainError) {
         /*
@@ -152,6 +159,7 @@ export default async function HomePage({ searchParams }: PageProps) {
       {data ? (
         <Dashboard
           data={data}
+          liveSpot={liveSpot}
           /*
             Graded against the quote date, not `asOfIso`. `asOfIso` is stamped
             at render time and is therefore always "now" — it would report a

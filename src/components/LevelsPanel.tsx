@@ -698,7 +698,7 @@ export function LevelsPanel({
         */}
         {!activityEmpty && activeFrontFlip !== null && (
           <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1 text-2xs leading-relaxed text-term-faint">
-            <span className="label-xs text-pos/90">Today&rsquo;s expiry flip</span>
+            <span className="label-xs text-pos/90">Flip — today&rsquo;s expiry only</span>
             <span className="font-bold tabular-nums text-term-text">
               {formatPrice(activeFrontFlip)}
             </span>
