@@ -295,6 +295,28 @@ export function ageHours(
   return Math.round(((now.getTime() - at) / 3_600_000) * 10) / 10;
 }
 
+/**
+ * When a reading is carrying a price from an earlier calendar session than
+ * today, the short label of that session (e.g. `Fri 26 Sep`); otherwise null.
+ *
+ * This is a plain "is this yesterday's number" test, deliberately distinct from
+ * `assessStaleness`: before the open, the prior close is the newest price that
+ * exists and is NOT stale — but it is still last session's, and a spot shown
+ * over today's chart should say so out loud ("Last close (Fri)") rather than
+ * look live. The staleness banner handles "this is too old to trust"; this
+ * handles "this is honestly a previous session's close".
+ */
+export function priorSessionLabel(
+  isoTimestamp: string | null | undefined,
+  now: Date = new Date(),
+): string | null {
+  const at = isoTimestamp ? Date.parse(isoTimestamp) : NaN;
+  if (!Number.isFinite(at)) return null;
+  const quoteDate = marketNow(new Date(at)).date;
+  const today = marketNow(now).date;
+  return quoteDate < today ? sessionLabel(quoteDate) : null;
+}
+
 /** `2026-08-28` -> `Fri 28 Aug`, for naming a session in prose. */
 export function sessionLabel(date: string): string {
   const parsed = new Date(`${date}T12:00:00Z`);

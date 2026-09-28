@@ -235,7 +235,10 @@ function toPositioning(
     meta: {
       source,
       sourceLabel: SOURCE_LABELS[source],
-      asOfLabel: formatAsOf(now),
+      // The "as of" a reader sees is when the PRICE was recorded, never when this
+      // job ran. `asOfIso` stays the render clock because the cache countdown is
+      // measured from it; the human-facing label is the quote's own time.
+      asOfLabel: formatAsOf(snapshot.quoteDate),
       asOfIso: now.toISOString(),
       quoteDateLabel: formatAsOf(snapshot.quoteDate),
       quoteDateIso: snapshot.quoteDate.toISOString(),

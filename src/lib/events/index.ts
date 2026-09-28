@@ -13,6 +13,7 @@ import {
   assessDailySnapshot,
   assessStaleness,
   previousSessionDate,
+  priorSessionLabel,
   type Staleness,
 } from '../staleness';
 import { marketStatus, type MarketStatus } from '../marketPhase';
@@ -89,6 +90,14 @@ export function dailySnapshotStaleness(
 export function priorSessionDate(date: string): string | null {
   return previousSessionDate(date, rules);
 }
+
+/**
+ * The short label of the earlier session a price belongs to (e.g. `Fri 26 Sep`),
+ * or null when the price is from today. Re-exported here so pages have one place
+ * to reach for market-clock helpers. It compares calendar days, so it needs no
+ * calendar rules of its own.
+ */
+export { priorSessionLabel };
 
 /**
  * Where the market clock is right now, holidays included.

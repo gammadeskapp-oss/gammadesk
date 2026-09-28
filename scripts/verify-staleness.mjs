@@ -24,8 +24,14 @@ import { registerTsImports } from './ts-imports.mjs';
 registerTsImports();
 
 const { marketTimeToUtcMs } = await import('../src/lib/time.ts');
-const { assessStaleness, assessDailySnapshot, expectedDailyDate, inSession, lastCompletedSession } =
-  await import('../src/lib/staleness.ts');
+const {
+  assessStaleness,
+  assessDailySnapshot,
+  expectedDailyDate,
+  inSession,
+  lastCompletedSession,
+  priorSessionLabel,
+} = await import('../src/lib/staleness.ts');
 const { sessionRules } = await import('../src/lib/events/rules.ts');
 
 let failures = 0;
@@ -253,6 +259,25 @@ ok(
   "so the previous day's post is not stale on a holiday",
   !assessDailySnapshot(MON, et(MON, 9).toISOString(), et(HOLIDAY, 10), rules).stale,
 );
+
+// --- priorSessionLabel -------------------------------------------------------
+
+section('priorSessionLabel names an earlier session and is silent on today');
+{
+  // Fri 26 Sep 2026 15:50 ET price, read pre-open Mon 28 Sep 09:05 ET.
+  const friClose = et('2026-09-26', 15, 50).toISOString();
+  const monPreOpen = et('2026-09-28', 9, 5);
+  ok(
+    'Friday close read on Monday morning is labelled a prior session',
+    priorSessionLabel(friClose, monPreOpen) !== null,
+    priorSessionLabel(friClose, monPreOpen),
+  );
+  ok(
+    "today's own quote gets no prior-session label",
+    priorSessionLabel(et('2026-09-28', 9, 45).toISOString(), monPreOpen) === null,
+  );
+  ok('an unparseable timestamp is silent, not thrown', priorSessionLabel('nope', monPreOpen) === null);
+}
 
 // --- result ------------------------------------------------------------------
 

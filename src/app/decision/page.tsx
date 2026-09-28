@@ -36,7 +36,7 @@ import { peekForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatStrike } from '@/lib/format';
 import { peekPositioningView } from '@/lib/positioning';
-import { eventsBetween, snapshotStaleness } from '@/lib/events';
+import { eventsBetween, priorSessionLabel, snapshotStaleness } from '@/lib/events';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { MethodologyDrawer } from '@/components/MethodologyDrawer';
 import { positioningMethodology, type Methodology } from '@/lib/methodology';
@@ -508,6 +508,11 @@ export default async function DecisionPage({ searchParams }: PageProps) {
   // this reason — see lib/decision/types.ts.
   const staleness = data ? snapshotStaleness(data.context.quoteDateIso) : null;
 
+  // When the spot on screen is an earlier session's close (before today's open,
+  // over a weekend, or a feed that has not ticked into the new session yet), say
+  // so plainly rather than letting a stale price look live.
+  const priorLabel = data ? priorSessionLabel(data.context.quoteDateIso) : null;
+
   /*
    * Market clock, for the levels' volume view. When there is no live session
    * the "today's activity" volume is really the last completed session's, so
@@ -624,6 +629,15 @@ export default async function DecisionPage({ searchParams }: PageProps) {
           /* The book's stamp, not the render clock — see DecisionContext. */
           asOfLabel={data?.context.quoteDateLabel}
         />
+
+        {priorLabel && (
+          <div className="panel border-l-2 border-l-flip/60 px-3.5 py-2 text-2xs leading-relaxed text-flip/90">
+            Spot is <strong>last close ({priorLabel})</strong> — no live session
+            yet, so this price is not moving. The levels below are from{' '}
+            {priorLabel}&rsquo;s positioning: open interest publishes once a day,
+            so the walls and flip are always the prior session&rsquo;s book.
+          </div>
+        )}
 
         {/*
           This is the page you sit on while deciding, so the delayed positioning
@@ -778,10 +792,10 @@ export default async function DecisionPage({ searchParams }: PageProps) {
 
         <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
           <p>
-            <span className="text-term-dim">Everything here is delayed. </span>
-            Option chains are delayed quotes and the price bars are fifteen
-            minutes behind, which is stated again on the chart itself. Nothing
-            on this page is a live tape, and it should not be used as one.
+            <span className="text-term-dim">This is not a live tape. </span>
+            Every price and level here carries its own timestamp — read that
+            stamp for how current it is. Nothing on this page is a real-time
+            quote, and it should not be traded as one.
           </p>
           <p className="mt-2">
             <span className="text-term-dim">It adds no new data. </span>
