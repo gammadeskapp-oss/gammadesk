@@ -10,7 +10,12 @@ import {
 import { marketNow, marketToday } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+// Generating the morning brief pays the full option-chain fetch + IV-surface
+// parse, which overruns a cold lambda's 60s ceiling — the same overrun that
+// made the X tick silently produce nothing until it moved to a cached snapshot.
+// 300s is the Pro-plan maximum and matches the other chain-parsing routes
+// (/api/x/snapshot, /api/x/tick). See lib note vercel-maxduration-convention.
+export const maxDuration = 300;
 
 /*
  * The morning X post used to ride on this task, which meant it fired at this
