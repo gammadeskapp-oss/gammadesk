@@ -1,6 +1,8 @@
 import { BreadthCard } from './BreadthCard';
+import { MacroBiasCard } from './MacroBiasCard';
 import { QuoteRow } from './QuoteRow';
 import type { BreadthReading } from '@/lib/breadth/types';
+import type { MacroBias } from '@/lib/macroBias/types';
 import type { MarketContextQuotes } from '@/lib/marketContext/quotes';
 import { contextVerdict } from '@/lib/marketContext/verdict';
 import { currentMarketStatus } from '@/lib/events';
@@ -36,13 +38,16 @@ import { sessionLabel } from '@/lib/staleness';
 export function ContextRow({
   breadth,
   quotes,
+  macroBias,
 }: {
   breadth: BreadthReading | null;
   quotes: MarketContextQuotes | null;
+  /** The stored daily backdrop score. Null before the first cron run. */
+  macroBias?: MacroBias | null;
 }) {
   // Nothing to say and nothing to show. Rendering an empty shell would imply
   // the readings were taken and came back unremarkable.
-  if (!breadth && !quotes) return null;
+  if (!breadth && !quotes && !macroBias) return null;
 
   const market = currentMarketStatus();
 
@@ -65,14 +70,32 @@ export function ContextRow({
 
   return (
     <section aria-label="Market context" className="space-y-2">
-      <div className="grid gap-2 md:grid-cols-2">
+      {/*
+        Three tiles left to right — Breadth, Macro Bias, Market — that wrap to a
+        second line rather than squeezing on a narrow screen. Breadth is pinned
+        to a slim fixed column so the two four-metric tiles beside it get the
+        room; both of those flex and carry a min-width so they drop below rather
+        than compress past legibility.
+      */}
+      <div className="flex flex-wrap gap-2">
         {breadth && (
-          <BreadthCard
-            reading={breadth}
-            closedNote={market.open ? undefined : market.nextUpdateLine}
-          />
+          <div className="w-full md:w-[250px] md:shrink-0">
+            <BreadthCard
+              reading={breadth}
+              closedNote={market.open ? undefined : market.nextUpdateLine}
+            />
+          </div>
         )}
-        {quotes && <QuoteRow data={quotes} asOf={quotesAsOf} />}
+        {macroBias && (
+          <div className="min-w-[280px] flex-1">
+            <MacroBiasCard bias={macroBias} />
+          </div>
+        )}
+        {quotes && (
+          <div className="min-w-[280px] flex-1">
+            <QuoteRow data={quotes} asOf={quotesAsOf} />
+          </div>
+        )}
       </div>
 
       <p className="panel px-3.5 py-2.5 text-xs leading-relaxed text-term-dim">

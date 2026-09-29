@@ -617,6 +617,14 @@ const ENTRIES = {
     detail:
       'The share of the nine /ticker checks voting bullish, 0-100. Computed by the /sectors and /groups jobs, which cover a smaller universe — so most names show a dash.',
   },
+
+  macroBias: {
+    label: 'Macro Bias',
+    plain:
+      "This box scores three things that push the market around: the Fed's interest rate, the 10-year bond yield, and inflation (CPI). Each gets +1 if it's good for stocks, −1 if it's bad, 0 if neutral. We add them up to get the Bias score — a higher number means the backdrop favors stocks going up, a lower number means it's working against them. Updated daily.",
+    detail:
+      'Values are from FRED (Federal Reserve Bank of St. Louis): fed funds target upper limit (DFEDTARU), 10-year Treasury yield (DGS10), and CPI year-over-year (CPIAUCSL). Regime context only — it feeds no score, verdict, or forecast.',
+  },
 };
 
 export type TooltipKey = keyof typeof ENTRIES;
