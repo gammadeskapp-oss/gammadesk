@@ -1,26 +1,32 @@
 /**
  * The intraday phrase bank — a free, offline replacement for the Claude API
- * generator. Each firing builds a three-part, human-sounding update:
+ * generator. Each firing builds a human-sounding update:
  *
- *   Line 1  a situational phrase (price + what it's doing)
- *   Line 2  context — the day change and the range, in plain words
- *   Line 3  one mover line (always, when movers are known)
- *   + "Not financial advice"
+ *   Line 1  a situational phrase (price + what it's doing) + the day change
+ *   Line 2  plain English — what this level/situation actually means
+ *   Line 3  the nearest levels: "Next floor: X · Ceiling: Y"
+ *   (blank)
+ *   "Today's movers:" then a ▲ gainers line and a ▼ losers line, each with %
+ *   (blank)
+ *   "Not financial advice"
  *
- * aiming for a fuller 180–260 characters rather than a terse one-liner. Kept in
- * its own file, free of `server-only`, so it is easy to extend and is
- * unit-tested directly in `scripts/verify-x-poster.mjs`.
+ * aiming for a fuller 200–270 characters rather than a terse one-liner. The
+ * movers are TODAY's actual percentage moves (snapshot `gainers`/`losers`), not
+ * the multi-day strength score — so "today" is honest. Kept in its own file,
+ * free of `server-only`, so it is easy to extend and is unit-tested directly in
+ * `scripts/verify-x-poster.mjs`.
  *
- * Placeholders, filled from the desk snapshot: {spot} {sup} {res} {flip}
- * {strong} {strong2} {weak}. Levels render as whole numbers; tickers as
- * $cashtags.
+ * Placeholders, filled from the desk snapshot: {spot} {sup} {res} {flip}.
+ * Levels render as whole numbers.
  */
 
 import {
+  NFA,
   X_LIMIT,
-  dayChangeWords,
-  finishIntraday,
+  changeText,
+  limitCashtags,
   money,
+  moverPct,
   roundLevel,
   xLen,
   type Composed,
@@ -123,15 +129,38 @@ export const AT_LEVEL: Record<'NEAR_SUPPORT' | 'NEAR_RESIST', string[]> = {
   ],
 };
 
-/** Mover line templates (line 3). Fallbacks need only {strong} or only {weak}. */
-export const MOVERS: string[] = [
-  '{strong} and {strong2} leading, {weak} lagging.',
-  '{strong} out front, {weak} the laggard.',
-  '{strong} leading the group, {weak} trailing.',
-  '{strong} and {strong2} strongest today, {weak} weakest.',
-  '{strong} leading the group.',
-  '{weak} lagging the group.',
-];
+/**
+ * Line 2 — the plain-English meaning of the current situation. What a level
+ * break or a level test actually implies for the tape, in words a non-specialist
+ * reads. Two variants each so followers do not see the identical sentence every
+ * time. No banned wording (see `BANNED` in compose.ts).
+ */
+export const MEANING: Record<Situation, string[]> = {
+  BELOW_FLIP: [
+    'Below this line moves tend to feed on themselves — expect a wider, choppier tape.',
+    'Under here the shock absorbers come off; swings can stretch further than usual.',
+  ],
+  NEAR_SUPPORT: [
+    'This is the floor bulls keep defending; lose it and the slide can pick up speed.',
+    'Holding here keeps the day constructive; break it and it opens room lower.',
+  ],
+  NEAR_RESIST: [
+    'This is the ceiling that keeps capping it; clear it and the path opens up.',
+    'Getting through here would flip the tape from capped to breaking out.',
+  ],
+  BROKE_UP: [
+    'Clearing that ceiling opens room to run before the next shelf overhead.',
+    'With that level behind it, the old ceiling tends to act as a floor now.',
+  ],
+  BROKE_DOWN: [
+    'Losing that floor puts the next levels down in play.',
+    'That broken floor tends to cap bounces now — the tape has lower to prove.',
+  ],
+  IN_RANGE: [
+    'Balanced tape — the edges of the range are where the day gets decided.',
+    'No edge either way yet; the first clean break of the range sets direction.',
+  ],
+};
 
 /** The placeholder values available from a snapshot; null when the field is absent. */
 function fills(s: DeskSnapshot): Record<string, string | null> {
@@ -140,9 +169,6 @@ function fills(s: DeskSnapshot): Record<string, string | null> {
     sup: s.support !== null ? roundLevel(s.support) : null,
     res: s.resistance !== null ? roundLevel(s.resistance) : null,
     flip: s.flip !== null ? roundLevel(s.flip) : null,
-    strong: s.strong[0] ? `$${s.strong[0].symbol}` : null,
-    strong2: s.strong[1] ? `$${s.strong[1].symbol}` : null,
-    weak: s.weak[0] ? `$${s.weak[0].symbol}` : null,
   };
 }
 
@@ -182,29 +208,40 @@ export function phraseId(poolKey: string, index: number): string {
   return `${poolKey}#${index}`;
 }
 
-/** The plain day-change + range context line (line 2). */
-function contextLine(s: DeskSnapshot): string {
-  const parts = [dayChangeWords(s.changePct)];
-  const range = rangeSentence(s);
-  if (range) parts.push(range);
-  return parts.join(' ');
-}
-
-/** The range/level clause for the context line, in whole numbers. */
-function rangeSentence(s: DeskSnapshot): string | null {
+/**
+ * Line 3 — the nearest levels only, as a floor and a ceiling, never a wide
+ * range. `support`/`resistance` are already the nearest walls either side of
+ * spot, so this quotes them directly (rounded), e.g. "Next floor: 765 · Ceiling:
+ * 770". Returns null when neither wall is known.
+ */
+function levelsLine(s: DeskSnapshot): string | null {
   const sup = s.support !== null ? roundLevel(s.support) : null;
   const res = s.resistance !== null ? roundLevel(s.resistance) : null;
-  if (sup && res) return `Range to watch: ${sup} to ${res}.`;
-  if (res) return `Ceiling at ${res}.`;
-  if (sup) return `Floor at ${sup}.`;
+  if (sup && res) return `Next floor: ${sup} · Ceiling: ${res}`;
+  if (res) return `Ceiling: ${res}`;
+  if (sup) return `Next floor: ${sup}`;
   return null;
 }
 
-/** One renderable mover line, or null when no mover is known. */
-function moverLine(values: Record<string, string | null>, rand: () => number): string | null {
-  const lines = MOVERS.map((m) => render(m, values)).filter((m): m is string => m !== null);
-  if (lines.length === 0) return null;
-  return lines[Math.floor(rand() * lines.length) % lines.length];
+/**
+ * The "Today's movers" block — a ▲ gainers line and a ▼ losers line, each with
+ * the live day change. Tickers are written as `$SYM`; the single-cashtag cap
+ * (applied once over the whole post) keeps `$SPY` on line 1 and de-$es these, so
+ * "▲ NVDA +2.1% · MSFT +1.4%" is what actually posts. Returns null when no live
+ * mover is known (a failed quote fetch), so the block — and the word "today" —
+ * simply does not appear rather than showing a stale name.
+ */
+function moversBlock(s: DeskSnapshot, opts: { max?: number } = {}): string | null {
+  const max = opts.max ?? 2;
+  const up = s.gainers.slice(0, max);
+  const down = s.losers.slice(0, max);
+  if (up.length === 0 && down.length === 0) return null;
+
+  const fmt = (m: { symbol: string; changePct: number }) => `$${m.symbol} ${moverPct(m.changePct)}`;
+  const lines = ["Today's movers:"];
+  if (up.length > 0) lines.push(`▲ ${up.map(fmt).join(' · ')}`);
+  if (down.length > 0) lines.push(`▼ ${down.map(fmt).join(' · ')}`);
+  return lines.join('\n');
 }
 
 export interface IntradayPhrase {
@@ -247,17 +284,19 @@ function pickLine(
 }
 
 /**
- * Compose one intraday post from the phrase bank as three parts plus the
- * disclaimer (see the file header).
+ * Compose one intraday post from the phrase bank (see the file header for the
+ * shape).
  *
  * Line 1 is chosen for the current situation, never a phrase already posted
- * today, preferring the least-used over recent days; a "wild/bigger moves" line
- * is only eligible when `allowWild` is set (the caller throttles it to once an
- * hour). Line 2 is the day change and range; line 3 a mover line, always when
- * movers are known. If the whole thing would exceed the X limit it sheds the
- * mover, then the context line. Returns null only when the chosen situation has
- * no line-1 phrase that renders from this snapshot — the caller then falls back
- * to the fixed line.
+ * today, preferring the least-used over recent days, with the day change tagged
+ * on the end; a "wild/bigger moves" line is only eligible when `allowWild` is
+ * set (the caller throttles it to once an hour). Line 2 is the plain-English
+ * meaning; line 3 the nearest floor/ceiling; then the "Today's movers" block of
+ * live gainers and losers. If the whole thing would exceed the X limit it sheds,
+ * in order: the second name on each mover line, the meaning line, the levels
+ * line, then the movers block — line 1 plus the disclaimer is the safe floor.
+ * Returns null only when the chosen situation has no line-1 phrase that renders
+ * from this snapshot — the caller then falls back to the fixed line.
  */
 export function composeIntradayPhrase(
   s: DeskSnapshot,
@@ -300,19 +339,38 @@ export function composeIntradayPhrase(
   const pool = candidates.filter((c) => count(c) === min);
   const chosen = pool[Math.floor(rand() * pool.length) % pool.length];
 
-  const line1 = chosen.text;
-  const line2 = contextLine(s);
-  const line3 = moverLine(values, moverRand);
+  // Line 1: the situational phrase with the day change tagged on. Strip the
+  // phrase's own trailing period first so it reads "…now 765.20 (▼0.6%)".
+  const line1 = `${chosen.text.replace(/\.\s*$/, '')} (${changeText(s.changePct)})`;
+  const meanings = MEANING[situation];
+  const line2 = meanings[Math.floor(moverRand() * meanings.length) % meanings.length];
+  const line3 = levelsLine(s);
 
-  // Assemble, then shed optional lines (mover, then context) if over the limit.
-  const lines = [line1, line2, line3].filter((l): l is string => Boolean(l));
-  let composed = finishIntraday(lines.join('\n'), s);
-  if (xLen(composed.text) > X_LIMIT && line3) {
-    composed = finishIntraday([line1, line2].join('\n'), s);
+  // Assemble the full post, shedding to fit the X limit in priority order.
+  const build = (opt: { max: number; meaning: boolean; levels: boolean; movers: boolean }): string => {
+    const head = [line1];
+    if (opt.meaning) head.push(line2);
+    if (opt.levels && line3) head.push(line3);
+    const sections = [head.join('\n')];
+    const mv = opt.movers ? moversBlock(s, { max: opt.max }) : null;
+    if (mv) sections.push(mv);
+    return limitCashtags(`${sections.join('\n\n')}\n\n${NFA}`);
+  };
+
+  const attempts: Array<{ max: number; meaning: boolean; levels: boolean; movers: boolean }> = [
+    { max: 2, meaning: true, levels: true, movers: true },
+    { max: 1, meaning: true, levels: true, movers: true },
+    { max: 1, meaning: false, levels: true, movers: true },
+    { max: 1, meaning: false, levels: false, movers: true },
+    { max: 0, meaning: false, levels: false, movers: false },
+  ];
+  let text = build(attempts[0]);
+  for (const attempt of attempts) {
+    text = build(attempt);
+    if (xLen(text) <= X_LIMIT) break;
   }
-  if (xLen(composed.text) > X_LIMIT) {
-    composed = finishIntraday(line1, s);
-  }
+
+  const composed: Composed = { text, length: xLen(text), numbers: { spot: s.spot }, dataIso: s.dataIso };
 
   return {
     composed,

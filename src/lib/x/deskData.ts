@@ -1,15 +1,40 @@
 import 'server-only';
 
 import { getGroupsSnapshot } from '../groups';
+import { moverSymbols } from '../groups/definitions';
 import { rankTickers } from '../groups/ranking';
 import { marketToday } from '../time';
 import { getPositioning } from '../positioning';
 import { getSpotQuote } from '../spot';
 import { readScanForDate } from '../news/store';
 import { xLine } from '../news/view';
-import { fetchCboeQuote } from './cboeQuote';
+import { fetchCboeQuote, fetchCboeQuotes } from './cboeQuote';
 import { stalestIso } from './compose';
-import type { DeskSnapshot, ScoredName } from './compose';
+import type { DayMover, DeskSnapshot, ScoredName } from './compose';
+
+/**
+ * Today's top gainers and losers across the tracked single stocks, by live day
+ * change. Fetched from the same Cboe compact-quote feed the pulse uses, so the
+ * percentages are the actual intraday moves — not the multi-day strength score
+ * behind `strong`/`weak`. Two of each; a name with no finite change is skipped.
+ */
+async function loadDayMovers(): Promise<{ gainers: DayMover[]; losers: DayMover[] }> {
+  const quotes = await fetchCboeQuotes(moverSymbols()).catch(() => new Map());
+  const rows: DayMover[] = [...quotes.values()]
+    .filter((q) => Number.isFinite(q.changePct))
+    .map((q) => ({ symbol: q.symbol, changePct: q.changePct }));
+
+  const gainers = rows
+    .filter((r) => r.changePct > 0)
+    .sort((a, b) => b.changePct - a.changePct)
+    .slice(0, 2);
+  const losers = rows
+    .filter((r) => r.changePct < 0)
+    .sort((a, b) => a.changePct - b.changePct)
+    .slice(0, 2);
+
+  return { gainers, losers };
+}
 
 /**
  * Assemble the one snapshot every reworked X post is built from — the same
@@ -27,12 +52,13 @@ import type { DeskSnapshot, ScoredName } from './compose';
  */
 export async function loadDeskSnapshot(now: Date = new Date()): Promise<DeskSnapshot> {
   const date = marketToday(now);
-  const [positioning, groups, live, quote, scan] = await Promise.all([
+  const [positioning, groups, live, quote, scan, movers] = await Promise.all([
     getPositioning(),
     getGroupsSnapshot().catch(() => null),
     getSpotQuote('SPY').catch(() => null),
     fetchCboeQuote('SPY').catch(() => null),
     readScanForDate(date).catch(() => null),
+    loadDayMovers().catch(() => ({ gainers: [], losers: [] })),
   ]);
 
   const s = positioning.summary;
@@ -72,6 +98,8 @@ export async function loadDeskSnapshot(now: Date = new Date()): Promise<DeskSnap
     flip: s.flipLevel,
     strong,
     weak,
+    gainers: movers.gainers,
+    losers: movers.losers,
     headline,
     dataIso: stalestIso(priceIso, positioning.meta.quoteDateIso) ?? new Date().toISOString(),
   };

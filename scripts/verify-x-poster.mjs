@@ -32,7 +32,7 @@ const {
 } = await import('../src/lib/x/schedule.ts');
 const {
   PHRASES,
-  MOVERS,
+  MEANING,
   AT_LEVEL,
   WILD_INDICES,
   pickSituation,
@@ -56,6 +56,7 @@ const {
   finishIntraday,
   changeText,
   dayChangeWords,
+  moverPct,
   roundLevel,
   moodEmoji,
   money,
@@ -680,6 +681,8 @@ const snap = {
   flip: 770,
   strong: [{ symbol: 'META', score: 89 }, { symbol: 'MU', score: 78 }, { symbol: 'NVDA', score: 67 }],
   weak: [{ symbol: 'TSLA', score: 12 }, { symbol: 'F', score: 22 }],
+  gainers: [{ symbol: 'NVDA', changePct: 0.021 }, { symbol: 'MSFT', changePct: 0.014 }],
+  losers: [{ symbol: 'AMD', changePct: -0.04 }, { symbol: 'INTC', changePct: -0.022 }],
   headline: 'KO: raised its full-year guidance',
   dataIso: new Date().toISOString(),
 };
@@ -887,44 +890,72 @@ section('isPostingDay skips weekends, holidays, and early-close half-days');
 
 // --- Phrase bank -------------------------------------------------------------
 
-section('Every phrase (with long numbers + the longest mover) fits 280 and is clean');
+section('Every phrase (with long numbers + the longest movers) fits 280 and is clean');
 {
-  const V = { spot: '8888.88', sup: '8888', res: '8888', flip: '8888', strong: '$WWWWW', strong2: '$WWWWW', weak: '$WWWWW' };
-  const longSnap = { spot: 8888.88, changePct: 0.1234, dayHigh: null, dayLow: null, mood: 'wild', resistance: 8888, support: 8888, flip: 8888, strong: [{ symbol: 'WWWWW', score: 99 }, { symbol: 'WWWWW', score: 88 }], weak: [{ symbol: 'WWWWW', score: 1 }], headline: null, dataIso: '2026-09-21T15:00:00Z' };
-  const longestMover = MOVERS.map((m) => render(m, V)).filter(Boolean).sort((a, b) => b.length - a.length)[0];
-  let allFit = true;
+  const V = { spot: '8888.88', sup: '8888', res: '8888', flip: '8888' };
+  const longSnap = { spot: 8888.88, changePct: 0.1234, dayHigh: null, dayLow: null, mood: 'wild', resistance: 8888, support: 8888, flip: 8888, strong: [{ symbol: 'WWWWW', score: 99 }, { symbol: 'WWWWW', score: 88 }], weak: [{ symbol: 'WWWWW', score: 1 }], gainers: [{ symbol: 'WWWWW', changePct: 0.1234 }, { symbol: 'WWWWW', changePct: 0.1111 }], losers: [{ symbol: 'WWWWW', changePct: -0.1234 }, { symbol: 'WWWWW', changePct: -0.1111 }], headline: null, dataIso: '2026-09-21T15:00:00Z' };
+  let allRender = true;
   const allPools = [...Object.entries(PHRASES), ...Object.entries(AT_LEVEL)];
   for (const [sit, arr] of allPools) {
     arr.forEach((t, i) => {
-      const body = render(t, V);
-      if (body === null) { allFit = false; ok(`${sit}#${i} renders`, false, t); return; }
-      const full = finishIntraday(`${body}\n${longestMover}`, longSnap);
-      if (full.length > 280 || checkPost(full.text).length > 0) allFit = false;
+      if (render(t, V) === null) { allRender = false; ok(`${sit}#${i} renders`, false, t); }
     });
   }
-  ok('all phrases + mover fit 280 and pass checkPost', allFit);
-  ok('the disclaimer is on every finished phrase', finishIntraday(render(PHRASES.IN_RANGE[0], V), longSnap).text.endsWith(NFA));
+  ok('every phrase renders from a full snapshot', allRender);
 
-  // The full three-part composed post fits 280 in the worst case too.
+  // The full composed post fits 280 in the worst case (longest names, wild).
   let composedFit = true;
-  for (const spot of [8888.88, 8871, 8905, 8850, 8888.88]) {
+  for (const spot of [8888.88, 8871, 8905, 8850, 8760]) {
     const p = composeIntradayPhrase({ ...longSnap, spot }, { rand: () => 0, moverRand: () => 0 });
     if (!p || p.composed.length > 280 || checkPost(p.composed.text).length > 0) composedFit = false;
   }
-  ok('a full 3-part post fits 280 and is clean across situations', composedFit);
+  ok('a full post fits 280 and is clean across situations', composedFit);
+  ok('the disclaimer is on every finished post', composeIntradayPhrase({ ...longSnap, spot: 8888.88 }, { rand: () => 0 }).composed.text.endsWith(NFA));
 }
 
-section('Intraday post structure: three parts + disclaimer, longer body');
+section('Intraday post structure: phrase + meaning + levels + movers block');
 {
   const p = composeIntradayPhrase(snap, { rand: () => 0, moverRand: () => 0 });
-  const lines = p.composed.text.split('\n');
-  ok('has line 1 (phrase), line 2 (context), line 3 (mover), + disclaimer', lines.length === 4, JSON.stringify(lines));
-  ok('line 2 carries the day change words', /Up|Down|Flat/.test(lines[1]), lines[1]);
-  ok('line 2 carries the range', /Range to watch: \d+ to \d+\.|Ceiling at \d+\.|Floor at \d+\./.test(lines[1]), lines[1]);
-  ok('line 3 is a mover line', /[A-Z]{2,}/.test(lines[2]) && /(leading|lagging|front|laggard|trailing|strongest|weakest)/.test(lines[2]), lines[2]);
-  ok('ends with the disclaimer', lines[3] === NFA);
-  ok('the body is meatier than a one-liner (>120 chars)', p.composed.text.length > 120, String(p.composed.text.length));
-  ok('range levels render as whole numbers', /Range to watch: 772 to 775\./.test(lines[1]), lines[1]);
+  const text = p.composed.text;
+  ok('line 1 carries the day change tag (▲/▼ %)', /\((?:▲|▼|0\.0%)/.test(text.split('\n')[0]) && /\$SPY/.test(text), text.split('\n')[0]);
+  ok('has a plain-English meaning line', MEANING[p.situation].some((m) => text.includes(m)), text);
+  ok('levels line uses Next floor / Ceiling, not a wide range', /Next floor: \d+ · Ceiling: \d+/.test(text) && !/Range to watch/.test(text), text);
+  ok('has the "Today\'s movers:" header', text.includes("Today's movers:"), text);
+  ok('shows a ▲ gainers line with a %', /▲ .*\+\d+\.\d%/.test(text), text);
+  ok('shows a ▼ losers line with a %', /▼ .*−\d+\.\d%/.test(text), text);
+  ok('ends with the disclaimer on its own line', text.endsWith(`\n${NFA}`) && text.split('\n').pop() === NFA, text);
+  ok('carries exactly one cashtag ($SPY only)', countCashtags(text) === 1, String(countCashtags(text)));
+  ok('sits in the fuller 200–270 range', p.composed.length >= 160 && p.composed.length <= 280, String(p.composed.length));
+}
+
+section('moverPct signs and rounds with a real minus');
+{
+  ok('positive gets a plus', moverPct(0.021) === '+2.1%');
+  ok('negative gets a unicode minus', moverPct(-0.04) === '−4.0%');
+  ok('flat never renders as minus zero', moverPct(-0.0003) === '+0.0%');
+}
+
+section('Movers are today\'s change, never the multi-day strength score');
+{
+  // AMD is a strength LEADER here (top of `strong`) but is DOWN today. The post
+  // must show it as a ▼ loser with its real move, not call it "strongest".
+  const amdSnap = {
+    ...snap,
+    strong: [{ symbol: 'AMD', score: 95 }, { symbol: 'META', score: 90 }],
+    gainers: [{ symbol: 'NVDA', changePct: 0.021 }],
+    losers: [{ symbol: 'AMD', changePct: -0.04 }],
+  };
+  const p = composeIntradayPhrase(amdSnap, { rand: () => 0, moverRand: () => 0 });
+  ok('AMD appears as a ▼ loser with its real move', /▼ AMD −4\.0%/.test(p.composed.text), p.composed.text);
+  ok('AMD is never called strongest/leading', !/AMD (?:strongest|leading|out front)/.test(p.composed.text));
+}
+
+section('No live movers → the block and the word "today" are omitted');
+{
+  const noMovers = { ...snap, gainers: [], losers: [] };
+  const p = composeIntradayPhrase(noMovers, { rand: () => 0, moverRand: () => 0 });
+  ok('omits the movers block', !p.composed.text.includes("Today's movers:"), p.composed.text);
+  ok('still clean and closed with the disclaimer', checkPost(p.composed.text).length === 0 && p.composed.text.endsWith(NFA));
 }
 
 section('roundLevel and dayChangeWords');

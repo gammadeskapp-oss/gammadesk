@@ -47,3 +47,13 @@ export const GROUPS: GroupDefinition[] = [
 export function allTrackedSymbols(): string[] {
   return [...new Set(GROUPS.flatMap((g) => g.symbols))].sort();
 }
+
+/**
+ * The tracked single stocks, for the intraday "today's movers" post — the index
+ * ETFs (SPY/QQQ/IWM/DIA) are excluded, since the post is about SPY itself and an
+ * index ETF is not a "mover" a reader means by the word.
+ */
+export function moverSymbols(): string[] {
+  const indexEtfs = new Set(GROUPS.find((g) => g.id === 'index')?.symbols ?? []);
+  return allTrackedSymbols().filter((s) => !indexEtfs.has(s));
+}

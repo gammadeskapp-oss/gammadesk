@@ -42,6 +42,14 @@ export interface DeskSnapshot {
   strong: ScoredName[];
   /** Weakest tracked names, lowest score first. */
   weak: ScoredName[];
+  /**
+   * Today's top gainers by live day change, biggest move first. Distinct from
+   * `strong`, which is the multi-day strength score — these are the actual
+   * intraday percentage moves, so an intraday post can say "today" honestly.
+   */
+  gainers: DayMover[];
+  /** Today's top losers by live day change, most negative first. */
+  losers: DayMover[];
   /** The day's top news headline, one plain line, or null. */
   headline: string | null;
   /** ISO timestamp the SPY figure was read at — the freshness clock. */
@@ -51,6 +59,13 @@ export interface DeskSnapshot {
 export interface ScoredName {
   symbol: string;
   score: number;
+}
+
+/** A tracked name's live day change, for the intraday "today's movers" lines. */
+export interface DayMover {
+  symbol: string;
+  /** Fractional day change, e.g. 0.021 = +2.1%, -0.04 = -4.0%. */
+  changePct: number;
 }
 
 export interface Composed {
@@ -78,6 +93,17 @@ export function changeText(fraction: number): string {
   if (rounded === 0) return '0.0%'; // also catches a -0.04% that rounds to -0.0
   const arrow = rounded > 0 ? '▲' : '▼';
   return `${arrow}${Math.abs(rounded).toFixed(1)}%`;
+}
+
+/**
+ * A signed day change for a mover line, one decimal: +2.1% / −4.0%. Uses a real
+ * minus sign (−, U+2212) to sit beside the ▲/▼ arrows. A flat reading is "+0.0%"
+ * and never "−0.0%".
+ */
+export function moverPct(fraction: number): string {
+  const rounded = Math.round(fraction * 1000) / 10; // percent, one decimal
+  const sign = rounded < 0 ? '−' : '+';
+  return `${sign}${Math.abs(rounded).toFixed(1)}%`;
 }
 
 /** 🟡 for calm, 🔴 for wild. */
