@@ -117,6 +117,18 @@ for (let i = 0; i < 14; i += 1) stickyCpi.push({ date: `m${i}`, value: 300 + i *
 // YoY accelerates because the step is constant on a growing base? Check sign via delta.
 eq(scoreCpi(stickyCpi, 0.1), 1, 'linear index → decelerating YoY → cooling +1');
 
+console.log('CPI history window');
+// The scorer needs the current YoY (needs >=13 obs) AND the prior month's YoY
+// (needs >=14 obs). Too-short a FRED window silently drops the prior-month
+// compare to null. Assert those boundaries so the fetch window can't regress.
+const cpi13 = [];
+for (let i = 0; i < 13; i += 1) cpi13.push({ date: `m${i}`, value: 300 + i });
+eq(yoy(cpi13, 12) !== null, true, '13 obs → current YoY available');
+eq(yoy(cpi13.slice(0, -1), 12) === null, true, '13 obs → prior-month YoY NULL (the bug)');
+const cpi14 = [];
+for (let i = 0; i < 14; i += 1) cpi14.push({ date: `m${i}`, value: 300 + i });
+eq(yoy(cpi14.slice(0, -1), 12) !== null, true, '14 obs → prior-month YoY available');
+
 console.log('Bias label');
 eq(labelFor(-2), 'Bearish', '−2 bearish');
 eq(labelFor(-1), 'Mild down', '−1 mild down');
