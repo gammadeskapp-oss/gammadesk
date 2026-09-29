@@ -71,15 +71,25 @@ export function ContextRow({
   return (
     <section aria-label="Market context" className="space-y-2">
       {/*
-        Three tiles left to right — Breadth, Macro Bias, Market — that wrap to a
-        second line rather than squeezing on a narrow screen. Breadth is pinned
-        to a slim fixed column so the two four-metric tiles beside it get the
-        room; both of those flex and carry a min-width so they drop below rather
-        than compress past legibility.
+        Breadth, Macro Bias, Market, left to right, wrapping to a second line
+        rather than squeezing on a narrow screen.
+
+        Breadth is pinned to a slim fixed column *only when the Macro Bias tile
+        is present* — that is what leaves room for the two four-metric tiles
+        beside it. With no Macro Bias record (a fresh deploy before the first
+        refresh, or FRED down), pinning Breadth slim would strand a lone Market
+        box across the rest of the row; so in that case Breadth flexes too and
+        the two fall back to the balanced half-and-half they had before.
       */}
       <div className="flex flex-wrap gap-2">
         {breadth && (
-          <div className="w-full md:w-[250px] md:shrink-0">
+          <div
+            className={
+              macroBias
+                ? 'w-full md:w-[250px] md:shrink-0'
+                : 'min-w-[280px] flex-1'
+            }
+          >
             <BreadthCard
               reading={breadth}
               closedNote={market.open ? undefined : market.nextUpdateLine}
