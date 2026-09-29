@@ -73,7 +73,7 @@ export function BreadthCard({
   const spark = series.length >= 2 ? series.map((s) => s.pctAbovePriorClose) : null;
 
   return (
-    <div className={`panel border-l-2 ${tone.edge} px-3.5 py-2.5`}>
+    <div className={`panel h-full border-l-2 ${tone.edge} px-3.5 py-2.5`}>
       <div className="flex items-center gap-1.5">
         <span className="label-xs">Breadth</span>
         <InfoTip for="breadth" />

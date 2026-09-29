@@ -58,7 +58,7 @@ export function MacroBiasCard({ bias }: { bias: MacroBias }) {
   };
 
   return (
-    <div className="panel px-3.5 py-2.5">
+    <div className="panel h-full px-3.5 py-2.5">
       <div className="flex items-center gap-1.5">
         <span className="label-xs">Macro Bias</span>
         <InfoTip for="macroBias" />

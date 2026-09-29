@@ -33,7 +33,7 @@ export function QuoteRow({
   asOf?: string;
 }) {
   return (
-    <div className="panel px-3.5 py-2.5">
+    <div className="panel h-full px-3.5 py-2.5">
       <div className="label-xs">Market</div>
 
       <dl className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
