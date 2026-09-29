@@ -12,6 +12,7 @@ import { getSpotQuote } from '@/lib/spot';
 import { buildGammaProfile } from '@/lib/gammaProfile';
 import { peekPositioningView, normaliseSymbol } from '@/lib/positioning';
 import { getBreadth } from '@/lib/breadth';
+import { getMacroBias, type MacroBias } from '@/lib/macroBias';
 import { macroTranslatorEnabled } from '@/lib/pageFlag';
 import { getMacroSelection, type MacroSelection } from '@/lib/macro/consensus';
 import { getOvernight, type OvernightData } from '@/lib/macro/overnight';
@@ -95,9 +96,12 @@ export default async function HomePage({ searchParams }: PageProps) {
    */
   const macroOn = macroTranslatorEnabled();
 
-  const [breadth, quotes, overnight, macroSelection, log, archive] = await Promise.all([
+  const [breadth, quotes, macroBias, overnight, macroSelection, log, archive] = await Promise.all([
     getBreadth().catch((): BreadthReading | null => null),
     getMarketContextQuotes().catch((): MarketContextQuotes | null => null),
+    // A stored read — one storage read, never a FRED call on page load — and
+    // allowed to fail on its own like the rest of the backdrop.
+    getMacroBias().catch((): MacroBias | null => null),
     macroOn
       ? getOvernight().catch((): OvernightData | null => null)
       : Promise.resolve<OvernightData | null>(null),
@@ -217,7 +221,7 @@ export default async function HomePage({ searchParams }: PageProps) {
           })}
           contextRow={
             <>
-              <ContextRow breadth={breadth} quotes={quotes} />
+              <ContextRow breadth={breadth} quotes={quotes} macroBias={macroBias} />
               <EventRiskRow events={events} highToday={highToday} />
               {macroOn && (
                 <MacroTranslatorCard
@@ -244,7 +248,7 @@ export default async function HomePage({ searchParams }: PageProps) {
             backdrop is the only thing on the page that still works, and it is
             more use than an error message alone.
           */}
-          <ContextRow breadth={breadth} quotes={quotes} />
+          <ContextRow breadth={breadth} quotes={quotes} macroBias={macroBias} />
           <EventRiskRow events={events} highToday={highToday} />
           {macroOn && (
             <MacroTranslatorCard

@@ -232,6 +232,57 @@ export const config = {
       },
     };
   },
+
+  /**
+   * Macro Bias — the three-factor backdrop score on the home page context row.
+   *
+   * Regime context only, exactly like `netLiquidity` above: the Fed's rate,
+   * the 10-year yield and CPI move over weeks and months, and none of these
+   * scores may reach the nine-signal consensus, the decision verdict or any
+   * per-ticker number. The box reads a once-a-day stored record; it never
+   * calls FRED on page load. See `lib/macroBias`.
+   */
+  get macroBias() {
+    return {
+      /**
+       * FRED API key. Optional: when set, the JSON API at api.stlouisfed.org
+       * is used (official, higher rate limit). When absent the module falls
+       * back to the keyless fredgraph.csv endpoint the net-liquidity tile
+       * already relies on, so the feature works offline and in CI without a
+       * secret. Server-side only — never `NEXT_PUBLIC_`.
+       */
+      get apiKey(): string | undefined {
+        const key = process.env.FRED_API_KEY?.trim();
+        return key ? key : undefined;
+      },
+      /**
+       * How far back to look when scoring the Fed's direction. The target rate
+       * only moves on FOMC decisions, so a day-over-day compare is "steady"
+       * almost every day; comparing the latest value against the print this
+       * many days ago is what surfaces a recent cut or hike.
+       */
+      fedLookbackDays: Math.max(7, num(process.env.GAMMADESK_MACRO_FED_LOOKBACK_DAYS, 90)),
+      /**
+       * Percentage points the 10-year yield's daily move must clear before it
+       * counts as rising or falling. Below it the factor is flat. A basis
+       * point or two each way is tape noise, not a change in the backdrop.
+       */
+      tenYearFlatPp: Math.max(0, num(process.env.GAMMADESK_MACRO_10Y_FLAT_PP, 0.03)),
+      /**
+       * Percentage points the year-over-year CPI rate must change, month over
+       * month, before inflation counts as cooling or sticky. Below it, flat.
+       */
+      cpiFlatPp: Math.max(0, num(process.env.GAMMADESK_MACRO_CPI_FLAT_PP, 0.1)),
+      /**
+       * Cache/refresh TTL in seconds. The record is rebuilt by a daily cron;
+       * this only bounds how long a manual read reuses one FRED pull. FRED
+       * revises these series slowly, so an hour is ample.
+       */
+      get cacheSeconds(): number {
+        return Math.max(600, num(process.env.GAMMADESK_MACRO_CACHE_SECONDS, 3600));
+      },
+    };
+  },
   /**
    * Polygon's options entitlement, and what this app may spend against it.
    *
