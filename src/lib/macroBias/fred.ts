@@ -102,8 +102,13 @@ async function fetchViaCsv(
 /**
  * One series as `{date, value}`, oldest first.
  *
- * `observationStart` defaults to about 450 days back, which is enough for the
- * 12-month CPI look-back with margin, and cheap for the daily series.
+ * `observationStart` defaults to about 800 days back (~26 months). CPI is the
+ * binding constraint: the scorer needs both the current YoY (latest vs 12
+ * months earlier) *and* the prior month's YoY (one month back vs 13 months
+ * back), so ~14 monthly prints are required — and because CPI publishes with a
+ * one-to-two-month lag, a naive 12-month window yields only ~13 observations
+ * and the prior-month comparison silently drops to "No prior month → neutral".
+ * 26 months clears that with margin and is still cheap for the daily series.
  */
 export async function fetchFredSeries(
   id: string,
@@ -123,5 +128,5 @@ export async function fetchFredSeries(
 const DAY_MS = 86_400_000;
 
 function defaultStart(): string {
-  return new Date(Date.now() - 450 * DAY_MS).toISOString().slice(0, 10);
+  return new Date(Date.now() - 800 * DAY_MS).toISOString().slice(0, 10);
 }
