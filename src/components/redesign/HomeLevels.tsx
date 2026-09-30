@@ -1,23 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-import { LevelsPanel } from '@/components/LevelsPanel';
+import { GammaProfile } from '@/components/GammaProfile';
 import { GammaLevelSummary } from './GammaLevelSummary';
-import { mockLevelsPanel, type GammaLevelsMock } from '@/lib/redesign/mock';
+import { mockGammaProfile, type GammaLevelsMock } from '@/lib/redesign/mock';
 
 /**
- * SPY Level / Gamma Map on Home — the real `/decision` LevelsPanel (Walls /
- * Level map / Details, with the ceiling/floor strength bars and the flip line),
- * reused wholesale rather than reimplemented so the levels never render two
- * ways across the app.
+ * SPY Level / Gamma Map on Home — the real strike-by-strike `GammaProfile`
+ * (BARS / RUNNING TOTAL, NET / CALLS / PUTS, the strikes-each-side control and
+ * the gamma-flip / price-now lines), reused wholesale rather than
+ * reimplemented so the map never renders two ways across the app. It is the
+ * "full interactive gamma histogram" the spec's map module calls for.
  *
- * The mobile-collapse contract still holds: a phone gets the key-levels summary
- * up top and the full panel behind a "Show map" toggle; desktop (`lg:`) shows
- * it expanded regardless. The toggle default (`false`) matches the server
- * render, so there is no hydration flicker.
+ * The mobile-collapse contract holds: a phone gets the key-levels summary up
+ * top and the full chart behind a "Show map" toggle; desktop (`lg:`) shows it
+ * expanded regardless. The toggle default (`false`) matches the server render,
+ * so there is no hydration flicker.
  *
- * Layout-first preview: fed placeholder props from `lib/redesign/mock`. Real
- * wiring passes the live decision result down.
+ * Layout-first preview: fed a placeholder profile from `lib/redesign/mock`.
+ * Real wiring passes `buildGammaProfile(data)` down.
  */
 export function HomeLevels({ levels }: { levels: GammaLevelsMock }) {
   const [show, setShow] = useState(false);
@@ -51,9 +52,9 @@ export function HomeLevels({ levels }: { levels: GammaLevelsMock }) {
         {show ? 'Hide map' : 'Show map'}
       </button>
 
-      {/* Full panel: state-driven below lg, always shown at lg+. */}
+      {/* Full interactive chart: state-driven below lg, always shown at lg+. */}
       <div className={`${show ? 'block' : 'hidden'} mt-3 lg:block`}>
-        <LevelsPanel {...mockLevelsPanel} />
+        <GammaProfile profile={mockGammaProfile} />
       </div>
     </section>
   );

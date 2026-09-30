@@ -14,6 +14,7 @@
 
 import type { Wall, ActivityLevels } from '@/lib/decision/types';
 import type { LevelMap, LevelRung } from '@/lib/decision/levelMap';
+import type { GammaProfileData, GammaProfilePoint } from '@/lib/gammaProfile';
 
 export const MOCK_NOTICE =
   'Preview layout — every figure on this page is placeholder data, not the live market.';
@@ -159,6 +160,57 @@ export const mockLevelsPanel = {
   confirmedByVolume: [575, 570],
   marketClosed: false,
   sessionDateLabel: 'Sep 29',
+};
+
+// --- strike-by-strike gamma profile (the real GammaProfile, fed mock data) --
+
+/**
+ * A believable strike-by-strike profile around SPOT: calls dominate above the
+ * flip (net positive, amber to the right), puts dominate below (net negative,
+ * blue to the left), with the heaviest strikes at the magnets. Ascending by
+ * strike, as `GammaProfile` expects.
+ */
+function makeProfilePoints(): GammaProfilePoint[] {
+  const BASE = 2.2e8;
+  const bump = (x: number, centre: number, spread: number) =>
+    Math.max(0, 1 - Math.abs(x - centre) / spread);
+  const points: GammaProfilePoint[] = [];
+  for (let strike = 560; strike <= 586; strike += 1) {
+    // Call weight peaks at the upper magnet, put weight at the lower one.
+    const callW = 0.12 + bump(strike, 575, 13) * 1.0 + bump(strike, 583, 6) * 0.25;
+    const putW = 0.12 + bump(strike, 567, 12) * 1.0 + bump(strike, 561, 6) * 0.3;
+    // Below the flip puts win; above it calls win.
+    const above = strike >= 569;
+    const callGex = BASE * callW * (above ? 1 : 0.35);
+    const putGex = -BASE * putW * (above ? 0.3 : 1);
+    points.push({
+      strike,
+      callGex,
+      putGex,
+      netGex: callGex + putGex,
+      oiCall: Math.round(callW * 22000),
+      oiPut: Math.round(putW * 20000),
+    });
+  }
+  return points;
+}
+
+export const mockGammaProfile: GammaProfileData = {
+  symbol: 'SPY',
+  spot: SPOT,
+  flipLevel: 569,
+  magnetAbove: 575,
+  magnetBelow: 570,
+  points: makeProfilePoints(),
+  facts: [
+    { label: 'Expirations included', value: '3 — Sep 30 (1d), Oct 3 (4d), Oct 18 (19d)' },
+    { label: 'Contracts used', value: '61,204 across 27 strikes' },
+    { label: 'Snapshot timestamp', value: 'as of 15:52 ET' },
+    {
+      label: 'Open interest as of',
+      value: 'The prior session’s settlement — it does not move intraday',
+    },
+  ],
 };
 
 // --- macro bias (first-class, inspectable) ----------------------------------
