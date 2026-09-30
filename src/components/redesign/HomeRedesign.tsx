@@ -61,22 +61,32 @@ export function HomeRedesign({ data }: { data: HomeData }) {
       {/* 3 — macro bias, first-class, directly under the hero */}
       {data.macro ? <MacroBiasCard macro={data.macro} /> : <Unavailable title="Macro bias" />}
 
-      {/* 4 — gamma map (the real strike-by-strike profile; collapsed on mobile) */}
-      {data.levels && data.profile ? (
-        <HomeLevels levels={data.levels} profile={data.profile} />
-      ) : (
-        <Unavailable title="SPY level / gamma map" />
-      )}
+      {/*
+        4 + 5–11 — the gamma map and the preview teasers, side by side.
 
-      {/* 5–11 — preview teasers */}
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {data.health ? <MarketHealthPreview data={data.health} /> : <Unavailable title="Market health" />}
-        {data.outlook ? <ForwardOutlookPreview data={data.outlook} /> : <Unavailable title="Forward outlook" />}
-        {data.netLiquidity ? <NetLiquidityPreview data={data.netLiquidity} /> : <Unavailable title="Net liquidity" />}
-        {data.leadership ? <LeadershipPreview data={data.leadership} /> : <Unavailable title="Leadership" />}
-        {data.scanner ? <ScannerShortlistPreview data={data.scanner} /> : <Unavailable title="Scanner shortlist" />}
-        {data.flow ? <OptionsFlowPreview data={data.flow} /> : <Unavailable title="Options flow" />}
-        {data.trackRecord ? <TrackRecordPreview data={data.trackRecord} /> : <Unavailable title="Track record" />}
+        The strike ladder is tall; rather than leave a column of dead space
+        beside it and push the modules below the fold, the previews sit in a
+        two-wide grid parallel to the chart (xl+), using its height instead of
+        wasting it. Below xl everything stacks: map first, then the previews.
+      */}
+      <div className="grid gap-4 xl:grid-cols-2 xl:items-start">
+        {/* 4 — gamma map (the real strike-by-strike profile; collapsed on mobile) */}
+        {data.levels && data.profile ? (
+          <HomeLevels levels={data.levels} profile={data.profile} />
+        ) : (
+          <Unavailable title="SPY level / gamma map" />
+        )}
+
+        {/* 5–11 — preview teasers, two across beside the map */}
+        <div className="grid content-start gap-2 sm:grid-cols-2">
+          {data.health ? <MarketHealthPreview data={data.health} /> : <Unavailable title="Market health" />}
+          {data.outlook ? <ForwardOutlookPreview data={data.outlook} /> : <Unavailable title="Forward outlook" />}
+          {data.netLiquidity ? <NetLiquidityPreview data={data.netLiquidity} /> : <Unavailable title="Net liquidity" />}
+          {data.leadership ? <LeadershipPreview data={data.leadership} /> : <Unavailable title="Leadership" />}
+          {data.scanner ? <ScannerShortlistPreview data={data.scanner} /> : <Unavailable title="Scanner shortlist" />}
+          {data.flow ? <OptionsFlowPreview data={data.flow} /> : <Unavailable title="Options flow" />}
+          {data.trackRecord ? <TrackRecordPreview data={data.trackRecord} /> : <Unavailable title="Track record" />}
+        </div>
       </div>
 
       {/* 12 — data & method */}

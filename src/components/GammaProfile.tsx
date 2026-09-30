@@ -80,14 +80,18 @@ function valueOf(point: GammaProfilePoint, series: Series): number {
 
 // --- chart geometry, in viewBox units ---------------------------------------
 const VB_WIDTH = 760;
-const PAD_TOP = 28;
-const PAD_BOTTOM = 18;
-const ROW_H = 12;
-const BAR_H = 6;
+const PAD_TOP = 30;
+const PAD_BOTTOM = 16;
+const ROW_H = 18;
+const BAR_H = 12;
 /** Left gutter: strike labels. */
-const PLOT_LEFT = 78;
-/** Right gutter: the labels for price, the flip, and the two magnets. */
-const PLOT_RIGHT = 556;
+const PLOT_LEFT = 60;
+/**
+ * Right gutter: a compact band for the price / flip / magnet pills. Wide
+ * enough to hold "◇ flip 764.95" without wrapping, narrow enough that the bars
+ * fill the panel instead of trailing off into dead space on the right.
+ */
+const PLOT_RIGHT = 600;
 const CENTRE = (PLOT_LEFT + PLOT_RIGHT) / 2;
 const HALF_WIDTH = CENTRE - PLOT_LEFT;
 
@@ -179,6 +183,31 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
     return yOf(0);
   };
 
+  /**
+   * The drawn row nearest a price, or null when the price is outside the
+   * window. Price and the flip are shown as a tint on this row plus an inline
+   * pill, rather than a line spanning the panel — the line used to cross a wide
+   * empty band on the right, which is what made the chart read as half-empty.
+   */
+  const nearestRowTo = (price: number | null): number | null => {
+    if (price === null || rows.length === 0) return null;
+    const top = rows[0].strike;
+    const bottom = rows[rows.length - 1].strike;
+    if (price > top || price < bottom) return null;
+    let best = 0;
+    let gap = Infinity;
+    rows.forEach((p, i) => {
+      const d = Math.abs(p.strike - price);
+      if (d < gap) {
+        gap = d;
+        best = i;
+      }
+    });
+    return best;
+  };
+  const spotRowIndex = nearestRowTo(spot);
+  const flipRowIndex = flipLevel !== null ? nearestRowTo(flipLevel) : null;
+
   const active = hovered ?? pinned;
   const activeRow = active === null ? null : (rows[active] ?? null);
   const isDefaultView = width === defaultWidth && pinned === null;
@@ -193,33 +222,6 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
     if (strike === magnetAbove) return 'Magnet above — heaviest strike near price, on the way up';
     if (strike === magnetBelow) return 'Magnet below — heaviest strike near price, on the way down';
     return null;
-  };
-
-  const marker = (
-    price: number | null,
-    label: string,
-    dash: string | undefined,
-    className: string,
-  ) => {
-    if (price === null) return null;
-    const y = yOfPrice(price);
-    if (y === null) return null;
-    return (
-      <g className={className}>
-        <line
-          x1={PLOT_LEFT - 14}
-          x2={PLOT_RIGHT + 4}
-          y1={y}
-          y2={y}
-          stroke="currentColor"
-          strokeWidth={1.4}
-          strokeDasharray={dash}
-        />
-        <text x={PLOT_RIGHT + 10} y={y + 3.5} fontSize={10} fill="currentColor">
-          {label}
-        </text>
-      </g>
-    );
   };
 
   /** Where the running total changes sign, interpolated between two strikes. */
@@ -391,7 +393,28 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
             const barWidth = maxAbs === 0 ? 0 : (Math.abs(barValue) / maxAbs) * HALF_WIDTH;
             const x = barValue >= 0 ? CENTRE : CENTRE - barWidth;
             const isActive = active === i;
+            const isSpot = i === spotRowIndex;
+            const isFlip = i === flipRowIndex && !isSpot;
+            const isMagnetUp = point.strike === magnetAbove;
+            const isMagnetDown = point.strike === magnetBelow;
             const magnet = magnetLabel(point.strike);
+
+            /*
+             * One background rect per row, chosen by priority: the hovered or
+             * pinned row wins, then the spot row, then the flip row, then plain
+             * zebra striping so a long ladder stays readable across its width.
+             * A transparent fill still catches the pointer, so this rect is the
+             * hit area as well as the shading.
+             */
+            const rowBg = isActive
+              ? { cls: 'text-term-raised', opacity: 1 }
+              : isSpot
+                ? { cls: 'text-term-text', opacity: 0.08 }
+                : isFlip
+                  ? { cls: 'text-level', opacity: 0.1 }
+                  : i % 2 === 0
+                    ? { cls: 'text-term-raised', opacity: 0.4 }
+                    : { cls: 'text-term-raised', opacity: 0 };
 
             return (
               <g
@@ -410,22 +433,27 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
                 */
                 className="cursor-pointer outline-none"
               >
-                {/* Full-width hit area, so a tap anywhere on the row selects it. */}
+                {/* Full-width row background + hit area. */}
                 <rect
                   x={0}
                   y={y - ROW_H / 2}
                   width={VB_WIDTH}
                   height={ROW_H}
-                  fill={isActive ? 'currentColor' : 'transparent'}
-                  className={isActive ? 'text-term-raised' : undefined}
+                  fill="currentColor"
+                  className={rowBg.cls}
+                  opacity={rowBg.opacity}
                 />
                 <text
-                  x={PLOT_LEFT - 18}
+                  x={PLOT_LEFT - 14}
                   y={y + 3.5}
                   fontSize={10}
                   textAnchor="end"
                   fill="currentColor"
-                  className={magnet || isActive ? 'text-term-text' : 'text-term-dim'}
+                  className={
+                    isSpot || isFlip || isMagnetUp || isMagnetDown || isActive
+                      ? 'text-term-text'
+                      : 'text-term-dim'
+                  }
                 >
                   {formatStrike(point.strike)}
                 </text>
@@ -434,25 +462,51 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
                   <rect
                     x={x}
                     y={y - BAR_H / 2}
-                    width={Math.max(barWidth, 0.75)}
+                    width={Math.max(barWidth, 1)}
                     height={BAR_H}
+                    rx={2}
                     fill="currentColor"
                     className={barValue >= 0 ? POSITIVE : NEGATIVE}
-                    opacity={isActive ? 1 : 0.72}
+                    opacity={isActive ? 1 : 0.82}
                   />
                 )}
 
-                {magnet && (
+                {/*
+                  Price / flip / magnet live in the right band as inline pills,
+                  hugging the bars. Priority: price, then flip, then a magnet —
+                  one pill per row so labels never stack on top of each other.
+                */}
+                {isSpot ? (
                   <text
-                    x={PLOT_LEFT - 66}
+                    x={PLOT_RIGHT + 8}
+                    y={y + 3.5}
+                    fontSize={9.5}
+                    fill="currentColor"
+                    className="font-bold text-term-text"
+                  >
+                    ● price {spot.toFixed(2)}
+                  </text>
+                ) : isFlip && flipLevel !== null ? (
+                  <text
+                    x={PLOT_RIGHT + 8}
+                    y={y + 3.5}
+                    fontSize={9.5}
+                    fill="currentColor"
+                    className="text-level"
+                  >
+                    ◇ flip {formatStrike(flipLevel)}
+                  </text>
+                ) : magnet ? (
+                  <text
+                    x={PLOT_RIGHT + 8}
                     y={y + 3.5}
                     fontSize={9}
-                    className="text-term-faint"
                     fill="currentColor"
+                    className="text-term-faint"
                   >
-                    {point.strike === magnetAbove ? 'magnet ↑' : 'magnet ↓'}
+                    ◆ magnet {isMagnetUp ? '↑' : '↓'}
                   </text>
-                )}
+                ) : null}
               </g>
             );
           })}
@@ -489,15 +543,6 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
             </>
           )}
 
-          {/*
-            Drawn last so a labelled level is never hidden under a bar. Solid
-            for price, dashed and violet for the flip — but both are named in
-            text, because telling them apart must not depend on telling a solid
-            line from a dashed one.
-          */}
-          {marker(spot, `Price now ${spot.toFixed(2)}`, undefined, 'text-term-text')}
-          {flipLevel !== null &&
-            marker(flipLevel, `Gamma flip ${formatStrike(flipLevel)}`, '6 4', 'text-level')}
         </svg>
       </div>
 
