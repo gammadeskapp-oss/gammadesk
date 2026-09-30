@@ -54,8 +54,9 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: '/', label: 'Home', icon: '◎', match: ['/dashboard'] },
   { href: '/scanner', label: 'Scanner', icon: '⌕' },
-  // `/` and `/ticker` both land a symbol on the ticker workspace.
-  { href: '/ticker', label: 'Ticker Search', icon: '⌕', match: ['/decision'] },
+  // The ticker workspace — Levels + the interactive gamma chart + forecast.
+  // This is where every ticker link in the app already lands.
+  { href: '/decision', label: 'Ticker Search', icon: '◈' },
   { href: '/watchlist', label: 'Watchlist', icon: '★' },
 ];
 
@@ -65,6 +66,9 @@ const NAV: NavItem[] = [
  * forms read as jargon to someone who has not used the page yet.
  */
 const MORE: NavItem[] = [
+  // The nine-signal consensus tool — a different read from the ticker
+  // workspace, so it keeps its own entry here.
+  { href: '/ticker', label: 'Signal Consensus', icon: '⌗' },
   { href: '/strength', label: 'Stock Strength', icon: '⇅' },
   { href: '/sectors', label: 'Sector Momentum', icon: '◆' },
   { href: '/flow', label: 'Options Flow', icon: '⇄' },
