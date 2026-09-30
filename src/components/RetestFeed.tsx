@@ -97,19 +97,40 @@ export function RetestFeed({
 }) {
   const [showAll, setShowAll] = useState(false);
   const [explain, setExplain] = useState(false);
+  // Collapsed by default: this is a running commentary, useful when wanted but
+  // long enough to bury the exposure tables below it when it is not.
+  const [open, setOpen] = useState(false);
 
   const shown = showAll ? events : events.slice(0, VISIBLE);
 
   return (
     <section className="space-y-2">
-      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="group flex w-full flex-wrap items-baseline gap-x-2.5 gap-y-1 text-left"
+      >
+        <span
+          aria-hidden
+          className={`text-pos transition-transform ${open ? 'rotate-90' : ''}`}
+        >
+          &#9656;
+        </span>
         <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-term-text">
           What happened at the levels
         </h3>
-        <InfoTip for="retestFeed" />
         <span className="text-2xs text-term-faint">
           {symbol} · newest first · from one-minute bars
+          {!open && events.length > 0 && ` · ${events.length} today`}
         </span>
+      </button>
+
+      {open && (
+      <>
+      <div className="flex items-center gap-2">
+        <InfoTip for="retestFeed" />
+        <span className="text-2xs text-term-faint">Tap the heading to collapse.</span>
       </div>
 
       <div className="panel">
@@ -244,6 +265,8 @@ export function RetestFeed({
             </p>
           </div>
         </div>
+      )}
+      </>
       )}
     </section>
   );

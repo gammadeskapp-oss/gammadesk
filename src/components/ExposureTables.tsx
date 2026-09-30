@@ -5,8 +5,8 @@ import { PositioningTable } from './PositioningTable';
 import { TabBar } from './TabBar';
 import type { MetricKey, PositioningData } from '@/lib/types';
 
-/** GEX, VEX and CEX — the three exposure views, without the raw OI tab. */
-const EXPOSURE_TABS: MetricKey[] = ['gex', 'vex', 'cex'];
+/** GEX, VEX, CEX and raw open interest — the four exposure views. */
+const EXPOSURE_TABS: MetricKey[] = ['gex', 'vex', 'cex', 'oi'];
 
 /**
  * The exposure grid, as it appears at the foot of /decision.
