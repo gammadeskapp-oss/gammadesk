@@ -61,24 +61,26 @@ const NAV: NavItem[] = [
 ];
 
 /*
- * The specialist links, under "More". Same labels as before — "Stock
+ * The specialist links, under "More". These are exactly the pages the existing
+ * nav surfaced (minus the ones now primary). Same labels as before — "Stock
  * Strength", not "Strength"; "Options Flow", not "Flow" — because the short
  * forms read as jargon to someone who has not used the page yet.
+ *
+ * Deliberately NOT listed, matching the current gammadesk.app: /sectors,
+ * /forecast, /ticker and /status are reached through the work — from the pages
+ * and cards that lead into them (e.g. the Home preview cards link to /sectors,
+ * /forecast and the strength board; a ticker's consensus is one click from its
+ * workspace) — rather than from a nav list. Surfacing them here would put back
+ * the flat list of fourteen the redesign is meant to cut down.
  */
 const MORE: NavItem[] = [
-  // The nine-signal consensus tool — a different read from the ticker
-  // workspace, so it keeps its own entry here.
-  { href: '/ticker', label: 'Signal Consensus', icon: '⌗' },
   { href: '/strength', label: 'Stock Strength', icon: '⇅' },
-  { href: '/sectors', label: 'Sector Momentum', icon: '◆' },
   { href: '/flow', label: 'Options Flow', icon: '⇄' },
-  { href: '/forecast', label: 'Forecast', icon: '⟿' },
   { href: '/analogues', label: 'Analogues', icon: '⟲' },
   // The log is the record; /history is the same record drawn against price.
   { href: '/log', label: 'Track Record', icon: '✓', match: ['/history'] },
   // Digest and the morning post were one day's writing split over two pages.
   { href: '/daily', label: 'Daily', icon: '≡', match: ['/digest', '/post'] },
-  { href: '/status', label: 'Status', icon: '◇' },
   { href: '/guide', label: 'Guide', icon: '?' },
 ];
 
