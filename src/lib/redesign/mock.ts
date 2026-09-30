@@ -236,8 +236,12 @@ export interface MacroBiasMock {
   score: number;
   /** Confidence 0..100, independent of direction. */
   confidence: number;
-  /** Score at the prior session's close, for the "changed since" line. */
-  priorScore: number;
+  /**
+   * Score at the prior session's close, for the "changed since" line. Null
+   * when no prior reading is stored yet (the daily macro series is not
+   * persisted), in which case the card hides the day-over-day delta.
+   */
+  priorScore: number | null;
   /** Plain-English one-liner. */
   reason: string;
   /** Next scheduled catalyst. */
