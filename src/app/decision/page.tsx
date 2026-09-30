@@ -46,6 +46,8 @@ import { normaliseSymbol } from '@/lib/ticker/bars';
 import type { PositioningData } from '@/lib/types';
 import type { TooltipKey } from '@/lib/tooltips';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
+import { MacroFitCard } from '@/components/redesign/MacroFitCard';
+import { loadMacroFit } from '@/lib/redesign/data';
 
 export const metadata: Metadata = {
   title: 'Decision',
@@ -220,6 +222,30 @@ function Decision({
           {methodology && (
             <MethodologyDrawer methodology={methodology} anchor="levels" />
           )}
+
+          {/*
+            How the levels have actually behaved — the same levels judged after
+            the close. It lives in the levels column, directly under the levels
+            it grades, which is also what fills the space this column used to
+            leave empty beside the taller conviction/tradeability column.
+
+            On any other ticker this is a sentence rather than a card. An empty
+            panel would read as "no levels have held", which is a claim about
+            the market; the truth is that nothing has been recorded, which is a
+            claim about this project.
+          */}
+          {positioningRecord ? (
+            <PositioningRecordCard symbol={config.symbol} record={positioningRecord} />
+          ) : (
+            <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
+              <h2 className="label-xs">How these levels have behaved</h2>
+              <p className="mt-1.5">
+                {tracksLog
+                  ? 'The accuracy record could not be read, so no rates are shown rather than incomplete ones.'
+                  : `Only ${config.symbol} has a settled record. Levels are logged for ${config.symbol} each morning and judged after the close, and that log has no per-ticker history behind it — so there is nothing to show for ${c.symbol} rather than nothing to report.`}
+              </p>
+            </section>
+          )}
         </div>
 
         {/*
@@ -315,29 +341,6 @@ function Decision({
               </div>
             )}
           </Section>
-
-          {/*
-            The record under the checks, because it is the same levels judged
-            after the fact — and directly under them, so a conviction reading
-            and how that reading has actually turned out are on one screen.
-
-            On any other ticker this is a sentence rather than a card. An empty
-            panel would read as "no levels have held", which is a claim about
-            the market; the truth is that nothing has been recorded, which is a
-            claim about this project.
-          */}
-          {positioningRecord ? (
-            <PositioningRecordCard symbol={config.symbol} record={positioningRecord} />
-          ) : (
-            <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
-              <h2 className="label-xs">How these levels have behaved</h2>
-              <p className="mt-1.5">
-                {tracksLog
-                  ? 'The accuracy record could not be read, so no rates are shown rather than incomplete ones.'
-                  : `Only ${config.symbol} has a settled record. Levels are logged for ${config.symbol} each morning and judged after the close, and that log has no per-ticker history behind it — so there is nothing to show for ${c.symbol} rather than nothing to report.`}
-              </p>
-            </section>
-          )}
         </div>
       </div>
 
@@ -435,6 +438,10 @@ export default async function DecisionPage({ searchParams }: PageProps) {
   // to take a validated symbol from.
   const chartSymbol = normaliseSymbol(query);
   const symbol = data?.context.symbol ?? chartSymbol;
+
+  // The macro-fit read for this name, from the live macro bias. Best-effort and
+  // allowed to be absent — a dead macro feed must not cost the workspace.
+  const macroFit = data ? await loadMacroFit(data.context.symbol).catch(() => null) : null;
 
   /*
    * The cone and the exposure grid, fetched alongside the decision itself.
@@ -649,6 +656,13 @@ export default async function DecisionPage({ searchParams }: PageProps) {
         </div>
 
         <DecisionSearch initial={data?.context.symbol ?? query} />
+
+        {/*
+          Macro Fit — compact, near the top, so a setup is read against the
+          macro backdrop before conviction is formed. From the live macro bias
+          and the name's standing sensitivity (see `lib/redesign/data`).
+        */}
+        {macroFit && <MacroFitCard fit={macroFit} />}
 
         {updating && (
           <div className="panel border-l-2 border-l-term-dim/60 px-4 py-4">

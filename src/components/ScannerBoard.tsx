@@ -811,6 +811,8 @@ export function ScannerBoard({
   const [sort, setSort] = useState<{ key: ScoreKey; dir: 'desc' | 'asc' } | null>(
     null,
   );
+  /** Zero-based page of the results table. Ten rows a page. */
+  const [page, setPage] = useState(0);
 
   /*
    * On-demand grades, held here rather than in the row.
@@ -997,6 +999,30 @@ export function ScannerBoard({
     });
   }, [shown, sort]);
 
+  /*
+   * Paged ten at a time. The list is still the top-scoring names with matches
+   * first, so page one always holds the best matches — pagination only moves
+   * the lower rows off the initial view, it never changes which names are here
+   * or their order. Rank numbers continue across pages.
+   */
+  const PER_PAGE = 10;
+
+  // Any change to the order or the filtered set sends the reader back to page
+  // one, so a sort never leaves them stranded on an empty trailing page. This
+  // is the sanctioned "adjust state while rendering" pattern rather than an
+  // effect — no extra render pass, and it is what the set-state-in-effect rule
+  // points to.
+  const resetKey = `${sort?.key ?? ''}:${sort?.dir ?? ''}:${stage ?? ''}:${paramsFromSettings(settings)}`;
+  const [pageKey, setPageKey] = useState(resetKey);
+  if (pageKey !== resetKey) {
+    setPageKey(resetKey);
+    setPage(0);
+  }
+
+  const pageCount = Math.max(1, Math.ceil(sorted.length / PER_PAGE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageRows = sorted.slice(safePage * PER_PAGE, safePage * PER_PAGE + PER_PAGE);
+
   const isDefault = settingsAreDefault(settings);
   const shareUrl =
     typeof window === 'undefined'
@@ -1111,11 +1137,14 @@ export function ScannerBoard({
 
       <FunnelStrip stages={stages} active={stage} onSelect={setStage} />
 
-      {/* --- the filters, in plain English ---------------------------------- */}
-      <section className="panel px-3.5 py-3">
-        <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-dim">
+      {/* --- the filters, in plain English (collapsed: reference, read once) - */}
+      <details className="panel group px-3.5 py-3">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-2xs font-bold uppercase tracking-[0.18em] text-term-dim transition-colors hover:text-term-text [&::-webkit-details-marker]:hidden">
+          <span aria-hidden className="text-pos transition-transform group-open:rotate-90">
+            &#9656;
+          </span>
           The eight filters you can narrow with
-        </h2>
+        </summary>
         <ol className="mt-2 space-y-1.5">
           {RULE_KEYS.map((key, i) => (
             <li key={key} className="flex gap-2 text-xs leading-relaxed">
@@ -1135,13 +1164,16 @@ export function ScannerBoard({
           which rows are on the page — the score does that, and the score is a
           separate thing built from the seven components below.
         </p>
-      </section>
+      </details>
 
-      {/* --- the seven components, in plain English -------------------------- */}
-      <section className="panel px-3.5 py-3">
-        <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-dim">
+      {/* --- the seven components, in plain English (collapsed) -------------- */}
+      <details className="panel group px-3.5 py-3">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-2xs font-bold uppercase tracking-[0.18em] text-term-dim transition-colors hover:text-term-text [&::-webkit-details-marker]:hidden">
+          <span aria-hidden className="text-pos transition-transform group-open:rotate-90">
+            &#9656;
+          </span>
           The seven components the score is built from
-        </h2>
+        </summary>
         <ol className="mt-2 space-y-1.5">
           {SCORE_KEYS.map((key, i) => (
             <li key={key} className="flex gap-2 text-xs leading-relaxed">
@@ -1165,7 +1197,7 @@ export function ScannerBoard({
           so the composite can be checked rather than trusted. Open any
           row&rsquo;s detail to see its arithmetic.
         </p>
-      </section>
+      </details>
 
       <section className="scroll-term overflow-x-auto panel">
         <table className="w-full border-separate border-spacing-0 text-xs">
@@ -1197,12 +1229,12 @@ export function ScannerBoard({
             </tr>
           </thead>
           <tbody>
-            {sorted.map(({ entry, inStage }, i) => (
+            {pageRows.map(({ entry, inStage }, i) => (
               <ResultRow
                 key={entry.row.symbol}
                 scored={entry}
                 settings={settings}
-                rank={i + 1}
+                rank={safePage * PER_PAGE + i + 1}
                 inStage={inStage}
                 nwSettings={nwSettings}
                 trendEmaPeriod={trendEmaPeriod}
@@ -1213,6 +1245,36 @@ export function ScannerBoard({
           </tbody>
         </table>
       </section>
+
+      {pageCount > 1 && (
+        <div className="flex items-center justify-between gap-3 px-1 text-2xs text-term-dim">
+          <span className="tabular-nums text-term-faint">
+            Showing {safePage * PER_PAGE + 1}&ndash;{safePage * PER_PAGE + pageRows.length} of{' '}
+            {sorted.length}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={safePage === 0}
+              className="border border-term-line px-2.5 py-1 uppercase tracking-[0.1em] transition-colors hover:border-term-edge hover:text-term-text disabled:opacity-40"
+            >
+              ‹ Prev
+            </button>
+            <span className="tabular-nums text-term-faint">
+              Page {safePage + 1} / {pageCount}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+              disabled={safePage >= pageCount - 1}
+              className="border border-term-line px-2.5 py-1 uppercase tracking-[0.1em] transition-colors hover:border-term-edge hover:text-term-text disabled:opacity-40"
+            >
+              Next ›
+            </button>
+          </div>
+        </div>
+      )}
 
       {matchingCount === 0 && (
         <p className="panel px-3.5 py-2.5 text-2xs leading-relaxed text-flip/90">

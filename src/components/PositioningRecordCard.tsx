@@ -89,14 +89,25 @@ export function PositioningRecordCard({
   }
 
   return (
-    <section className="panel px-3.5 py-3 text-2xs leading-relaxed">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h2 className="label-xs">How these levels have behaved</h2>
+    <details className="panel group px-3.5 py-3 text-2xs leading-relaxed">
+      {/* Collapsible, collapsed by default: the heading and settled-session
+          count stay visible, and the reader opens it when they want the
+          per-level history rather than having it fill the column unasked. */}
+      <summary className="flex cursor-pointer list-none flex-wrap items-baseline justify-between gap-x-3 gap-y-1 [&::-webkit-details-marker]:hidden">
+        <span className="flex items-center gap-2">
+          <span
+            aria-hidden
+            className="text-pos transition-transform group-open:rotate-90"
+          >
+            &#9656;
+          </span>
+          <span className="label-xs">How these levels have behaved</span>
+        </span>
         <span className="text-2xs text-term-faint">
           {symbol} · {daysSettled} settled{' '}
           {daysSettled === 1 ? 'session' : 'sessions'}
         </span>
-      </div>
+      </summary>
 
       <div className="mt-2 space-y-1.5">
         <Row label="Flip level" stats={flip} hitWord="held its side" />
@@ -125,6 +136,6 @@ export function PositioningRecordCard({
         snapshot still counts, so these figures run slightly high. Nothing here
         says what today will do.
       </p>
-    </section>
+    </details>
   );
 }

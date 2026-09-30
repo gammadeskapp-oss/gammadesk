@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import { formatContracts, formatPrice, formatStrike } from '@/lib/format';
 import { METRICS } from '@/lib/metrics';
 import type { MetricKey, PositioningData } from '@/lib/types';
@@ -82,6 +82,20 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
     return { spotStrike: nearestSpot, flipStrike: nearestFlip };
   }, [rows, spot, summary.flipLevel]);
 
+  // Open centred on spot: the strike the reader came to check is the one that
+  // should be in view, not the top of a sixty-strike ladder. Scoped to the
+  // scroll box so the page itself does not jump.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const spotRef = useRef<HTMLTableRowElement>(null);
+  useEffect(() => {
+    const box = scrollRef.current;
+    const row = spotRef.current;
+    if (!box || !row) return;
+    const boxRect = box.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    box.scrollTop += rowRect.top - boxRect.top - box.clientHeight / 2 + rowRect.height / 2;
+  }, [spotStrike]);
+
   const headCell =
     'sticky top-0 z-20 border-b border-term-edge bg-term-raised px-2 py-2 text-2xs font-bold uppercase tracking-[0.1em] text-term-dim';
 
@@ -94,7 +108,7 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
         <p className="text-2xs text-term-faint">{def.unit}</p>
       </div>
 
-      <div className="scroll-term max-h-[74vh] overflow-auto">
+      <div ref={scrollRef} className="scroll-term max-h-[27rem] overflow-auto">
         <table className="w-full border-separate border-spacing-0 text-right text-xs tabular-nums">
           <caption className="sr-only">
             {def.name} for {data.symbol} by strike and expiration.
@@ -163,7 +177,7 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
                   : 'border-b border-term-line/60';
 
               return (
-                <tr key={row.strike} className={rowClass}>
+                <tr key={row.strike} ref={isSpot ? spotRef : undefined} className={rowClass}>
                   <th
                     scope="row"
                     className={`sticky left-0 z-10 border-r border-term-edge px-2 py-[0.3rem] text-left font-bold ${strikeBg} ${edge}`}

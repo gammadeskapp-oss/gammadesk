@@ -53,9 +53,9 @@ const NEGATIVE = 'text-neg'; // blue token (`--c-cool`)
  * Widening past this means raising the env var, which changes every page built
  * from the same snapshot; it is not something a chart control can do.
  */
-const PREFERRED_WIDTHS = [10, 25] as const;
-/** Strikes each side by default — a ~50 strike window, or all there are. */
-const PREFERRED_DEFAULT = 25;
+const PREFERRED_WIDTHS = [5, 10, 25] as const;
+/** Strikes each side by default — a ~20 strike window, or all there are. */
+const PREFERRED_DEFAULT = 10;
 type Width = number;
 
 type View = 'bars' | 'cumulative';
@@ -80,14 +80,18 @@ function valueOf(point: GammaProfilePoint, series: Series): number {
 
 // --- chart geometry, in viewBox units ---------------------------------------
 const VB_WIDTH = 760;
-const PAD_TOP = 28;
-const PAD_BOTTOM = 18;
+const PAD_TOP = 30;
+const PAD_BOTTOM = 16;
 const ROW_H = 18;
-const BAR_H = 11;
+const BAR_H = 12;
 /** Left gutter: strike labels. */
-const PLOT_LEFT = 78;
-/** Right gutter: the labels for price, the flip, and the two magnets. */
-const PLOT_RIGHT = 556;
+const PLOT_LEFT = 60;
+/**
+ * Right gutter: a compact band for the price / flip / magnet pills. Wide
+ * enough to hold "◇ flip 764.95" without wrapping, narrow enough that the bars
+ * fill the panel instead of trailing off into dead space on the right.
+ */
+const PLOT_RIGHT = 600;
 const CENTRE = (PLOT_LEFT + PLOT_RIGHT) / 2;
 const HALF_WIDTH = CENTRE - PLOT_LEFT;
 
@@ -179,6 +183,40 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
     return yOf(0);
   };
 
+  /**
+   * A price marker: a thin line at the price's exact position between the
+   * strikes — interpolated, so spot at 764.80 sits just below the 765 row
+   * rather than snapping onto it — with a compact label in the right band. The
+   * line stops at PLOT_RIGHT and hugs the bars; it does not trail across the
+   * empty band on the right the way the old full-width markers did.
+   */
+  const marker = (
+    price: number | null,
+    label: string,
+    dash: string | undefined,
+    className: string,
+  ) => {
+    if (price === null) return null;
+    const y = yOfPrice(price);
+    if (y === null) return null;
+    return (
+      <g className={className}>
+        <line
+          x1={PLOT_LEFT - 12}
+          x2={PLOT_RIGHT}
+          y1={y}
+          y2={y}
+          stroke="currentColor"
+          strokeWidth={1.4}
+          strokeDasharray={dash}
+        />
+        <text x={PLOT_RIGHT + 8} y={y + 3.3} fontSize={10} fill="currentColor">
+          {label}
+        </text>
+      </g>
+    );
+  };
+
   const active = hovered ?? pinned;
   const activeRow = active === null ? null : (rows[active] ?? null);
   const isDefaultView = width === defaultWidth && pinned === null;
@@ -193,33 +231,6 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
     if (strike === magnetAbove) return 'Magnet above — heaviest strike near price, on the way up';
     if (strike === magnetBelow) return 'Magnet below — heaviest strike near price, on the way down';
     return null;
-  };
-
-  const marker = (
-    price: number | null,
-    label: string,
-    dash: string | undefined,
-    className: string,
-  ) => {
-    if (price === null) return null;
-    const y = yOfPrice(price);
-    if (y === null) return null;
-    return (
-      <g className={className}>
-        <line
-          x1={PLOT_LEFT - 14}
-          x2={PLOT_RIGHT + 4}
-          y1={y}
-          y2={y}
-          stroke="currentColor"
-          strokeWidth={1.4}
-          strokeDasharray={dash}
-        />
-        <text x={PLOT_RIGHT + 10} y={y + 3.5} fontSize={10} fill="currentColor">
-          {label}
-        </text>
-      </g>
-    );
   };
 
   /** Where the running total changes sign, interpolated between two strikes. */
@@ -391,7 +402,23 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
             const barWidth = maxAbs === 0 ? 0 : (Math.abs(barValue) / maxAbs) * HALF_WIDTH;
             const x = barValue >= 0 ? CENTRE : CENTRE - barWidth;
             const isActive = active === i;
+            const isMagnetUp = point.strike === magnetAbove;
+            const isMagnetDown = point.strike === magnetBelow;
             const magnet = magnetLabel(point.strike);
+
+            /*
+             * One background rect per row: the hovered or pinned row wins,
+             * otherwise plain zebra striping so a long ladder stays readable
+             * across its width. Spot and the flip are drawn as their own
+             * interpolated lines below, not as row tints, so they land at the
+             * true price rather than on the nearest strike. A transparent fill
+             * still catches the pointer, so this rect is the hit area too.
+             */
+            const rowBg = isActive
+              ? { cls: 'text-term-raised', opacity: 1 }
+              : i % 2 === 0
+                ? { cls: 'text-term-raised', opacity: 0.4 }
+                : { cls: 'text-term-raised', opacity: 0 };
 
             return (
               <g
@@ -410,22 +437,27 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
                 */
                 className="cursor-pointer outline-none"
               >
-                {/* Full-width hit area, so a tap anywhere on the row selects it. */}
+                {/* Full-width row background + hit area. */}
                 <rect
                   x={0}
                   y={y - ROW_H / 2}
                   width={VB_WIDTH}
                   height={ROW_H}
-                  fill={isActive ? 'currentColor' : 'transparent'}
-                  className={isActive ? 'text-term-raised' : undefined}
+                  fill="currentColor"
+                  className={rowBg.cls}
+                  opacity={rowBg.opacity}
                 />
                 <text
-                  x={PLOT_LEFT - 18}
+                  x={PLOT_LEFT - 14}
                   y={y + 3.5}
                   fontSize={10}
                   textAnchor="end"
                   fill="currentColor"
-                  className={magnet || isActive ? 'text-term-text' : 'text-term-dim'}
+                  className={
+                    isMagnetUp || isMagnetDown || isActive
+                      ? 'text-term-text'
+                      : 'text-term-dim'
+                  }
                 >
                   {formatStrike(point.strike)}
                 </text>
@@ -434,23 +466,29 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
                   <rect
                     x={x}
                     y={y - BAR_H / 2}
-                    width={Math.max(barWidth, 0.75)}
+                    width={Math.max(barWidth, 1)}
                     height={BAR_H}
+                    rx={2}
                     fill="currentColor"
                     className={barValue >= 0 ? POSITIVE : NEGATIVE}
-                    opacity={isActive ? 1 : 0.72}
+                    opacity={isActive ? 1 : 0.82}
                   />
                 )}
 
+                {/*
+                  Magnets live in the right band as an inline pill hugging the
+                  bars. Spot and the flip get their own interpolated lines and
+                  labels, drawn after all the rows so they sit on top.
+                */}
                 {magnet && (
                   <text
-                    x={PLOT_LEFT - 66}
+                    x={PLOT_RIGHT + 8}
                     y={y + 3.5}
                     fontSize={9}
-                    className="text-term-faint"
                     fill="currentColor"
+                    className="text-term-faint"
                   >
-                    {point.strike === magnetAbove ? 'magnet ↑' : 'magnet ↓'}
+                    ◆ magnet {isMagnetUp ? '↑' : '↓'}
                   </text>
                 )}
               </g>
@@ -490,14 +528,14 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
           )}
 
           {/*
-            Drawn last so a labelled level is never hidden under a bar. Solid
-            for price, dashed and violet for the flip — but both are named in
-            text, because telling them apart must not depend on telling a solid
-            line from a dashed one.
+            Drawn last so a labelled level is never hidden under a bar. The spot
+            line is solid white and sits at the exact current price; the flip is
+            dashed and violet. Both are named in the label, because telling them
+            apart must not depend on solid-versus-dashed alone.
           */}
-          {marker(spot, `Price now ${spot.toFixed(2)}`, undefined, 'text-term-text')}
+          {marker(spot, `price ${spot.toFixed(2)}`, undefined, 'text-term-text')}
           {flipLevel !== null &&
-            marker(flipLevel, `Gamma flip ${formatStrike(flipLevel)}`, '6 4', 'text-level')}
+            marker(flipLevel, `flip ${formatStrike(flipLevel)}`, '5 4', 'text-level')}
         </svg>
       </div>
 
@@ -552,6 +590,18 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
         </p>
       )}
 
+      {/* How to read this + provenance, behind one expander so the chart and its
+          readout are what the panel leads with. Collapsed by default — it is
+          reference, read once. */}
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-2xs uppercase tracking-[0.12em] text-term-dim transition-colors hover:text-term-text [&::-webkit-details-marker]:hidden">
+          <span aria-hidden className="text-pos transition-transform group-open:rotate-90">
+            &#9656;
+          </span>
+          How to read this, and where it comes from
+        </summary>
+
+        <div className="mt-3 space-y-3">
       {/* How to read this, in the same callout style as "What am I looking at?". */}
       <div className="panel border-l-2 border-l-pos/50 p-4 text-xs leading-relaxed text-term-dim">
         <h4 className="text-2xs font-bold uppercase tracking-[0.18em] text-pos">
@@ -630,6 +680,8 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
           </Link>
         </p>
       </div>
+        </div>
+      </details>
     </section>
   );
 }

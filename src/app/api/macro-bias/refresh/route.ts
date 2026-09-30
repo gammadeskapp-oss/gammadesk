@@ -8,9 +8,11 @@ export const maxDuration = 60;
 /**
  * The daily Macro Bias refresh — see `vercel.json`.
  *
- * Pulls the three FRED series, scores them, and stores the record the home
- * page's box reads. Runs once on a weekday morning; FRED revises these series
- * slowly, so nothing is gained by running it more often.
+ * Pulls the FRED series, scores them, and stores the records the home page
+ * reads: the legacy 3-factor box and the −5…+5 model behind the redesign's
+ * Macro Bias card (rates, dollar, volatility, breadth, credit + event risk,
+ * with an append-only daily history). Runs once on a weekday morning; FRED
+ * revises these series slowly, so nothing is gained by running it more often.
  *
  * A FRED failure is reported as `nothing-stored`, not a 500: the previous
  * record stays in place and the box keeps showing yesterday's numbers.
@@ -26,6 +28,8 @@ export async function GET(request: Request) {
     score: result.bias?.score ?? null,
     label: result.bias?.label ?? null,
     error: result.error ?? null,
+    // The −5…+5 model, refreshed alongside on its own footing.
+    rich: result.rich ?? null,
     store: storeStatus(),
   });
 }
