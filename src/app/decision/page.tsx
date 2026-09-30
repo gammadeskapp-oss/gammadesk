@@ -46,6 +46,8 @@ import { normaliseSymbol } from '@/lib/ticker/bars';
 import type { PositioningData } from '@/lib/types';
 import type { TooltipKey } from '@/lib/tooltips';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
+import { MacroFitCard } from '@/components/redesign/MacroFitCard';
+import { mockMacroFit } from '@/lib/redesign/mock';
 
 export const metadata: Metadata = {
   title: 'Decision',
@@ -649,6 +651,15 @@ export default async function DecisionPage({ searchParams }: PageProps) {
         </div>
 
         <DecisionSearch initial={data?.context.symbol ?? query} />
+
+        {/*
+          Macro Fit — compact, near the top, so a setup is read against the
+          macro backdrop before conviction is formed. Layout-first preview:
+          placeholder data keyed to the current symbol.
+        */}
+        {data && (
+          <MacroFitCard fit={{ ...mockMacroFit, symbol: data.context.symbol }} />
+        )}
 
         {updating && (
           <div className="panel border-l-2 border-l-term-dim/60 px-4 py-4">

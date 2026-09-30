@@ -5,6 +5,7 @@ import { RefreshStatus } from '@/components/RefreshStatus';
 import { ScannerBoard } from '@/components/ScannerBoard';
 import { ScannerRunRate } from '@/components/ScannerRunRate';
 import { ScannerTabs } from '@/components/ScannerTabs';
+import { ScannerMacroPanel } from '@/components/redesign/ScannerMacroPanel';
 import { TosTrendTab } from '@/components/TosTrendTab';
 import { InfoTip } from '@/components/InfoTip';
 import { getBreadth } from '@/lib/breadth';
@@ -153,6 +154,9 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
           typical four is an ordinary one, and the list itself cannot say which.
         */}
         <ScannerRunRate counts={view.counts} average={view.averagePassed} />
+
+        {/* Macro alignment column + filters (preview). */}
+        <ScannerMacroPanel />
 
         {scan ? (
           <ScannerBoard
