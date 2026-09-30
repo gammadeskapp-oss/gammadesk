@@ -175,7 +175,9 @@ function makeProfilePoints(): GammaProfilePoint[] {
   const bump = (x: number, centre: number, spread: number) =>
     Math.max(0, 1 - Math.abs(x - centre) / spread);
   const points: GammaProfilePoint[] = [];
-  for (let strike = 560; strike <= 586; strike += 1) {
+  // ~30 strikes each side of spot, so the chart offers the 5 / 10 / 25 / 30
+  // "strikes each side" steps the live chain (trimmed to 30) also shows.
+  for (let strike = 544; strike <= 603; strike += 1) {
     // Call weight peaks at the upper magnet, put weight at the lower one.
     const callW = 0.12 + bump(strike, 575, 13) * 1.0 + bump(strike, 583, 6) * 0.25;
     const putW = 0.12 + bump(strike, 567, 12) * 1.0 + bump(strike, 561, 6) * 0.3;
@@ -204,7 +206,7 @@ export const mockGammaProfile: GammaProfileData = {
   points: makeProfilePoints(),
   facts: [
     { label: 'Expirations included', value: '3 — Sep 30 (1d), Oct 3 (4d), Oct 18 (19d)' },
-    { label: 'Contracts used', value: '61,204 across 27 strikes' },
+    { label: 'Contracts used', value: '61,204 across 60 strikes' },
     { label: 'Snapshot timestamp', value: 'as of 15:52 ET' },
     {
       label: 'Open interest as of',

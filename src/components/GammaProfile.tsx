@@ -53,7 +53,7 @@ const NEGATIVE = 'text-neg'; // blue token (`--c-cool`)
  * Widening past this means raising the env var, which changes every page built
  * from the same snapshot; it is not something a chart control can do.
  */
-const PREFERRED_WIDTHS = [10, 25] as const;
+const PREFERRED_WIDTHS = [5, 10, 25] as const;
 /** Strikes each side by default — a ~50 strike window, or all there are. */
 const PREFERRED_DEFAULT = 25;
 type Width = number;
@@ -82,8 +82,8 @@ function valueOf(point: GammaProfilePoint, series: Series): number {
 const VB_WIDTH = 760;
 const PAD_TOP = 28;
 const PAD_BOTTOM = 18;
-const ROW_H = 18;
-const BAR_H = 11;
+const ROW_H = 14;
+const BAR_H = 9;
 /** Left gutter: strike labels. */
 const PLOT_LEFT = 78;
 /** Right gutter: the labels for price, the flip, and the two magnets. */
