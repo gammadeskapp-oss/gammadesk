@@ -47,7 +47,7 @@ import type { PositioningData } from '@/lib/types';
 import type { TooltipKey } from '@/lib/tooltips';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { MacroFitCard } from '@/components/redesign/MacroFitCard';
-import { mockMacroFit } from '@/lib/redesign/mock';
+import { loadMacroFit } from '@/lib/redesign/data';
 
 export const metadata: Metadata = {
   title: 'Decision',
@@ -438,6 +438,10 @@ export default async function DecisionPage({ searchParams }: PageProps) {
   const chartSymbol = normaliseSymbol(query);
   const symbol = data?.context.symbol ?? chartSymbol;
 
+  // The macro-fit read for this name, from the live macro bias. Best-effort and
+  // allowed to be absent — a dead macro feed must not cost the workspace.
+  const macroFit = data ? await loadMacroFit(data.context.symbol).catch(() => null) : null;
+
   /*
    * The cone and the exposure grid, fetched alongside the decision itself.
    *
@@ -654,12 +658,10 @@ export default async function DecisionPage({ searchParams }: PageProps) {
 
         {/*
           Macro Fit — compact, near the top, so a setup is read against the
-          macro backdrop before conviction is formed. Layout-first preview:
-          placeholder data keyed to the current symbol.
+          macro backdrop before conviction is formed. From the live macro bias
+          and the name's standing sensitivity (see `lib/redesign/data`).
         */}
-        {data && (
-          <MacroFitCard fit={{ ...mockMacroFit, symbol: data.context.symbol }} />
-        )}
+        {macroFit && <MacroFitCard fit={macroFit} />}
 
         {updating && (
           <div className="panel border-l-2 border-l-term-dim/60 px-4 py-4">

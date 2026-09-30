@@ -56,13 +56,15 @@ function ScoreMeter({ score }: { score: number }) {
 }
 
 export function MacroBiasCard({ macro }: { macro: MacroBiasMock }) {
-  const delta = macro.score - macro.priorScore;
+  const delta = macro.priorScore === null ? null : macro.score - macro.priorScore;
   const changedLine =
-    delta === 0
-      ? 'Unchanged since yesterday'
-      : `${delta > 0 ? 'Up' : 'Down'} ${Math.abs(delta)} since yesterday (was ${
-          macro.priorScore > 0 ? '+' : ''
-        }${macro.priorScore})`;
+    macro.priorScore === null || delta === null
+      ? 'No prior reading tracked yet'
+      : delta === 0
+        ? 'Unchanged since yesterday'
+        : `${delta > 0 ? 'Up' : 'Down'} ${Math.abs(delta)} since yesterday (was ${
+            macro.priorScore > 0 ? '+' : ''
+          }${macro.priorScore})`;
 
   const headlineTone =
     macro.score > 0 ? 'text-bull' : macro.score < 0 ? 'text-bear' : 'text-term-text';
@@ -116,6 +118,7 @@ export function MacroBiasCard({ macro }: { macro: MacroBiasMock }) {
       </p>
 
       {/* Daily history — score, drivers, what changed, next event. */}
+      {macro.history.length > 0 && (
       <details className="group mt-2">
         <summary className="flex cursor-pointer list-none items-center gap-2 text-2xs text-term-dim transition-colors hover:text-term-text [&::-webkit-details-marker]:hidden">
           <span aria-hidden className="text-pos transition-transform group-open:rotate-90">
@@ -144,6 +147,7 @@ export function MacroBiasCard({ macro }: { macro: MacroBiasMock }) {
           ))}
         </ul>
       </details>
+      )}
     </section>
   );
 }

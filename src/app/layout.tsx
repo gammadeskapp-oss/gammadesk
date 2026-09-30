@@ -5,7 +5,7 @@ import { ServiceWorker } from '@/components/ServiceWorker';
 import { SessionNotice } from '@/components/SessionNotice';
 import { Sidebar } from '@/components/Sidebar';
 import { MarketStatusBar } from '@/components/redesign/MarketStatusBar';
-import { mockStatus } from '@/lib/redesign/mock';
+import { loadMarketStatus } from '@/lib/redesign/data';
 import './globals.css';
 
 const siteUrl = 'https://gammadesk.app';
@@ -94,10 +94,11 @@ export default function RootLayout({
               freshness + market phase in one place, so the per-card timestamp
               repetition the old dashboard scattered around is gone.
 
-              Layout-first preview: fed a placeholder status. Real wiring passes
-              the live market reading down.
+              Fed the live market reading (`currentMarketStatus`), which is pure
+              and needs no upstream call; the ET clock inside the bar ticks
+              client-side after mount.
             */}
-            <MarketStatusBar status={mockStatus} />
+            <MarketStatusBar status={loadMarketStatus()} />
             {children}
           </div>
         </div>

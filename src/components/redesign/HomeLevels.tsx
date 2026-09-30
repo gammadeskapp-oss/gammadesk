@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { GammaProfile } from '@/components/GammaProfile';
+import type { GammaProfileData } from '@/lib/gammaProfile';
 import { GammaLevelSummary } from './GammaLevelSummary';
-import { mockGammaProfile, type GammaLevelsMock } from '@/lib/redesign/mock';
+import type { GammaLevelsMock } from '@/lib/redesign/mock';
 
 /**
  * SPY Level / Gamma Map on Home — the real strike-by-strike `GammaProfile`
@@ -17,10 +18,15 @@ import { mockGammaProfile, type GammaLevelsMock } from '@/lib/redesign/mock';
  * expanded regardless. The toggle default (`false`) matches the server render,
  * so there is no hydration flicker.
  *
- * Layout-first preview: fed a placeholder profile from `lib/redesign/mock`.
- * Real wiring passes `buildGammaProfile(data)` down.
+ * Fed the real `buildGammaProfile(data)` profile from the Home data loader.
  */
-export function HomeLevels({ levels }: { levels: GammaLevelsMock }) {
+export function HomeLevels({
+  levels,
+  profile,
+}: {
+  levels: GammaLevelsMock;
+  profile: GammaProfileData;
+}) {
   const [show, setShow] = useState(false);
 
   return (
@@ -54,7 +60,7 @@ export function HomeLevels({ levels }: { levels: GammaLevelsMock }) {
 
       {/* Full interactive chart: state-driven below lg, always shown at lg+. */}
       <div className={`${show ? 'block' : 'hidden'} mt-3 lg:block`}>
-        <GammaProfile profile={mockGammaProfile} />
+        <GammaProfile profile={profile} />
       </div>
     </section>
   );

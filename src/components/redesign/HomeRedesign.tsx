@@ -11,18 +11,7 @@ import {
   ScannerShortlistPreview,
   TrackRecordPreview,
 } from './PreviewModules';
-import {
-  MOCK_NOTICE,
-  mockFlow,
-  mockHealth,
-  mockLeadership,
-  mockLevels,
-  mockMacro,
-  mockNetLiquidity,
-  mockOutlook,
-  mockScanner,
-  mockTrackRecord,
-} from '@/lib/redesign/mock';
+import type { HomeData } from '@/lib/redesign/data';
 
 /**
  * The integrated Home Dashboard — Home and the old /dashboard merged into one
@@ -46,35 +35,48 @@ import {
  * action, never the full tool. The hero, macro and map above them are the
  * heavy blocks the page leads with.
  *
- * Layout-first preview: every figure is placeholder data from
- * `lib/redesign/mock`. Real wiring swaps those reads for the existing
- * server-side fetches.
+ * Every figure now comes from the real server-side loader (`lib/redesign/data`).
+ * Each source is allowed to fail on its own, so any module whose data did not
+ * resolve renders a compact "unavailable" note rather than taking the page down
+ * or showing invented numbers.
  */
-export function HomeRedesign() {
+function Unavailable({ title }: { title: string }) {
+  return (
+    <section className="panel p-4">
+      <h2 className="label-xs">{title}</h2>
+      <p className="mt-2 text-2xs leading-relaxed text-term-faint">
+        Not available right now — the feed behind this module did not respond. The rest of the
+        page is unaffected; try again shortly.
+      </p>
+    </section>
+  );
+}
+
+export function HomeRedesign({ data }: { data: HomeData }) {
   return (
     <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
-      <p className="panel border-l-2 border-l-flip/60 bg-flip/[0.05] px-3.5 py-2 text-2xs leading-relaxed text-flip">
-        {MOCK_NOTICE}
-      </p>
-
       {/* 2 — hero */}
-      <HeroRegime levels={mockLevels} />
+      {data.levels ? <HeroRegime levels={data.levels} /> : <Unavailable title="SPY regime" />}
 
       {/* 3 — macro bias, first-class, directly under the hero */}
-      <MacroBiasCard macro={mockMacro} />
+      {data.macro ? <MacroBiasCard macro={data.macro} /> : <Unavailable title="Macro bias" />}
 
-      {/* 4 — gamma map (the real LevelsPanel; collapsed on mobile) */}
-      <HomeLevels levels={mockLevels} />
+      {/* 4 — gamma map (the real strike-by-strike profile; collapsed on mobile) */}
+      {data.levels && data.profile ? (
+        <HomeLevels levels={data.levels} profile={data.profile} />
+      ) : (
+        <Unavailable title="SPY level / gamma map" />
+      )}
 
       {/* 5–11 — preview teasers */}
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        <MarketHealthPreview data={mockHealth} />
-        <ForwardOutlookPreview data={mockOutlook} />
-        <NetLiquidityPreview data={mockNetLiquidity} />
-        <LeadershipPreview data={mockLeadership} />
-        <ScannerShortlistPreview data={mockScanner} />
-        <OptionsFlowPreview data={mockFlow} />
-        <TrackRecordPreview data={mockTrackRecord} />
+        {data.health ? <MarketHealthPreview data={data.health} /> : <Unavailable title="Market health" />}
+        {data.outlook ? <ForwardOutlookPreview data={data.outlook} /> : <Unavailable title="Forward outlook" />}
+        {data.netLiquidity ? <NetLiquidityPreview data={data.netLiquidity} /> : <Unavailable title="Net liquidity" />}
+        {data.leadership ? <LeadershipPreview data={data.leadership} /> : <Unavailable title="Leadership" />}
+        {data.scanner ? <ScannerShortlistPreview data={data.scanner} /> : <Unavailable title="Scanner shortlist" />}
+        {data.flow ? <OptionsFlowPreview data={data.flow} /> : <Unavailable title="Options flow" />}
+        {data.trackRecord ? <TrackRecordPreview data={data.trackRecord} /> : <Unavailable title="Track record" />}
       </div>
 
       {/* 12 — data & method */}
