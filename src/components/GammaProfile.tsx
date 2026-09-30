@@ -82,8 +82,8 @@ function valueOf(point: GammaProfilePoint, series: Series): number {
 const VB_WIDTH = 760;
 const PAD_TOP = 28;
 const PAD_BOTTOM = 18;
-const ROW_H = 14;
-const BAR_H = 9;
+const ROW_H = 12;
+const BAR_H = 6;
 /** Left gutter: strike labels. */
 const PLOT_LEFT = 78;
 /** Right gutter: the labels for price, the flip, and the two magnets. */
@@ -552,6 +552,18 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
         </p>
       )}
 
+      {/* How to read this + provenance, behind one expander so the chart and its
+          readout are what the panel leads with. Collapsed by default — it is
+          reference, read once. */}
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-2xs uppercase tracking-[0.12em] text-term-dim transition-colors hover:text-term-text [&::-webkit-details-marker]:hidden">
+          <span aria-hidden className="text-pos transition-transform group-open:rotate-90">
+            &#9656;
+          </span>
+          How to read this, and where it comes from
+        </summary>
+
+        <div className="mt-3 space-y-3">
       {/* How to read this, in the same callout style as "What am I looking at?". */}
       <div className="panel border-l-2 border-l-pos/50 p-4 text-xs leading-relaxed text-term-dim">
         <h4 className="text-2xs font-bold uppercase tracking-[0.18em] text-pos">
@@ -630,6 +642,8 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
           </Link>
         </p>
       </div>
+        </div>
+      </details>
     </section>
   );
 }

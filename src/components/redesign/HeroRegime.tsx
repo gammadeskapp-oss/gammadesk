@@ -24,11 +24,13 @@ export function HeroRegime({ levels }: { levels: GammaLevelsMock }) {
         <span className="tabular-nums text-2xs text-term-faint">net GEX {levels.netGex}</span>
       </div>
 
-      <p className={`mt-2 text-3xl font-bold tracking-tight sm:text-4xl ${accent}`}>
+      <p className={`mt-2 text-2xl font-bold tracking-tight sm:text-3xl ${accent}`}>
         {levels.regimeLabel}
       </p>
 
-      <p className="mt-3 max-w-2xl text-sm leading-relaxed text-term-dim">{levels.regimeSub}</p>
+      <p className="mt-2.5 max-w-2xl text-xs leading-relaxed text-term-dim sm:text-sm">
+        {levels.regimeSub}
+      </p>
 
       <div className="mt-5 border-t border-term-line pt-4">
         <GammaLevelSummary levels={levels} />
