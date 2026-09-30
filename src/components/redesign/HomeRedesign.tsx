@@ -69,7 +69,7 @@ export function HomeRedesign({ data }: { data: HomeData }) {
         two-wide grid parallel to the chart (xl+), using its height instead of
         wasting it. Below xl everything stacks: map first, then the previews.
       */}
-      <div className="grid gap-4 xl:grid-cols-2 xl:items-start">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] xl:items-start">
         {/* 4 — gamma map (the real strike-by-strike profile; collapsed on mobile) */}
         {data.levels && data.profile ? (
           <HomeLevels levels={data.levels} profile={data.profile} />
