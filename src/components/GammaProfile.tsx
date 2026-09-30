@@ -54,8 +54,8 @@ const NEGATIVE = 'text-neg'; // blue token (`--c-cool`)
  * from the same snapshot; it is not something a chart control can do.
  */
 const PREFERRED_WIDTHS = [5, 10, 25] as const;
-/** Strikes each side by default — a ~50 strike window, or all there are. */
-const PREFERRED_DEFAULT = 25;
+/** Strikes each side by default — a ~20 strike window, or all there are. */
+const PREFERRED_DEFAULT = 10;
 type Width = number;
 
 type View = 'bars' | 'cumulative';
