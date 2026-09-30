@@ -30,6 +30,12 @@ export const FRED_SERIES = {
   tenYear: 'DGS10',
   /** CPI for all urban consumers, index level. Monthly. */
   cpi: 'CPIAUCSL',
+  /** Trade-weighted broad US dollar index. Business-day. */
+  dollar: 'DTWEXBGS',
+  /** CBOE VIX close. Business-day. */
+  vix: 'VIXCLS',
+  /** ICE BofA US High Yield option-adjusted spread, in percent. Business-day. */
+  hyOas: 'BAMLH0A0HYM2',
 } as const;
 
 function parseRows(rows: Array<[string, string]>): FredObservation[] {

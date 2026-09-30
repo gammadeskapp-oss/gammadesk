@@ -29,7 +29,7 @@ import { getSpotQuote } from '@/lib/spot';
 import { getBreadth } from '@/lib/breadth';
 import type { BreadthReading } from '@/lib/breadth/types';
 import { getMarketContextQuotes, type MarketContextQuotes } from '@/lib/marketContext/quotes';
-import { getMacroBias, type MacroBias } from '@/lib/macroBias';
+import { getRichMacroBias, type RichMacroView } from '@/lib/macroBias';
 import { peekForecast } from '@/lib/forecast';
 import { getNetLiquidity } from '@/lib/netLiquidity';
 import { getSectorsSnapshot } from '@/lib/sectors';
@@ -147,88 +147,50 @@ function mapLevels(data: PositioningData, profile: GammaProfileData, spot: numbe
 
 // --- macro bias --------------------------------------------------------------
 
-function stateOf(direction: 'bullish' | 'bearish' | 'neutral'): DriverState {
-  return direction === 'bullish' ? 'tailwind' : direction === 'bearish' ? 'headwind' : 'neutral';
+/** `2026-09-26` → `Fri Sep 26`, for the history rows. */
+function formatHistoryDate(iso: string): string {
+  const t = Date.parse(`${iso}T00:00:00Z`);
+  if (!Number.isFinite(t)) return iso;
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(t));
 }
 
 /**
- * Map the live 3-factor macro bias onto the inspectable card.
- *
- * The FRED reading scores Fed, 10-year and CPI at −1…+1 each (a −3…+3 sum). The
- * card is a −5…+5 scale, so breadth and volatility — both already fetched for
- * Market Health — extend it with one more ±1 each, and the drivers grid shows
- * all five with their states. `priorScore` and `history` stay null/empty: the
- * app does not yet persist a daily macro series, so there is no honest
- * day-over-day delta to draw, and the card degrades to "no prior reading" and
- * hides the history drawer rather than inventing one.
+ * Map the stored −5…+5 macro model onto the inspectable card. The score,
+ * confidence, drivers, reason and history all come straight from the persisted
+ * record (see `lib/macroBias/rich`); `priorScore` is the most recent prior day,
+ * so the "changed since yesterday" line is a real day-over-day delta.
  */
 function mapMacro(
-  bias: MacroBias,
-  breadth: BreadthReading | null,
-  quotes: MarketContextQuotes | null,
-  nextCatalyst: MacroBiasMock['nextCatalyst'],
+  view: RichMacroView,
+  catalyst: MacroBiasMock['nextCatalyst'],
 ): MacroBiasMock {
-  const drivers: MacroDriverMock[] = [
-    { key: 'fed', label: 'Fed', value: bias.fed.value, state: stateOf(bias.fed.direction), note: bias.fed.sub },
-    { key: 'rates', label: 'Rates (10Y)', value: bias.tenYear.value, state: stateOf(bias.tenYear.direction), note: bias.tenYear.sub },
-    { key: 'cpi', label: 'Inflation (CPI)', value: bias.cpi.value, state: stateOf(bias.cpi.direction), note: bias.cpi.sub },
-  ];
-
-  let extra = 0;
-
-  const vix = quotes?.quotes.find((q) => q.symbol === '^VIX')?.price ?? null;
-  if (vix !== null) {
-    const state: DriverState = vix < 16 ? 'tailwind' : vix > 22 ? 'headwind' : 'neutral';
-    extra += state === 'tailwind' ? 1 : state === 'headwind' ? -1 : 0;
-    drivers.push({
-      key: 'vol',
-      label: 'Volatility',
-      value: `VIX ${vix.toFixed(1)}`,
-      state,
-      note: state === 'tailwind' ? 'calm tape' : state === 'headwind' ? 'stress rising' : 'middling',
-    });
-  }
-
-  const breadthPct = breadth?.computed?.pctAbovePriorClose ?? null;
-  if (breadthPct !== null) {
-    const state: DriverState = breadthPct > 55 ? 'tailwind' : breadthPct < 45 ? 'headwind' : 'neutral';
-    extra += state === 'tailwind' ? 1 : state === 'headwind' ? -1 : 0;
-    drivers.push({
-      key: 'breadth',
-      label: 'Breadth',
-      value: `${Math.round(breadthPct)}% > prior`,
-      state,
-      note: state === 'tailwind' ? 'broad participation' : state === 'headwind' ? 'narrow tape' : 'mixed participation',
-    });
-  }
-
-  const score = Math.max(-5, Math.min(5, bias.score + extra));
-  const label =
-    score >= 3 ? 'Bullish'
-      : score >= 1 ? 'Cautiously bullish'
-        : score === 0 ? 'Neutral'
-          : score >= -2 ? 'Cautiously bearish'
-            : 'Bearish';
-
-  // Confidence from how much the non-neutral drivers agree with the net sign.
-  const signed = drivers.filter((d) => d.state !== 'neutral');
-  const agreeing = signed.filter(
-    (d) => (d.state === 'tailwind' ? 1 : -1) === Math.sign(score),
-  ).length;
-  const confidence =
-    score === 0 || signed.length === 0
-      ? 30
-      : Math.round((agreeing / signed.length) * 100);
-
+  const c = view.current;
+  const drivers: MacroDriverMock[] = c.drivers.map((d) => ({
+    key: d.key,
+    label: d.label,
+    value: d.value,
+    state: d.state as DriverState,
+    note: d.sub,
+  }));
   return {
-    label,
-    score,
-    confidence,
-    priorScore: null,
-    reason: bias.footer,
-    nextCatalyst,
+    label: c.label,
+    score: c.score,
+    confidence: c.confidence,
+    priorScore: view.history[0]?.score ?? null,
+    reason: c.reason,
+    nextCatalyst: catalyst,
     drivers,
-    history: [],
+    history: view.history.map((h) => ({
+      date: formatHistoryDate(h.date),
+      score: h.score,
+      changed: h.changed,
+      nextEvent: h.nextEvent,
+    })),
   };
 }
 
@@ -403,10 +365,10 @@ async function mapTrackRecord(): Promise<TrackRecordMock | null> {
  * whether it aligns with or fights the current backdrop, never a price target.
  */
 export async function loadMacroFit(symbol: string, now: Date = new Date()): Promise<MacroFitMock | null> {
-  const bias = await getMacroBias().catch(() => null);
-  if (!bias) return null;
+  const view = await getRichMacroBias().catch(() => null);
+  if (!view) return null;
   const alignment = macroAlignmentFor(symbol);
-  const backdrop = bias.direction; // bullish | bearish | neutral
+  const backdrop = view.current.direction; // bullish | bearish | neutral
 
   const sensitivity =
     alignment === 'rate-sensitive'
@@ -448,12 +410,12 @@ export async function loadMacroFit(symbol: string, now: Date = new Date()): Prom
 export async function loadHomeData(now: Date = new Date()): Promise<HomeData> {
   const catalyst = nextCatalyst(now);
 
-  const [book, breadth, quotes, bias, outlook, netLiquidity, leadership, scanner, flow, trackRecord] =
+  const [book, breadth, quotes, richMacro, outlook, netLiquidity, leadership, scanner, flow, trackRecord] =
     await Promise.all([
       peekPositioningView(config.symbol).catch((): PositioningData | null => null),
       getBreadth().catch((): BreadthReading | null => null),
       getMarketContextQuotes().catch((): MarketContextQuotes | null => null),
-      getMacroBias().catch((): MacroBias | null => null),
+      getRichMacroBias().catch((): RichMacroView | null => null),
       mapOutlook(),
       mapNetLiquidity(),
       mapLeadership(),
@@ -474,7 +436,7 @@ export async function loadHomeData(now: Date = new Date()): Promise<HomeData> {
     status: loadMarketStatus(now),
     levels,
     profile,
-    macro: bias ? mapMacro(bias, breadth, quotes, catalyst) : null,
+    macro: richMacro ? mapMacro(richMacro, catalyst) : null,
     health: mapHealth(breadth, quotes),
     outlook,
     netLiquidity,
