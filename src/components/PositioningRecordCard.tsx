@@ -89,9 +89,10 @@ export function PositioningRecordCard({
   }
 
   return (
-    <details open className="panel group px-3.5 py-3 text-2xs leading-relaxed">
-      {/* Collapsible: opens by default so it fills the column, but can be
-          minimised when the reader wants the levels above it to stand alone. */}
+    <details className="panel group px-3.5 py-3 text-2xs leading-relaxed">
+      {/* Collapsible, collapsed by default: the heading and settled-session
+          count stay visible, and the reader opens it when they want the
+          per-level history rather than having it fill the column unasked. */}
       <summary className="flex cursor-pointer list-none flex-wrap items-baseline justify-between gap-x-3 gap-y-1 [&::-webkit-details-marker]:hidden">
         <span className="flex items-center gap-2">
           <span

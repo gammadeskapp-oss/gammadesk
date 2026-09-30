@@ -184,29 +184,38 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
   };
 
   /**
-   * The drawn row nearest a price, or null when the price is outside the
-   * window. Price and the flip are shown as a tint on this row plus an inline
-   * pill, rather than a line spanning the panel — the line used to cross a wide
-   * empty band on the right, which is what made the chart read as half-empty.
+   * A price marker: a thin line at the price's exact position between the
+   * strikes — interpolated, so spot at 764.80 sits just below the 765 row
+   * rather than snapping onto it — with a compact label in the right band. The
+   * line stops at PLOT_RIGHT and hugs the bars; it does not trail across the
+   * empty band on the right the way the old full-width markers did.
    */
-  const nearestRowTo = (price: number | null): number | null => {
-    if (price === null || rows.length === 0) return null;
-    const top = rows[0].strike;
-    const bottom = rows[rows.length - 1].strike;
-    if (price > top || price < bottom) return null;
-    let best = 0;
-    let gap = Infinity;
-    rows.forEach((p, i) => {
-      const d = Math.abs(p.strike - price);
-      if (d < gap) {
-        gap = d;
-        best = i;
-      }
-    });
-    return best;
+  const marker = (
+    price: number | null,
+    label: string,
+    dash: string | undefined,
+    className: string,
+  ) => {
+    if (price === null) return null;
+    const y = yOfPrice(price);
+    if (y === null) return null;
+    return (
+      <g className={className}>
+        <line
+          x1={PLOT_LEFT - 12}
+          x2={PLOT_RIGHT}
+          y1={y}
+          y2={y}
+          stroke="currentColor"
+          strokeWidth={1.4}
+          strokeDasharray={dash}
+        />
+        <text x={PLOT_RIGHT + 8} y={y + 3.3} fontSize={10} fill="currentColor">
+          {label}
+        </text>
+      </g>
+    );
   };
-  const spotRowIndex = nearestRowTo(spot);
-  const flipRowIndex = flipLevel !== null ? nearestRowTo(flipLevel) : null;
 
   const active = hovered ?? pinned;
   const activeRow = active === null ? null : (rows[active] ?? null);
@@ -393,28 +402,23 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
             const barWidth = maxAbs === 0 ? 0 : (Math.abs(barValue) / maxAbs) * HALF_WIDTH;
             const x = barValue >= 0 ? CENTRE : CENTRE - barWidth;
             const isActive = active === i;
-            const isSpot = i === spotRowIndex;
-            const isFlip = i === flipRowIndex && !isSpot;
             const isMagnetUp = point.strike === magnetAbove;
             const isMagnetDown = point.strike === magnetBelow;
             const magnet = magnetLabel(point.strike);
 
             /*
-             * One background rect per row, chosen by priority: the hovered or
-             * pinned row wins, then the spot row, then the flip row, then plain
-             * zebra striping so a long ladder stays readable across its width.
-             * A transparent fill still catches the pointer, so this rect is the
-             * hit area as well as the shading.
+             * One background rect per row: the hovered or pinned row wins,
+             * otherwise plain zebra striping so a long ladder stays readable
+             * across its width. Spot and the flip are drawn as their own
+             * interpolated lines below, not as row tints, so they land at the
+             * true price rather than on the nearest strike. A transparent fill
+             * still catches the pointer, so this rect is the hit area too.
              */
             const rowBg = isActive
               ? { cls: 'text-term-raised', opacity: 1 }
-              : isSpot
-                ? { cls: 'text-term-text', opacity: 0.08 }
-                : isFlip
-                  ? { cls: 'text-level', opacity: 0.1 }
-                  : i % 2 === 0
-                    ? { cls: 'text-term-raised', opacity: 0.4 }
-                    : { cls: 'text-term-raised', opacity: 0 };
+              : i % 2 === 0
+                ? { cls: 'text-term-raised', opacity: 0.4 }
+                : { cls: 'text-term-raised', opacity: 0 };
 
             return (
               <g
@@ -450,7 +454,7 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
                   textAnchor="end"
                   fill="currentColor"
                   className={
-                    isSpot || isFlip || isMagnetUp || isMagnetDown || isActive
+                    isMagnetUp || isMagnetDown || isActive
                       ? 'text-term-text'
                       : 'text-term-dim'
                   }
@@ -472,31 +476,11 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
                 )}
 
                 {/*
-                  Price / flip / magnet live in the right band as inline pills,
-                  hugging the bars. Priority: price, then flip, then a magnet —
-                  one pill per row so labels never stack on top of each other.
+                  Magnets live in the right band as an inline pill hugging the
+                  bars. Spot and the flip get their own interpolated lines and
+                  labels, drawn after all the rows so they sit on top.
                 */}
-                {isSpot ? (
-                  <text
-                    x={PLOT_RIGHT + 8}
-                    y={y + 3.5}
-                    fontSize={9.5}
-                    fill="currentColor"
-                    className="font-bold text-term-text"
-                  >
-                    ● price {spot.toFixed(2)}
-                  </text>
-                ) : isFlip && flipLevel !== null ? (
-                  <text
-                    x={PLOT_RIGHT + 8}
-                    y={y + 3.5}
-                    fontSize={9.5}
-                    fill="currentColor"
-                    className="text-level"
-                  >
-                    ◇ flip {formatStrike(flipLevel)}
-                  </text>
-                ) : magnet ? (
+                {magnet && (
                   <text
                     x={PLOT_RIGHT + 8}
                     y={y + 3.5}
@@ -506,7 +490,7 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
                   >
                     ◆ magnet {isMagnetUp ? '↑' : '↓'}
                   </text>
-                ) : null}
+                )}
               </g>
             );
           })}
@@ -543,6 +527,15 @@ export function GammaProfile({ profile }: { profile: GammaProfileData }) {
             </>
           )}
 
+          {/*
+            Drawn last so a labelled level is never hidden under a bar. The spot
+            line is solid white and sits at the exact current price; the flip is
+            dashed and violet. Both are named in the label, because telling them
+            apart must not depend on solid-versus-dashed alone.
+          */}
+          {marker(spot, `price ${spot.toFixed(2)}`, undefined, 'text-term-text')}
+          {flipLevel !== null &&
+            marker(flipLevel, `flip ${formatStrike(flipLevel)}`, '5 4', 'text-level')}
         </svg>
       </div>
 
