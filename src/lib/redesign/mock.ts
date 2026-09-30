@@ -12,6 +12,9 @@
  * to the real domain types so that swap is mechanical.
  */
 
+import type { Wall, ActivityLevels } from '@/lib/decision/types';
+import type { LevelMap, LevelRung } from '@/lib/decision/levelMap';
+
 export const MOCK_NOTICE =
   'Preview layout — every figure on this page is placeholder data, not the live market.';
 
@@ -76,6 +79,86 @@ export const mockLevels: GammaLevelsMock = {
     { strike: 580, weight: 0.55, side: 'call' },
     { strike: 585, weight: 0.3, side: 'call' },
   ],
+};
+
+// --- levels panel (the real /decision LevelsPanel, fed mock props) ----------
+
+const SPOT = 573.4;
+const wall = (strike: number, strength: number, gexAbs: number, above: boolean): Wall => ({
+  strike,
+  gex: above ? gexAbs : -gexAbs,
+  strength,
+  distancePct: ((strike - SPOT) / SPOT) * 100,
+});
+
+const CEILINGS: Wall[] = [
+  wall(575, 1.0, 9.2e8, true),
+  wall(577, 0.66, 6.1e8, true),
+  wall(580, 0.55, 5.0e8, true),
+  wall(585, 0.3, 2.8e8, true),
+];
+const FLOORS: Wall[] = [
+  wall(570, 0.82, 7.6e8, false),
+  wall(567, 0.6, 5.5e8, false),
+  wall(565, 0.45, 4.1e8, false),
+  wall(562, 0.3, 2.7e8, false),
+];
+
+const rung = (
+  price: number,
+  labels: LevelRung['labels'],
+  gex: number | null,
+  isSpot = false,
+): LevelRung => ({
+  price,
+  labels,
+  gex,
+  distancePct: ((price - SPOT) / SPOT) * 100,
+  isSpot,
+});
+
+const mockLevelMap: LevelMap = {
+  rungs: [
+    rung(585, ['ceiling'], 2.8e8),
+    rung(580, ['ceiling'], 5.0e8),
+    rung(577, ['ceiling'], 6.1e8),
+    rung(575, ['ceiling', 'heaviest'], 9.2e8),
+    rung(SPOT, ['spot'], null, true),
+    rung(570, ['floor'], -7.6e8),
+    rung(569, ['flip'], null),
+    rung(567, ['floor'], -5.5e8),
+    rung(565, ['floor'], -4.1e8),
+    rung(562, ['floor'], -2.7e8),
+  ],
+  spot: SPOT,
+  netGex: 4.1e9,
+  levelCount: 9,
+  rule: { threshold: 0.25, neighbourhood: 6 },
+};
+
+const mockActivity: ActivityLevels = {
+  available: true,
+  walls: { above: CEILINGS, below: FLOORS },
+  levelMap: mockLevelMap,
+  flipLevel: 569,
+  frontFlipLevel: 569.2,
+  frontExpiryLabel: 'Sep 30',
+};
+
+export const mockLevelsPanel = {
+  walls: { above: CEILINGS, below: FLOORS },
+  levelMap: mockLevelMap,
+  spot: SPOT,
+  asOfLabel: 'as of 15:52 ET',
+  // True so the ceiling/floor strength bars render (they are suppressed on
+  // thin chains). The mock chain is deep enough to show them.
+  showExposure: true,
+  frontFlipLevel: 569.2,
+  frontExpiryLabel: 'Sep 30',
+  activity: mockActivity,
+  confirmedByVolume: [575, 570],
+  marketClosed: false,
+  sessionDateLabel: 'Sep 29',
 };
 
 // --- macro bias (first-class, inspectable) ----------------------------------

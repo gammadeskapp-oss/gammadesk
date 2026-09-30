@@ -1,6 +1,6 @@
 import { HeroRegime } from './HeroRegime';
 import { MacroBiasCard } from './MacroBiasCard';
-import { GammaMap } from './GammaMap';
+import { HomeLevels } from './HomeLevels';
 import { MethodDrawer } from './MethodDrawer';
 import {
   ForwardOutlookPreview,
@@ -63,8 +63,8 @@ export function HomeRedesign() {
       {/* 3 — macro bias, first-class, directly under the hero */}
       <MacroBiasCard macro={mockMacro} />
 
-      {/* 4 — gamma map (collapsed on mobile) */}
-      <GammaMap levels={mockLevels} />
+      {/* 4 — gamma map (the real LevelsPanel; collapsed on mobile) */}
+      <HomeLevels levels={mockLevels} />
 
       {/* 5–11 — preview teasers */}
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
