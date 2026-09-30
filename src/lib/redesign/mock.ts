@@ -66,11 +66,15 @@ export const mockLevels: GammaLevelsMock = {
   magnetAbove: 575,
   magnetBelow: 570,
   strip: [
+    { strike: 562, weight: 0.22, side: 'put' },
     { strike: 565, weight: 0.35, side: 'put' },
+    { strike: 567, weight: 0.51, side: 'put' },
     { strike: 570, weight: 0.82, side: 'put' },
     { strike: 573, weight: 0.4, side: 'call' },
     { strike: 575, weight: 1.0, side: 'call' },
+    { strike: 577, weight: 0.66, side: 'call' },
     { strike: 580, weight: 0.55, side: 'call' },
+    { strike: 585, weight: 0.3, side: 'call' },
   ],
 };
 

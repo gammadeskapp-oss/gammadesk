@@ -24,62 +24,101 @@ import { formatPrice } from '@/lib/format';
 export function GammaMap({ levels }: { levels: GammaLevelsMock }) {
   const [show, setShow] = useState(false);
 
-  const strikes = levels.strip.map((s) => s.strike);
-  const min = Math.min(...strikes, levels.spot);
-  const max = Math.max(...strikes, levels.spot);
-  const span = max - min || 1;
-  const xOf = (strike: number) => ((strike - min) / span) * 100;
+  // Highest strike at the top, like a price ladder. Puts extend left, calls
+  // extend right from a shared centre axis, scaled to the largest bar.
+  const rows = [...levels.strip].sort((a, b) => b.strike - a.strike);
+  const maxWeight = Math.max(...rows.map((r) => r.weight), 0.0001);
+
+  const nearest = (price: number | null) =>
+    price === null
+      ? null
+      : rows.reduce((best, r) =>
+          Math.abs(r.strike - price) < Math.abs(best.strike - price) ? r : best,
+        );
+  const flipStrike = nearest(levels.flipLevel)?.strike ?? null;
+  const spotStrike = nearest(levels.spot)?.strike ?? null;
 
   const chart = (
     <div className="mt-3">
-      <div className="relative h-40 border border-term-line bg-term-raised/30">
-        {/* flip line (violet dashed) */}
-        {levels.flipLevel !== null && (
-          <div
-            aria-hidden
-            className="absolute inset-y-0 border-l border-dashed border-level"
-            style={{ left: `${xOf(levels.flipLevel)}%` }}
-          >
-            <span className="absolute -top-0.5 left-1 text-2xs text-level">
-              flip {formatPrice(levels.flipLevel)}
-            </span>
-          </div>
-        )}
+      <div className="border border-term-line bg-term-raised/30 px-2 py-3">
+        <div className="flex flex-col gap-1.5">
+          {rows.map((bar) => {
+            const call = bar.side === 'call';
+            const pct = (bar.weight / maxWeight) * 100;
+            const isFlip = bar.strike === flipStrike;
+            const isSpot = bar.strike === spotStrike;
+            return (
+              <div key={bar.strike} className="flex items-center gap-2">
+                {/* strike label + level tags */}
+                <div className="flex w-24 shrink-0 items-center justify-end gap-1.5 tabular-nums">
+                  {isSpot && (
+                    <span className="border border-term-edge px-1 text-[9px] uppercase tracking-wider text-term-dim">
+                      spot
+                    </span>
+                  )}
+                  {isFlip && (
+                    <span className="border border-level/60 px-1 text-[9px] uppercase tracking-wider text-level">
+                      flip
+                    </span>
+                  )}
+                  <span
+                    className={`text-xs ${isSpot ? 'font-bold text-term-text' : 'text-term-faint'}`}
+                  >
+                    {formatPrice(bar.strike)}
+                  </span>
+                </div>
 
-        {/* spot marker */}
-        <div
-          aria-hidden
-          className="absolute inset-y-0 border-l border-term-text/70"
-          style={{ left: `${xOf(levels.spot)}%` }}
-        >
-          <span className="absolute bottom-0 left-1 text-2xs text-term-dim">
-            spot {formatPrice(levels.spot)}
-          </span>
+                {/* diverging bar area with a centre axis */}
+                <div className="relative flex h-5 flex-1 items-center">
+                  <span aria-hidden className="absolute left-1/2 top-0 h-full w-px bg-term-edge" />
+                  {/* put half (left) */}
+                  <div className="flex h-full flex-1 items-center justify-end pr-px">
+                    {!call && (
+                      <div
+                        className="h-3 bg-neg/70"
+                        style={{ width: `${pct}%` }}
+                        title={`${bar.strike} · put · ${Math.round(bar.weight * 100)}%`}
+                      />
+                    )}
+                  </div>
+                  {/* call half (right) */}
+                  <div className="flex h-full flex-1 items-center pl-px">
+                    {call && (
+                      <div
+                        className="h-3 bg-pos/80"
+                        style={{ width: `${pct}%` }}
+                        title={`${bar.strike} · call · ${Math.round(bar.weight * 100)}%`}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        {/* gamma bars */}
-        {levels.strip.map((bar) => (
-          <div
-            key={bar.strike}
-            className="absolute bottom-0 w-3 -translate-x-1/2"
-            style={{ left: `${xOf(bar.strike)}%`, height: `${bar.weight * 85}%` }}
-          >
-            <div
-              className={`h-full w-full ${bar.side === 'call' ? 'bg-pos/70' : 'bg-neg/70'}`}
-              title={`${bar.strike} · ${bar.side}`}
-            />
+        {/* axis labels under the centre */}
+        <div className="mt-2 flex items-center gap-2 text-[9px] uppercase tracking-wider text-term-faint">
+          <span className="w-24 shrink-0" />
+          <div className="flex flex-1 justify-between">
+            <span>← puts</span>
+            <span>calls →</span>
           </div>
-        ))}
+        </div>
       </div>
+
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-2xs text-term-faint">
         <span className="flex items-center gap-1.5">
-          <span aria-hidden className="h-2 w-2 bg-pos/70" /> positive gamma (calls)
+          <span aria-hidden className="h-2 w-2 bg-pos/80" /> positive gamma (calls)
         </span>
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="h-2 w-2 bg-neg/70" /> negative gamma (puts)
         </span>
         <span className="flex items-center gap-1.5">
-          <span aria-hidden className="h-2 w-2 border-l border-dashed border-level" /> gamma flip
+          <span aria-hidden className="border border-level/60 px-1 text-[9px] uppercase tracking-wider text-level">
+            flip
+          </span>
+          gamma flip
         </span>
       </div>
     </div>
