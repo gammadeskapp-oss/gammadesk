@@ -4,6 +4,8 @@ import { CanonicalHost } from '@/components/CanonicalHost';
 import { ServiceWorker } from '@/components/ServiceWorker';
 import { SessionNotice } from '@/components/SessionNotice';
 import { Sidebar } from '@/components/Sidebar';
+import { MarketStatusBar } from '@/components/redesign/MarketStatusBar';
+import { mockStatus } from '@/lib/redesign/mock';
 import './globals.css';
 
 const siteUrl = 'https://gammadesk.app';
@@ -87,6 +89,15 @@ export default function RootLayout({
             <Suspense fallback={null}>
               <SessionNotice />
             </Suspense>
+            {/*
+              One global sticky status bar, shared across every page — data
+              freshness + market phase in one place, so the per-card timestamp
+              repetition the old dashboard scattered around is gone.
+
+              Layout-first preview: fed a placeholder status. Real wiring passes
+              the live market reading down.
+            */}
+            <MarketStatusBar status={mockStatus} />
             {children}
           </div>
         </div>

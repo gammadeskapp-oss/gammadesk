@@ -41,28 +41,40 @@ interface NavItem {
  * from a list of fourteen. `/methodology` is absent because it is no longer a
  * page: its text now sits at the bottom of `/guide`, under #methodology.
  */
+/*
+ * Redesign nav: four primary destinations plus a "More" menu.
+ *
+ *   Home | Scanner | Ticker Search | Watchlist | More ▾
+ *
+ * Nothing was deleted — every specialist page still has a home. The routes
+ * that used to sit in the flat list of ten now live under "More", reached in
+ * one extra tap. Home is the integrated dashboard; "Ticker Search" is the
+ * ticker workspace entry point.
+ */
 const NAV: NavItem[] = [
-  { href: '/dashboard', label: 'Dashboard', icon: '◎' },
-  /*
-   * Several labels say the noun out loud rather than the desk shorthand:
-   * "Stock Strength", not "Strength"; "Options Flow", not "Flow"; "Track
-   * Record", not "Accuracy Log". The short forms read as jargon to someone who
-   * has not used the page yet, which is exactly who a nav label is for. No
-   * route moved, so nothing needs redirecting.
-   */
-  { href: '/strength', label: 'Stock Strength', icon: '⇅' },
+  { href: '/', label: 'Home', icon: '◎', match: ['/dashboard'] },
   { href: '/scanner', label: 'Scanner', icon: '⌕' },
-  // `/` and `/ticker` both land a symbol here, so they light the same item.
-  // Kept as "Decision" on purpose — it is the one page whose name is the
-  // question the reader arrived with. Its subtitle does the explaining.
-  { href: '/decision', label: 'Decision', icon: '◈' },
+  // `/` and `/ticker` both land a symbol on the ticker workspace.
+  { href: '/ticker', label: 'Ticker Search', icon: '⌕', match: ['/decision'] },
   { href: '/watchlist', label: 'Watchlist', icon: '★' },
+];
+
+/*
+ * The specialist links, under "More". Same labels as before — "Stock
+ * Strength", not "Strength"; "Options Flow", not "Flow" — because the short
+ * forms read as jargon to someone who has not used the page yet.
+ */
+const MORE: NavItem[] = [
+  { href: '/strength', label: 'Stock Strength', icon: '⇅' },
+  { href: '/sectors', label: 'Sector Momentum', icon: '◆' },
   { href: '/flow', label: 'Options Flow', icon: '⇄' },
+  { href: '/forecast', label: 'Forecast', icon: '⟿' },
   { href: '/analogues', label: 'Analogues', icon: '⟲' },
   // The log is the record; /history is the same record drawn against price.
   { href: '/log', label: 'Track Record', icon: '✓', match: ['/history'] },
   // Digest and the morning post were one day's writing split over two pages.
   { href: '/daily', label: 'Daily', icon: '≡', match: ['/digest', '/post'] },
+  { href: '/status', label: 'Status', icon: '◇' },
   { href: '/guide', label: 'Guide', icon: '?' },
 ];
 
@@ -99,6 +111,7 @@ function writeCollapsed(value: boolean): void {
 export function Sidebar() {
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const collapsed = useSyncExternalStore(
     subscribeCollapsed,
@@ -119,39 +132,63 @@ export function Sidebar() {
   // Width lives in globals.css under `.gd-sidebar[data-collapsed]` — see the
   // comment there for why it is not a Tailwind responsive utility.
 
+  const renderLink = (item: NavItem) => {
+    const active = isActive(item);
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        aria-current={active ? 'page' : undefined}
+        /*
+         * Repeats the subtitle already on the page rather than adding
+         * anything: this is a desktop-hover convenience, and nothing that
+         * matters may live behind hover alone.
+         */
+        title={
+          collapsed
+            ? `${item.label} — ${PAGE_DESCRIPTIONS[item.href] ?? ''}`.replace(/ — $/, '')
+            : PAGE_DESCRIPTIONS[item.href]
+        }
+        onClick={() => setDrawerOpen(false)}
+        className={`group flex items-center gap-3 border-l-2 px-2.5 py-2 text-xs tracking-[0.12em] transition-colors ${
+          active
+            ? 'border-l-pos bg-pos/10 text-pos'
+            : 'border-l-transparent text-term-faint hover:bg-term-panel/60 hover:text-term-dim'
+        }`}
+      >
+        <span aria-hidden className="w-4 shrink-0 text-center text-sm leading-none">
+          {item.icon}
+        </span>
+        <span className={collapsed ? 'lg:sr-only' : ''}>{item.label}</span>
+      </Link>
+    );
+  };
+
+  // Auto-expand "More" when the current page lives inside it, so the active
+  // item is never hidden behind a collapsed menu.
+  const moreActive = MORE.some(isActive);
+  const showMore = moreOpen || moreActive;
+
   const nav = (
     <nav aria-label="Sections" className="flex flex-col gap-0.5 px-2">
-      {NAV.map((item) => {
-        const active = isActive(item);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? 'page' : undefined}
-            /*
-             * Repeats the subtitle already on the page rather than adding
-             * anything: this is a desktop-hover convenience, and nothing that
-             * matters may live behind hover alone.
-             */
-            title={
-              collapsed
-                ? `${item.label} — ${PAGE_DESCRIPTIONS[item.href] ?? ''}`.replace(/ — $/, '')
-                : PAGE_DESCRIPTIONS[item.href]
-            }
-            onClick={() => setDrawerOpen(false)}
-            className={`group flex items-center gap-3 border-l-2 px-2.5 py-2 text-xs tracking-[0.12em] transition-colors ${
-              active
-                ? 'border-l-pos bg-pos/10 text-pos'
-                : 'border-l-transparent text-term-faint hover:bg-term-panel/60 hover:text-term-dim'
-            }`}
-          >
-            <span aria-hidden className="w-4 shrink-0 text-center text-sm leading-none">
-              {item.icon}
-            </span>
-            <span className={collapsed ? 'lg:sr-only' : ''}>{item.label}</span>
-          </Link>
-        );
-      })}
+      {NAV.map(renderLink)}
+
+      <button
+        type="button"
+        onClick={() => setMoreOpen((v) => !v)}
+        aria-expanded={showMore}
+        title={collapsed ? 'More' : undefined}
+        className={`group flex items-center gap-3 border-l-2 border-l-transparent px-2.5 py-2 text-xs tracking-[0.12em] transition-colors ${
+          moreActive ? 'text-term-dim' : 'text-term-faint'
+        } hover:bg-term-panel/60 hover:text-term-dim`}
+      >
+        <span aria-hidden className="w-4 shrink-0 text-center text-sm leading-none">
+          {showMore ? '▾' : '▸'}
+        </span>
+        <span className={collapsed ? 'lg:sr-only' : ''}>More</span>
+      </button>
+
+      {showMore && <div className="flex flex-col gap-0.5 lg:pl-2">{MORE.map(renderLink)}</div>}
     </nav>
   );
 
