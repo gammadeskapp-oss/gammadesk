@@ -211,16 +211,17 @@ async function build(symbol: string): Promise<DecisionResult> {
   const { summary, spot } = positioning;
 
   /*
-   * `spot` is the chain snapshot's own price, on the many-minute chain cache. It
-   * is used below to *build* and *classify* the levels — which strikes count as
-   * walls, which side of the flip they sit on — so those stay stable within a
-   * cache window and do not flicker as price wobbles.
+   * `spot` is the book's anchor price. `getPositioningForSymbol` already overlays
+   * the live Cboe quote onto the chain's echoed spot when one is available (see
+   * `effectiveSpot` in `lib/positioning.ts`), because on a Polygon options plan
+   * that echo freezes at the open and would classify every wall around a stale
+   * price. So the levels below — which strikes count as walls, which side of the
+   * flip they sit on — are built against the live price, not a session-old one.
    *
-   * `displaySpot` is a live quote on its own short cache (see `lib/spot.ts`),
-   * used for what the reader is quoted: the price itself and its distance to the
-   * flip and the walls. So the levels come from the (cheap, stable) chain and
-   * the price tracks the tape. Falls back to the chain spot if the live quote
-   * is unavailable.
+   * `displaySpot` re-reads the same short-cached live quote for the price the
+   * reader is shown and its distance to the flip and the walls. It equals `spot`
+   * whenever the overlay took; the fetch is cached, so this costs nothing extra
+   * and keeps a sane fallback if the live quote is briefly unavailable.
    */
   const live = await getSpotQuote(symbol).catch(() => null);
   const displaySpot = live?.price ?? spot;

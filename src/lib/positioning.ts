@@ -11,6 +11,7 @@ import { readLastGoodSnapshot, saveLastGoodSnapshot } from './lastSnapshot';
 import { readCachedPositioning, writeCachedPositioning } from './positioningCache';
 import { schedulePopulate } from './schedulePopulate';
 import { fetchPolygonChain } from './polygon';
+import { getSpotQuote } from './spot';
 import { formatAsOf } from './time';
 import type { DataSource, PositioningData, WeightBasis } from './types';
 
@@ -215,18 +216,62 @@ function cachedSnapshot(): Promise<RawSnapshot> {
   return cached(snapshotCacheKey(), config.cacheSeconds, loadSnapshot);
 }
 
+/**
+ * How far a live overlay may sit from the chain's echoed spot and still be
+ * trusted. Mirrors the sanity band `fetchPolygonChain` applies to the echo
+ * itself: a live quote wilder than this is treated as the broken one and the
+ * chain's price is kept.
+ */
+const LIVE_SPOT_MAX_DRIFT = 0.15;
+
+/**
+ * The price the book should be measured against.
+ *
+ * The chain's own `spot` is an echo on the many-minute chain cache, and on a
+ * Polygon options plan that echo freezes at the open — measured 28 Sep 2026
+ * still carrying the prior close ~20 min into the session (see `lib/spot.ts`).
+ * Everything built from it — which strikes are walls, which side of the flip a
+ * strike sits on, the "← spot" marker, the greeks — is then anchored to a stale
+ * price while the tape has moved on, so the whole levels view reads a session
+ * behind.
+ *
+ * When a live quote is available and within a sane band of the echo, it is the
+ * anchor instead. Cboe is the spot source of record (keyless, carries its own
+ * trade timestamp), so this corrects the one field the frozen echo gets wrong
+ * while leaving the open-interest book — which genuinely only changes once a
+ * day — exactly as fetched.
+ */
+function effectiveSpot(chainSpot: number, liveSpot: number | null | undefined): number {
+  if (
+    typeof liveSpot === 'number' &&
+    Number.isFinite(liveSpot) &&
+    liveSpot > 0 &&
+    chainSpot > 0 &&
+    Math.abs(liveSpot - chainSpot) / chainSpot < LIVE_SPOT_MAX_DRIFT
+  ) {
+    return liveSpot;
+  }
+  return chainSpot;
+}
+
 function toPositioning(
   raw: RawSnapshot,
   expirationCount: number,
   symbol = config.symbol,
   weightBy: WeightBasis = 'openInterest',
+  /**
+   * A live spot to anchor the book to, overriding the chain's frozen echo (see
+   * `effectiveSpot`). Null keeps the chain's own price, which is the right
+   * behaviour when no live quote could be read.
+   */
+  liveSpot: number | null = null,
 ): PositioningData {
   const now = new Date();
   const { snapshot, source, notes } = raw;
 
   return buildPositioning(snapshot.contracts, {
     symbol,
-    spot: snapshot.spot,
+    spot: effectiveSpot(snapshot.spot, liveSpot),
     riskFreeRate: config.riskFreeRate,
     dividendYield: config.dividendYield,
     expirationCount,
@@ -262,7 +307,19 @@ export async function getPositioning(
   options: { force?: boolean } = {},
 ): Promise<PositioningData> {
   const compute = async (): Promise<PositioningData> => {
-    const data = toPositioning(await cachedSnapshot(), config.expirationCount);
+    // The live spot overlay (see `effectiveSpot`) is fetched here, at compute
+    // time, so it is baked into the Blob the refresher cron writes. The cron
+    // recomputes every 5 minutes through the trading day, so the persisted
+    // snapshot tracks the tape to within one cycle instead of freezing on the
+    // chain's open-time echo. Best-effort: a dead quote leaves the chain spot.
+    const live = await getSpotQuote(config.symbol).catch(() => null);
+    const data = toPositioning(
+      await cachedSnapshot(),
+      config.expirationCount,
+      config.symbol,
+      'openInterest',
+      live?.price ?? null,
+    );
     // Warm the cross-instance Blob cache so the next cold lambda skips the parse.
     await writeCachedPositioning(data);
     return data;
@@ -398,8 +455,19 @@ export async function getPositioningForSymbol(
   return cached(
     `positioning-symbol:${symbol}:${expirationCount}:${config.strikesEachSide}:${weightBy}`,
     config.cacheSeconds,
-    async () =>
-      toPositioning(await cachedSymbolSnapshot(symbol), expirationCount, symbol, weightBy),
+    async () => {
+      // Same live-spot overlay as the configured symbol: Cboe is keyless, so a
+      // live quote is available for on-demand tickers too, and the chain echo
+      // freezes for them the same way.
+      const live = await getSpotQuote(symbol).catch(() => null);
+      return toPositioning(
+        await cachedSymbolSnapshot(symbol),
+        expirationCount,
+        symbol,
+        weightBy,
+        live?.price ?? null,
+      );
+    },
   );
 }
 
