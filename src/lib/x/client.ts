@@ -15,11 +15,16 @@ import type { PostResult } from './types';
  */
 
 const TWEET_URL = 'https://api.twitter.com/2/tweets';
-// Media upload uses the v1.1 endpoint: it is the stable, universally-used media
-// upload for OAuth 1.0a user context, and the v2 simple-upload endpoint rejects
-// this multipart request outright (verified live: HTTP 400). The returned
-// media id is then attached to a v2 tweet — the standard cross-version pattern.
-const MEDIA_URL = 'https://upload.twitter.com/1.1/media/upload.json';
+// Media upload uses the v2 chunked (INIT/APPEND/FINALIZE) flow on api.x.com.
+// The legacy v1.1 upload host (upload.twitter.com/1.1/media/upload.json) was
+// retired on 2025-03-31. The v2 single-POST simple upload is not a working
+// substitute either — it returns HTTP 400 — so v2 exposes the upload only
+// through three RESTful sub-endpoints, each signed with the same OAuth 1.0a
+// user-context header. Verified live 2026-10-04: initialize/append/finalize all
+// 200, returning a media id that attaches to a v2 tweet.
+const MEDIA_INITIALIZE_URL = 'https://api.x.com/2/media/upload/initialize';
+const mediaAppendUrl = (id: string) => `https://api.x.com/2/media/upload/${id}/append`;
+const mediaFinalizeUrl = (id: string) => `https://api.x.com/2/media/upload/${id}/finalize`;
 
 /** Read at request time via bracket access so a bundler cannot inline it. */
 function env(name: string): string | undefined {
@@ -48,54 +53,92 @@ export interface MediaUploadResult {
   error?: string;
 }
 
+/** One failed-step result, with the step named so a log shows where it broke. */
+function uploadFailed(step: string, status: number, raw: string): MediaUploadResult {
+  const detail = raw.slice(0, 200).replace(/\s+/g, ' ').trim();
+  return { ok: false, error: `X media ${step} HTTP ${status}${detail ? `: ${detail}` : ''}.` };
+}
+
 /**
- * Upload one image to X (v1.1 media upload, simple non-chunked), signed with
- * OAuth 1.0a. The multipart body is not part of the signature base string (only
- * query/form-urlencoded params are), so the header is signed with the oauth
- * params alone — the same as the JSON tweet POST.
+ * Upload one image to X via the v2 chunked flow, signed with OAuth 1.0a.
  *
- * Returns the media id (`media_id_string`) to attach to a v2 tweet. Never
- * throws; any failure comes back as `{ ok: false }` so the caller can fall back
- * to a text-only post.
+ * Three steps, each its own request with its own OAuth header (none of the
+ * bodies — JSON or multipart — is part of the signature base string, so the
+ * header is signed with the oauth params alone, same as the JSON tweet POST):
+ *   1. POST /2/media/upload/initialize  (JSON: media_type, total_bytes,
+ *      media_category) → returns the media id.
+ *   2. POST /2/media/upload/{id}/append (multipart: media, segment_index). The
+ *      poster image is a single small PNG, so one segment is always enough.
+ *   3. POST /2/media/upload/{id}/finalize → the id is now attachable to a tweet.
+ *
+ * Returns that media id. Never throws; any failure comes back as
+ * `{ ok: false }` with the failing step named, so the caller can fall back to a
+ * text-only post.
  */
 export async function uploadMedia(bytes: Uint8Array, mime = 'image/png'): Promise<MediaUploadResult> {
   const creds = readCredentials();
   if (!creds) return { ok: false, error: 'X credentials are not configured.' };
 
-  const authHeader = buildAuthHeader('POST', MEDIA_URL, creds);
-  const form = new FormData();
-  // Copy into a fresh ArrayBuffer so the Blob part is a plain ArrayBuffer (not
-  // a possibly-shared/offset view), which the DOM typings require.
-  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-  form.append('media', new Blob([ab], { type: mime }), 'poster.png');
-  form.append('media_category', 'tweet_image');
-
-  let response: Response;
+  // --- 1. initialize ---
+  let mediaId: string;
   try {
-    response = await fetch(MEDIA_URL, {
+    const res = await fetch(MEDIA_INITIALIZE_URL, {
+      method: 'POST',
+      headers: { Authorization: buildAuthHeader('POST', MEDIA_INITIALIZE_URL, creds), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ media_type: mime, total_bytes: bytes.byteLength, media_category: 'tweet_image' }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const raw = await res.text().catch(() => '');
+    if (!res.ok) return uploadFailed('initialize', res.status, raw);
+    const j = JSON.parse(raw) as { data?: { id?: string } };
+    const id = j.data?.id;
+    if (!id) return { ok: false, error: 'X media initialize returned no media id.' };
+    mediaId = String(id);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'X media initialize failed.' };
+  }
+
+  // --- 2. append (single segment) ---
+  try {
+    const appendUrl = mediaAppendUrl(mediaId);
+    const form = new FormData();
+    // Copy into a fresh ArrayBuffer so the Blob part is a plain ArrayBuffer (not
+    // a possibly-shared/offset view), which the DOM typings require.
+    const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    form.append('media', new Blob([ab], { type: mime }), 'poster.png');
+    form.append('segment_index', '0');
+    const res = await fetch(appendUrl, {
       method: 'POST',
       // Content-Type (with boundary) is set by fetch from the FormData body.
-      headers: { Authorization: authHeader },
+      headers: { Authorization: buildAuthHeader('POST', appendUrl, creds) },
       body: form,
       signal: AbortSignal.timeout(30_000),
     });
+    if (!res.ok) return uploadFailed('append', res.status, await res.text().catch(() => ''));
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Media upload failed.' };
+    return { ok: false, error: error instanceof Error ? error.message : 'X media append failed.' };
   }
 
-  const raw = await response.text().catch(() => '');
-  if (!response.ok) {
-    const detail = raw.slice(0, 200).replace(/\s+/g, ' ').trim();
-    return { ok: false, error: `X media upload HTTP ${response.status}${detail ? `: ${detail}` : ''}.` };
-  }
+  // --- 3. finalize ---
   try {
-    const j = JSON.parse(raw) as { data?: { id?: string }; media_id_string?: string; id?: string };
-    const id = j.data?.id ?? j.media_id_string ?? j.id;
-    if (id) return { ok: true, mediaId: String(id) };
-  } catch {
-    // fall through
+    const finalizeUrl = mediaFinalizeUrl(mediaId);
+    const res = await fetch(finalizeUrl, {
+      method: 'POST',
+      headers: { Authorization: buildAuthHeader('POST', finalizeUrl, creds) },
+      signal: AbortSignal.timeout(30_000),
+    });
+    const raw = await res.text().catch(() => '');
+    if (!res.ok) return uploadFailed('finalize', res.status, raw);
+    // finalize echoes the id; fall back to the initialize id if the body is thin.
+    try {
+      const j = JSON.parse(raw) as { data?: { id?: string } };
+      return { ok: true, mediaId: String(j.data?.id ?? mediaId) };
+    } catch {
+      return { ok: true, mediaId };
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'X media finalize failed.' };
   }
-  return { ok: false, error: 'X media upload returned no media id.' };
 }
 
 /**
