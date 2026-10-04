@@ -56,8 +56,13 @@ export interface BuiltPost {
   editorial: boolean;
   /** Editorial "as of" label, for the log. */
   asOfLabel?: string;
-  /** A stored poster image to try to attach (editorial slots only now). */
-  image?: { date: string; type: 'weekly' | 'earnings' };
+  /**
+   * A stored poster image to try to attach. The editorial slots (weekly,
+   * earnings) and the two market slots (morning, closing) all carry one; the
+   * runner falls back to text-only whenever no image is stored for the day or
+   * the upload is rejected, so setting this is always safe.
+   */
+  image?: { date: string; type: 'morning' | 'closing' | 'weekly' | 'earnings' };
   /** An operational note folded into a successful post's log line. */
   note?: string;
   /** For an intraday post: which situation the phrase bank matched. */
@@ -68,18 +73,18 @@ export interface BuiltPost {
   wild?: boolean;
 }
 
-function fromComposed(c: Composed, note?: string): BuiltPost {
-  return { text: c.text, length: c.length, numbers: c.numbers, dataIso: c.dataIso, editorial: false, note };
+function fromComposed(c: Composed, note?: string, image?: BuiltPost['image']): BuiltPost {
+  return { text: c.text, length: c.length, numbers: c.numbers, dataIso: c.dataIso, editorial: false, note, image };
 }
 
 async function buildMorning(ctx: BuildContext, now: Date): Promise<BuiltPost> {
   const snapshot = ctx.snapshot ?? (await loadDeskSnapshot(now));
-  return fromComposed(composeMorning(snapshot));
+  return fromComposed(composeMorning(snapshot), undefined, { date: marketToday(now), type: 'morning' });
 }
 
 async function buildClosing(ctx: BuildContext, now: Date): Promise<BuiltPost> {
   const snapshot = ctx.snapshot ?? (await loadDeskSnapshot(now));
-  return fromComposed(composeClosing(snapshot));
+  return fromComposed(composeClosing(snapshot), undefined, { date: marketToday(now), type: 'closing' });
 }
 
 /**
