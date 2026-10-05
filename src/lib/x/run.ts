@@ -202,24 +202,36 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
 
   // --- attach the poster image, when one is available -------------------------
   //
-  // Morning and closing render their image in-app from the structured poster
-  // payload the Cowork task POSTs with the brief (lib/x/poster). Weekly and
-  // earnings still attach a pre-rendered PNG supplied in the brief. Either way a
-  // missing image just means text-only — never a blocked post.
+  // Morning and closing prefer the image rendered in-app from the structured
+  // poster payload the Cowork task POSTs with the brief (lib/x/poster), but fall
+  // back to a pre-rendered PNG the brief supplied via `image` — so a post is
+  // never left text-only just because the structured poster was absent or the
+  // render failed, as long as *some* image was received. Weekly and earnings
+  // only ever use the pre-rendered PNG. A missing image just means text-only —
+  // never a blocked post.
 
   let mediaId: string | undefined;
   let imageNote: string | undefined;
   const imageRef = built.image ?? null;
   if (imageRef) {
-    const bytes =
-      imageRef.type === 'morning' || imageRef.type === 'closing'
-        ? await loadPosterImage(imageRef.date, imageRef.type).catch(() => null)
-        : await readImageBytes(imageRef.date, imageRef.type).catch(() => null);
+    let bytes: Uint8Array | null = null;
+    let source = '';
+    if (imageRef.type === 'morning' || imageRef.type === 'closing') {
+      bytes = await loadPosterImage(imageRef.date, imageRef.type).catch(() => null);
+      source = 'rendered';
+      if (!bytes) {
+        bytes = await readImageBytes(imageRef.date, imageRef.type).catch(() => null);
+        source = 'cowork png';
+      }
+    } else {
+      bytes = await readImageBytes(imageRef.date, imageRef.type).catch(() => null);
+      source = 'cowork png';
+    }
     if (bytes) {
       const upload = await uploadMedia(bytes);
       if (upload.ok) {
         mediaId = upload.mediaId;
-        imageNote = 'with image';
+        imageNote = `with image (${source})`;
       } else {
         imageNote = 'image upload failed, posted text-only';
       }

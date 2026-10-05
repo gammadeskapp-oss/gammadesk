@@ -12,7 +12,12 @@ const nextConfig = {
    * several that could grow to read it.
    */
   outputFileTracingIncludes: {
-    '/*': ['data/econ-consensus.json'],
+    // econ-consensus.json: read by fs at runtime (not imported), so keep it in
+    // the bundle. The X poster fonts are read via `new URL(import.meta.url)` in
+    // lib/x/poster/fonts.ts; list them too so every route that renders the
+    // poster — including the deep import chain through /api/x/tick → run.ts —
+    // ships the woff files and never falls back to text-only for a missing font.
+    '/*': ['data/econ-consensus.json', 'src/lib/x/poster/fonts/*.woff'],
   },
   async redirects() {
     return [
