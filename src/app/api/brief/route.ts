@@ -4,6 +4,26 @@ import { saveBrief, saveClosingBrief, saveWeeklyBrief } from '@/lib/x/brief';
 import { saveImage } from '@/lib/x/imageStore';
 import { decodeImageField } from '@/lib/x/media';
 import { validateBrief, validateClosingBrief, validateWeeklyBrief } from '@/lib/x/text';
+import { savePosterData, validatePoster, type PosterKind } from '@/lib/x/poster';
+
+/**
+ * Store the optional full `poster` payload that rides with a morning/closing
+ * brief, so the app can render the same image the Discord poster shows. Kept
+ * non-fatal: a malformed poster is reported but never drops the text brief that
+ * already validated — the post simply falls back to text-only that run.
+ */
+async function storePosterIfPresent(
+  raw: unknown,
+  kind: PosterKind,
+  date: string,
+): Promise<{ saved: boolean; error?: string }> {
+  const poster = raw && typeof raw === 'object' ? (raw as { poster?: unknown }).poster : undefined;
+  if (poster === undefined || poster === null) return { saved: false };
+  const result = validatePoster(poster, kind, date);
+  if (!result.ok || !result.data) return { saved: false, error: result.error };
+  await savePosterData(result.data);
+  return { saved: true };
+}
 
 /**
  * Ingest the daily Cowork briefs — the morning "Desk" brief and the "Closing
@@ -24,6 +44,12 @@ import { validateBrief, validateClosingBrief, validateWeeklyBrief } from '@/lib/
  *   weekly:  { type:"weekly", weekEnding, spyWeekPct, qqqWeekPct, iwmWeekPct,
  *              vix, weekStory, nextWeek[] }
  *            — *WeekPct are the week's percent changes, vix the index level.
+ *
+ * Morning and closing bodies may also carry an optional `poster` object — the
+ * full structured poster the app renders for the X image (every section the
+ * Discord poster shows). It is validated and stored separately; a malformed
+ * poster is reported but never drops the text brief. See `lib/x/poster/types`
+ * and `docs/x-poster-cowork.md`.
  */
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -93,8 +119,9 @@ export async function POST(request: NextRequest) {
       }
       await saveClosingBrief(result.brief);
       if (decoded.bytes) await saveImage(result.brief.date, 'closing', decoded.bytes);
+      const poster = await storePosterIfPresent(raw, 'closing', result.brief.date);
       return NextResponse.json(
-        { ok: true, type: 'closing', date: result.brief.date, movers: result.brief.topMovers.length, image: decoded.bytes ? { saved: true, bytes: decoded.bytes.length } : { saved: false } },
+        { ok: true, type: 'closing', date: result.brief.date, movers: result.brief.topMovers.length, image: decoded.bytes ? { saved: true, bytes: decoded.bytes.length } : { saved: false }, poster },
         { headers: NO_STORE },
       );
     }
@@ -120,8 +147,9 @@ export async function POST(request: NextRequest) {
     }
     await saveBrief(result.brief);
     if (decoded.bytes) await saveImage(result.brief.date, 'morning', decoded.bytes);
+    const poster = await storePosterIfPresent(raw, 'morning', result.brief.date);
     return NextResponse.json(
-      { ok: true, type: 'morning', date: result.brief.date, earnings: result.brief.earningsToday.length, image: decoded.bytes ? { saved: true, bytes: decoded.bytes.length } : { saved: false } },
+      { ok: true, type: 'morning', date: result.brief.date, earnings: result.brief.earningsToday.length, image: decoded.bytes ? { saved: true, bytes: decoded.bytes.length } : { saved: false }, poster },
       { headers: NO_STORE },
     );
   } catch (error) {

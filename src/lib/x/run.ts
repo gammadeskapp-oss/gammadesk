@@ -9,6 +9,7 @@ import { ageMinutes, checkPost, limitCashtags, MAX_DATA_AGE_MIN, xLen } from './
 import { postingEnabledFromValue } from './flags';
 import { checkNumbers, checkText } from './guard';
 import { markImagePosted, readImageBytes } from './imageStore';
+import { loadPosterImage } from './poster';
 import { isTradingDay } from './schedule';
 import {
   alreadyPosted,
@@ -199,13 +200,21 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
     return { ...base, status: 'skipped', reason, text: built.text };
   }
 
-  // --- attach the poster image, when one was supplied (editorial only) --------
+  // --- attach the poster image, when one is available -------------------------
+  //
+  // Morning and closing render their image in-app from the structured poster
+  // payload the Cowork task POSTs with the brief (lib/x/poster). Weekly and
+  // earnings still attach a pre-rendered PNG supplied in the brief. Either way a
+  // missing image just means text-only — never a blocked post.
 
   let mediaId: string | undefined;
   let imageNote: string | undefined;
   const imageRef = built.image ?? null;
   if (imageRef) {
-    const bytes = await readImageBytes(imageRef.date, imageRef.type).catch(() => null);
+    const bytes =
+      imageRef.type === 'morning' || imageRef.type === 'closing'
+        ? await loadPosterImage(imageRef.date, imageRef.type).catch(() => null)
+        : await readImageBytes(imageRef.date, imageRef.type).catch(() => null);
     if (bytes) {
       const upload = await uploadMedia(bytes);
       if (upload.ok) {
