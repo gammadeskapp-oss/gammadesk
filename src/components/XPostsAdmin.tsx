@@ -482,6 +482,38 @@ export function XPostsAdmin() {
         </div>
       </section>
 
+      {/* App-rendered X poster — compare with the Cowork/Discord image above */}
+      <section className="space-y-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="label-xs">App-rendered X poster (what gets attached)</h2>
+          <span className="text-2xs text-term-faint">sample design · X size ≤1200×1500</span>
+        </div>
+        <p className="text-2xs text-term-faint">
+          Rendered in-app from the structured poster the Cowork task sends with the brief. Compare with
+          the Cowork/Discord image above. Shows the sample layout until real data flows; links open
+          today&rsquo;s real render and the full (uncapped) version.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {(['morning', 'closing'] as const).map((type) => (
+            <div key={type} className="panel px-3.5 py-3">
+              <div className="flex items-center justify-between text-2xs">
+                <span className="font-bold uppercase tracking-[0.12em] text-term-dim">{type}</span>
+                <span className="flex gap-2">
+                  <a className="text-pos hover:underline" href={`/api/admin/x-poster-preview?type=${type}&variant=x`} target="_blank" rel="noreferrer">today</a>
+                  <a className="text-pos hover:underline" href={`/api/admin/x-poster-preview?type=${type}&variant=full&sample=1`} target="_blank" rel="noreferrer">full</a>
+                </span>
+              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element -- owner-only render streamed from a route; next/image would proxy it and defeat the auth. */}
+              <img
+                src={`/api/admin/x-poster-preview?type=${type}&variant=x&sample=1`}
+                alt={`${type} X poster (sample)`}
+                className="mt-2 w-full rounded border border-term-line"
+              />
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Previews */}
       <section className="space-y-2">
         <div className="flex items-baseline justify-between gap-2">
