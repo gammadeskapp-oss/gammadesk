@@ -106,6 +106,16 @@ if (stage === 'gamma' || stage === 'all') {
   console.log(`[gamma] source line: ${outcome.stored.source}`);
 }
 
+if (stage === 'earnings' || stage === 'all') {
+  const { runEarningsStep } = await import('../src/lib/scanner/earningsStore.ts');
+  const started = Date.now();
+  const outcome = await runEarningsStep();
+  console.log(
+    `[earnings] dated=${outcome.dated}/${outcome.requested} in ${((Date.now() - started) / 1000).toFixed(0)}s`,
+  );
+  console.log(`[earnings] source: ${outcome.source}`);
+}
+
 if (stage === 'scan' || stage === 'all') {
   const { runScanner } = await import('../src/lib/scanner/run.ts');
   const { DEFAULT_FILTERS, scoreAndJudge, buildFunnel } = await import(
@@ -143,6 +153,16 @@ if (stage === 'scan' || stage === 'all') {
   }
   console.log('NOTES:');
   for (const note of result.notes) console.log(`  - ${note}`);
+}
+
+if (stage === 'contracts' || stage === 'all') {
+  const { gradeStoredScanContracts } = await import('../src/lib/scanner/run.ts');
+  const started = Date.now();
+  const outcome = await gradeStoredScanContracts();
+  console.log(
+    `[contracts] graded=${outcome.graded}/${outcome.targeted} failures=${outcome.failures.length} ` +
+      `skipped=${outcome.skipped.length} in ${((Date.now() - started) / 1000).toFixed(0)}s`,
+  );
 }
 
 

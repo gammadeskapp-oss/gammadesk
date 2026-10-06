@@ -380,6 +380,26 @@ export const config = {
       scanTimeEt: (process.env.GAMMADESK_SCAN_TIME_ET ?? '09:35').trim(),
       /** When the candidate gamma refresh runs, same caveat. */
       gammaTimeEt: (process.env.GAMMADESK_SCAN_GAMMA_TIME_ET ?? '08:30').trim(),
+      /** When the earnings-dates step runs (its own job, whole index). */
+      earningsTimeEt: (process.env.GAMMADESK_SCAN_EARNINGS_TIME_ET ?? '09:00').trim(),
+      /** When the contract-grading step runs (top names, reads the stored scan). */
+      contractsTimeEt: (process.env.GAMMADESK_SCAN_CONTRACTS_TIME_ET ?? '09:40').trim(),
+      /**
+       * By when the scan must have stored, in New York wall-clock, before the
+       * pipeline's health check emails the owner. A scan that has not saved by
+       * this time is the one failure worth a push rather than a log line.
+       */
+      healthDeadlineEt: (process.env.GAMMADESK_SCAN_HEALTH_DEADLINE_ET ?? '10:00').trim(),
+      /**
+       * Fraction of gamma chains allowed to fail before the health check alerts.
+       * More than this missing is a provider problem the owner should hear about.
+       */
+      chainFailAlertPct: Math.min(
+        1,
+        Math.max(0, num(process.env.GAMMADESK_SCAN_CHAIN_FAIL_ALERT_PCT, 0.1)),
+      ),
+      /** How many times a failed pipeline step is retried on later ticks. */
+      maxStepAttempts: Math.max(1, num(process.env.GAMMADESK_SCAN_MAX_STEP_ATTEMPTS, 3)),
 
       /**
        * Chains the 8:30 job may request in one run.

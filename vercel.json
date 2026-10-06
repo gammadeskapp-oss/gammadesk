@@ -14,20 +14,8 @@
       "schedule": "* 13-21 * * 1-5"
     },
     {
-      "path": "/api/scanner/gamma?when=scheduled",
-      "schedule": "30 12 * * 1-5"
-    },
-    {
-      "path": "/api/scanner/gamma?when=scheduled",
-      "schedule": "30 13 * * 1-5"
-    },
-    {
-      "path": "/api/scanner/run?when=scheduled",
-      "schedule": "35 13 * * 1-5"
-    },
-    {
-      "path": "/api/scanner/run?when=scheduled",
-      "schedule": "35 14 * * 1-5"
+      "path": "/api/scanner/pipeline",
+      "schedule": "*/5 12-15 * * 1-5"
     },
     {
       "path": "/api/trackrecord/log?when=scheduled",

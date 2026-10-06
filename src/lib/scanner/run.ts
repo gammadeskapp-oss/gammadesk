@@ -10,6 +10,7 @@ import { archiveScan } from './archive';
 import { readMovingAverages } from './averages';
 import { readExtension } from './evaluate';
 import { lookupEarnings } from './earnings';
+import { readTodaysEarnings } from './earningsStore';
 import { readTodaysGamma } from './gamma';
 import { gradeSymbol } from './optionChain';
 import {
@@ -195,12 +196,26 @@ export async function runScanner(): Promise<ScanResult> {
     notes.push(
       `No same-day gamma refresh was found, so the market regime is unknown and no name carries its own dealer positioning. The ${tuning.gammaTimeEt} ET job either has not run or could not store its result. The nightly cache is deliberately not used as a substitute — it can be four days old. Nothing is dropped for this: the regime is one component of seven and one optional filter, and an unmeasured component is left out of the blend rather than scored zero.`,
     );
-  } else if (gamma.failures.length > 0) {
-    notes.push(
-      `${gamma.failures.length} chain${gamma.failures.length === 1 ? '' : 's'} could not be read at ${tuning.gammaTimeEt} ET: ${gamma.failures
-        .map((f) => f.symbol)
-        .join(', ')}. Those names carry no dealer-positioning context and no option-liquidity reading, so both components are left out of their blend rather than scored zero.`,
-    );
+  } else {
+    /*
+     * The full list of names with no chain, not just the ones that errored.
+     *
+     * `failures` are the chains that threw; `skipped` are the ones abandoned at
+     * the per-symbol deadline or past the budget. Both leave the name with no
+     * dealer-positioning reading, and the note used to list only `failures` —
+     * so a name that timed out (the common case on a slow morning) was missing
+     * from the page's own account of what it could not read. Every name without
+     * a chain is named here now.
+     */
+    const noChain = [
+      ...gamma.failures.map((f) => f.symbol),
+      ...gamma.skipped,
+    ].sort();
+    if (noChain.length > 0) {
+      notes.push(
+        `${noChain.length} chain${noChain.length === 1 ? '' : 's'} could not be read at ${tuning.gammaTimeEt} ET: ${noChain.join(', ')}. Those names carry no dealer-positioning context and no option-liquidity reading, so both components are left out of their blend rather than scored zero.`,
+      );
+    }
   }
 
   // --- score every name ------------------------------------------------------
@@ -308,22 +323,47 @@ export async function runScanner(): Promise<ScanResult> {
     .sort((a, b) => b.score - a.score || a.row.symbol.localeCompare(b.row.symbol))
     .map(({ row }) => row);
 
-  const lookedUp = ordered.slice(0, tuning.earningsLookupN);
-  const earnings = await lookupEarnings(lookedUp.map((r) => r.symbol), scanDate);
+  /*
+   * Earnings come from the 09:00 ET step's store when it has run today — it
+   * looks up the whole index, so every scored name carries a real date. When it
+   * has not run (a cold morning, or the step failed its retries), the scan
+   * falls back to its own inline lookup of the top names so nothing regresses:
+   * the names below the fallback cutoff read `unknown`, which never clears a
+   * name and never removes one.
+   */
+  const storedEarnings = await readTodaysEarnings();
+  let earningsSourceLine: string;
 
-  for (const row of rows) {
-    row.earnings = earnings.bySymbol.get(row.symbol) ?? {
-      state: 'unknown',
-      dateIso: null,
-      daysAway: null,
-      source: `outside the top ${tuning.earningsLookupN} by score, so no date was requested`,
-    };
-  }
-
-  if (lookedUp.length < rows.length) {
+  if (storedEarnings) {
+    for (const row of rows) {
+      row.earnings = storedEarnings.bySymbol.get(row.symbol) ?? {
+        state: 'unknown',
+        dateIso: null,
+        daysAway: null,
+        source: 'not present in the earnings step result',
+      };
+    }
+    earningsSourceLine = storedEarnings.source;
     notes.push(
-      `Earnings dates were looked up for the top ${lookedUp.length} names by score. The remaining ${rows.length - lookedUp.length} carry an unknown date, which never clears a name and never removes one — their watch lines say so. The calendar is batched fifty symbols at a time and the whole index is eleven sequential round trips, which is enough to push the run past its time limit and store nothing.`,
+      `Earnings dates for all ${rows.length} scored names came from the 09:00 ET earnings step. ${storedEarnings.source}`,
     );
+  } else {
+    const lookedUp = ordered.slice(0, tuning.earningsLookupN);
+    const earnings = await lookupEarnings(lookedUp.map((r) => r.symbol), scanDate);
+    for (const row of rows) {
+      row.earnings = earnings.bySymbol.get(row.symbol) ?? {
+        state: 'unknown',
+        dateIso: null,
+        daysAway: null,
+        source: `outside the top ${tuning.earningsLookupN} by score, so no date was requested`,
+      };
+    }
+    earningsSourceLine = earnings.source;
+    if (lookedUp.length < rows.length) {
+      notes.push(
+        `The 09:00 ET earnings step has not stored a result for today, so the scan looked up the top ${lookedUp.length} names by score inline. The remaining ${rows.length - lookedUp.length} carry an unknown date, which never clears a name and never removes one — their watch lines say so.`,
+      );
+    }
   }
 
   const earningsExcluded: ScanResult['earningsExcluded'] = [];
@@ -341,21 +381,22 @@ export async function runScanner(): Promise<ScanResult> {
     }
   }
 
-  // --- the contract check ----------------------------------------------------
+  // --- the contract check: targeted here, graded in the 09:40 step -----------
 
   /*
-   * ## Who gets a chain pulled
+   * ## Who gets a chain pulled — decided here, pulled later
    *
-   * The top `contractTopN` by score, and nothing else. That used to be a
-   * circular decision — contract quality was a scoring component, so the score
-   * chose who was graded and the grade changed the score, and it took two
-   * passes to settle. The contract is a filter now: it can mark a row red and
-   * put a caution on its watch line, and it cannot move a name up or down the
-   * ranking. One ordering, computed once, before any request is spent.
+   * The top `contractTopN` by score, minus the names the default earnings
+   * buffer already removes (spending a chain to grade a name that is reporting
+   * this week buys nothing). The scan only *decides* the target set; the chains
+   * themselves are pulled by the separate 09:40 ET contracts step —
+   * `gradeStoredScanContracts` below — so the scan finishes in seconds and the
+   * slower, quota-sensitive chain pulls get their own function invocation and
+   * can be retried without re-running the whole scan.
    *
-   * Names already carrying a report inside the shipped buffer are skipped:
-   * spending a chain to grade a contract on a name the default earnings buffer
-   * removes buys nothing. They read "not checked", which is true.
+   * Until that step runs, every contract reads "not checked" in grey, which is
+   * unknown and not failed — exactly how it read before, just filled in a few
+   * minutes later instead of inside this run.
    */
   const excludedSymbols = new Set(earningsExcluded.map((e) => e.symbol));
 
@@ -364,62 +405,10 @@ export async function runScanner(): Promise<ScanResult> {
     .slice(0, tuning.contractTopN);
 
   const qualityFailures: string[] = [];
-  const bySymbol = new Map(toGrade.map((row) => [row.symbol, row]));
-
-  /*
-   * In waves, not one at a time.
-   *
-   * The constraint on Cboe is a quota per window rather than a rate, so
-   * concurrency spends no more requests than a sequential loop does — it just
-   * finishes. Graded serially, twenty-five chains took the run past the
-   * platform's five-minute function ceiling on its own, which would have meant
-   * the scan being killed mid-write and storing nothing at all.
-   *
-   * The budget is a backstop and it is deliberately short of the ceiling:
-   * stopping cleanly with some names ungraded stores a usable scan that says
-   * which ones it did not reach, and an ungraded contract already has an
-   * honest rendering. Being killed at the ceiling stores nothing.
-   */
-  const gradeOutcome = await runScan(
-    toGrade.map((row) => row.symbol),
-    async (symbol) => {
-      const row = bySymbol.get(symbol)!;
-      try {
-        row.optionQuality = await gradeSymbol(symbol, row.earnings, 'scan');
-      } catch {
-        /*
-         * A chain that did not answer leaves the badge null, which renders
-         * "contract not checked" in grey. Deliberately not a failed contract:
-         * the provider being unavailable is not a fact about the stock, and
-         * the one thing this page must never do is let a gap in the data read
-         * as a bearish verdict.
-         */
-        qualityFailures.push(symbol);
-      }
-    },
-    {
-      concurrency: SCAN_CONCURRENCY,
-      budgetMs: tuning.contractBudgetMs,
-      maxRequests: toGrade.length,
-    },
-  );
-
-  if (gradeOutcome.skipped.length > 0) {
-    notes.push(
-      `${gradeOutcome.skipped.length} contract check${gradeOutcome.skipped.length === 1 ? '' : 's'} were not reached before the time budget expired: ${gradeOutcome.skipped.join(', ')}. They read "contract not checked", which is what they are.`,
-    );
-  }
-
-  const graded = toGrade.filter((row) => row.optionQuality !== null).length;
-
-  if (qualityFailures.length > 0) {
-    notes.push(
-      `${qualityFailures.length} chain request${qualityFailures.length === 1 ? '' : 's'} failed: ${qualityFailures.join(', ')}. Those names show "contract not checked" rather than a failed contract — the provider being unavailable is not a fact about the stock.`,
-    );
-  }
+  const graded = 0;
 
   notes.push(
-    `Option contracts were checked at scan time for the top ${graded} name${graded === 1 ? '' : 's'} by score, out of ${rows.length} scored. Everything below that reads "contract not checked" in grey until you open it — that is unknown, not failed. Raising the relative-strength cutoff or any other control can bring an unchecked name into view; its contract rule stays grey until it is checked.`,
+    `Option contracts are checked for the top ${toGrade.length} name${toGrade.length === 1 ? '' : 's'} by score (of ${rows.length} scored) by the 09:40 ET contracts step. Until it runs, and for everything below the top ${toGrade.length}, the contract rule reads "contract not checked" in grey — unknown, not failed.`,
   );
 
   /*
@@ -499,7 +488,7 @@ export async function runScanner(): Promise<ScanResult> {
     gammaDate: gamma?.date ?? null,
     gammaRefreshedAt: gamma?.refreshedAt ?? null,
     earningsExcluded,
-    earningsSource: earnings.source,
+    earningsSource: earningsSourceLine,
     qualityChecked: graded,
     qualityTargeted: toGrade.length,
     qualityFailures,
@@ -528,6 +517,127 @@ export async function runScanner(): Promise<ScanResult> {
   await archiveScan(result);
 
   return result;
+}
+
+export interface ContractsStepOutcome {
+  /** Null when there was no stored scan to grade. */
+  date: string | null;
+  targeted: number;
+  graded: number;
+  failures: string[];
+  skipped: string[];
+}
+
+/**
+ * The 09:40 ET contracts step: grade the top names' option chains and write the
+ * grades back onto today's stored scan.
+ *
+ * ## Separate from the scan on purpose
+ *
+ * Pulling option chains is the slow, quota-sensitive half of the morning, and
+ * running it inside the scan made the scan risk the platform's function ceiling
+ * — a single unlucky run would be killed mid-write and store nothing. As its
+ * own step it has a whole invocation to itself, it can be retried without
+ * re-scoring the index, and a scan with no grades yet is already a correct page
+ * (every contract reads "not checked" in grey until this fills them in).
+ *
+ * Idempotent: if the stored scan already has grades, it does nothing. Never
+ * throws — a chain that will not answer leaves its badge grey, which is unknown
+ * and not failed.
+ */
+export async function gradeStoredScanContracts(): Promise<ContractsStepOutcome> {
+  const tuning = config.scanner;
+  const stored = await scanStore.read().catch(() => null);
+  const today = marketToday();
+  const scan = stored?.scans.find((s) => s.date === today) ?? null;
+
+  if (!scan) return { date: null, targeted: 0, graded: 0, failures: [], skipped: [] };
+
+  const excluded = new Set(scan.earningsExcluded.map((e) => e.symbol));
+  // The stored rows are already in score order, so "top N" is just the slice.
+  const toGrade = scan.rows
+    .filter((row) => !excluded.has(row.symbol))
+    .slice(0, tuning.contractTopN);
+
+  // Already graded (a prior tick did it): nothing to do.
+  if (scan.qualityChecked > 0 && toGrade.every((row) => row.optionQuality !== null)) {
+    return {
+      date: today,
+      targeted: toGrade.length,
+      graded: scan.qualityChecked,
+      failures: scan.qualityFailures,
+      skipped: [],
+    };
+  }
+
+  const failures: string[] = [];
+  const bySymbol = new Map(toGrade.map((row) => [row.symbol, row]));
+
+  const outcome = await runScan(
+    toGrade.map((row) => row.symbol),
+    async (symbol) => {
+      const row = bySymbol.get(symbol)!;
+      try {
+        row.optionQuality = await gradeSymbol(symbol, row.earnings, 'scan');
+      } catch {
+        failures.push(symbol);
+      }
+    },
+    {
+      concurrency: SCAN_CONCURRENCY,
+      budgetMs: tuning.contractBudgetMs,
+      maxRequests: toGrade.length,
+    },
+  );
+
+  const graded = toGrade.filter((row) => row.optionQuality !== null).length;
+
+  // Rebuild the contract notes on the stored scan: drop the "checked by the
+  // 09:40 step" placeholder the scan wrote, and record what actually happened.
+  const notes = scan.notes.filter(
+    (n) => !n.startsWith('Option contracts are checked for the top'),
+  );
+  notes.push(
+    `Option contracts were checked for the top ${graded} name${graded === 1 ? '' : 's'} by score, out of ${scan.scored} scored. Everything below reads "contract not checked" in grey — unknown, not failed.`,
+  );
+  if (outcome.skipped.length > 0) {
+    notes.push(
+      `${outcome.skipped.length} contract check${outcome.skipped.length === 1 ? '' : 's'} were not reached before the time budget expired: ${outcome.skipped.join(', ')}. They read "contract not checked".`,
+    );
+  }
+  if (failures.length > 0) {
+    notes.push(
+      `${failures.length} chain request${failures.length === 1 ? '' : 's'} failed: ${failures.join(', ')}. Those names show "contract not checked" rather than a failed contract.`,
+    );
+  }
+
+  const updated: ScanResult = {
+    ...scan,
+    qualityChecked: graded,
+    qualityFailures: failures,
+    notes,
+  };
+
+  try {
+    await scanStore.update((current) => ({
+      scans: current.scans.map((s) => (s.date === today ? updated : s)),
+    }));
+  } catch {
+    // Leave the scan as it was; the grades were computed but not persisted, and
+    // the next tick retries.
+  }
+
+  // Re-archive so the day's record carries the contract grades rather than the
+  // grey placeholders the scan step archived.
+  await archiveScan(updated);
+
+  return {
+    date: today,
+    targeted: toGrade.length,
+    graded,
+    failures,
+    skipped: outcome.skipped,
+  };
 }
 
 /**

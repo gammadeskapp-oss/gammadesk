@@ -9,28 +9,25 @@ import type { MacroAlignment } from '@/lib/redesign/mock';
  * Macro on the Scanner — a "Macro alignment" column plus filters, on the
  * scanner page itself rather than a separate page.
  *
- * Layout-first preview: this is a self-contained demonstration of the column
- * and the filter chips over placeholder rows. The real feature folds the
- * `macro` field and these filters into the existing sortable `ScannerBoard`.
+ * Wired to the real scored list: the page passes the actual top names by score,
+ * each tagged against the live macro backdrop by `macroAlignmentFor`. It used to
+ * render a hardcoded demonstration set (NVDA at 91, an XLU that is not even in
+ * the S&P 500), which sat on the public page above a ranked list that disagreed
+ * with it — so it now takes the same rows the board does and cannot drift from
+ * them.
  */
-interface Row {
+export interface MacroRow {
   symbol: string;
   score: number;
   macro: MacroAlignment;
 }
 
-const ROWS: Row[] = [
-  { symbol: 'NVDA', score: 91, macro: 'conflicted' },
-  { symbol: 'JPM', score: 84, macro: 'rate-sensitive' },
-  { symbol: 'WMT', score: 79, macro: 'defensive' },
-  { symbol: 'CAT', score: 76, macro: 'cyclical' },
-  { symbol: 'XLU', score: 71, macro: 'aligned' },
-  { symbol: 'MU', score: 68, macro: 'event-risk' },
-];
-
-export function ScannerMacroPanel() {
+export function ScannerMacroPanel({ rows: allRows }: { rows: MacroRow[] }) {
   const [active, setActive] = useState<MacroAlignment | null>(null);
-  const rows = active ? ROWS.filter((r) => r.macro === active) : ROWS;
+
+  if (allRows.length === 0) return null;
+
+  const rows = active ? allRows.filter((r) => r.macro === active) : allRows;
 
   return (
     <section className="panel border-l-2 border-l-flip/60 p-4">
@@ -38,7 +35,7 @@ export function ScannerMacroPanel() {
         <div className="flex items-center gap-2">
           <h2 className="label-xs">Macro alignment</h2>
           <span className="text-2xs uppercase tracking-[0.12em] text-term-faint">
-            preview — folds into the ranked list
+            top names, tagged against the macro backdrop
           </span>
         </div>
       </div>
