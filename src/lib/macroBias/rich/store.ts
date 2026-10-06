@@ -28,6 +28,13 @@ export interface RichMacroDoc {
   current: RichMacroBias;
   /** Prior days, newest first. */
   history: RichMacroHistoryEntry[];
+  /**
+   * The last full reading from the PRIOR day, kept with its drivers so the
+   * "what changed" line stays a day-over-day comparison even when the refresh
+   * runs several times in one session (breadth is intraday, so it does). A
+   * history entry carries no drivers, which is why this is stored separately.
+   */
+  prevDay?: RichMacroBias | null;
   updatedAt: string;
 }
 
@@ -50,11 +57,13 @@ export async function readRichMacroDoc(): Promise<RichMacroDoc | null> {
 export async function writeRichMacroDoc(
   current: RichMacroBias,
   history: RichMacroHistoryEntry[],
+  prevDay: RichMacroBias | null = null,
 ): Promise<RichMacroDoc> {
   const doc: RichMacroDoc = {
     schema: SCHEMA,
     current,
     history: history.slice(0, HISTORY_KEEP),
+    prevDay,
     updatedAt: new Date().toISOString(),
   };
   await store.write(doc);

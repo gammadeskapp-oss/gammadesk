@@ -90,8 +90,15 @@ async function refreshRichMacroBias(): Promise<RefreshResult['rich']> {
 
     const prevDoc = await readRichMacroDoc();
     const prev = prevDoc?.current ?? null;
-    // What flipped today versus the last stored reading.
-    current.changed = changedLine(current, prev);
+    const isNewDay = !prev || prev.dateKey !== dateKey;
+
+    // The baseline for "what changed" is always the prior DAY's reading. On a
+    // new day that is the stored `current`; on a same-day re-run — which happens
+    // through the morning because breadth is intraday — it is the carried-over
+    // `prevDay`, so a re-run never compares today against its own earlier self
+    // and reports "no driver changes" by mistake.
+    const baseline = isNewDay ? prev : (prevDoc?.prevDay ?? null);
+    current.changed = changedLine(current, baseline);
 
     let history = prevDoc?.history ?? [];
     // Roll the previous day into history only when the date actually changed;
@@ -107,7 +114,11 @@ async function refreshRichMacroBias(): Promise<RefreshResult['rich']> {
       history = [entry, ...history];
     }
 
-    await writeRichMacroDoc(current, history);
+    // Carry the prior-day reading forward: on a new day it becomes the day that
+    // just ended; on a same-day re-run it stays as it was.
+    const prevDay = isNewDay ? prev : (prevDoc?.prevDay ?? null);
+
+    await writeRichMacroDoc(current, history, prevDay);
     return { stored: true, score: current.score };
   } catch (error) {
     return {
