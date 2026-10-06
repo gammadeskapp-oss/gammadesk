@@ -389,6 +389,7 @@ export type MacroAlignment =
   | 'aligned'
   | 'conflicted'
   | 'event-risk'
+  | 'growth'
   | 'rate-sensitive'
   | 'defensive'
   | 'cyclical';

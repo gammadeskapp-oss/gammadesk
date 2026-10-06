@@ -53,7 +53,15 @@ export function MarketStatusBar({ status }: { status: MarketStatusMock }) {
           <span className="font-bold">{status.phaseLabel}</span>
         </span>
 
-        <DataFreshnessBadge level={status.freshness} label={status.asOfLabel} />
+        {/*
+          No "Live" badge while the market is open: the price feed is 15 minutes
+          delayed, so "Market open" is the one honest label here — the per-page
+          context lines carry the "delayed 15 min · as of …" timestamp. The
+          freshness badge still shows when closed, where "Last close" is true.
+        */}
+        {status.phase !== 'open' && (
+          <DataFreshnessBadge level={status.freshness} label={status.asOfLabel} />
+        )}
 
         <span className="ml-auto flex items-center gap-2 tabular-nums text-2xs text-term-faint">
           {clock && (
