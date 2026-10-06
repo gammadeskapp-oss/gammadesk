@@ -15,6 +15,8 @@ import { DEFAULT_FILTERS, scoreRow } from '@/lib/scanner/score';
 import { SCANNER_TOP_N } from '@/lib/scanner/types';
 import { formatEtClock } from '@/lib/scanner/schedule';
 import { macroAlignmentFor, earningsWithin24h } from '@/lib/redesign/macroAlignment';
+import { getMembership } from '@/lib/rs/membership';
+import { sectorMap } from '@/lib/rs/universe';
 import { formatAsOf } from '@/lib/time';
 
 export const metadata: Metadata = {
@@ -54,6 +56,9 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
   const view = await getScannerView();
   // Reads a stored document, so it costs the scan nothing.
   const breadth = await getBreadth().catch(() => null);
+  // GICS sector per name, for the macro-alignment tags (growth / cyclical / …).
+  const membership = await getMembership().catch(() => null);
+  const sectors = membership ? sectorMap(membership.members) : new Map();
   const store = storeStatus();
   const { scan, latest, gamma, schedule } = view;
 
@@ -74,10 +79,10 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
         .map(({ row, total }) => ({
           symbol: row.symbol,
           score: Math.round(total),
-          macro: macroAlignmentFor(
-            row.symbol,
-            earningsWithin24h(row.earnings.dateIso),
-          ),
+          macro: macroAlignmentFor(row.symbol, {
+            sector: sectors.get(row.symbol.toUpperCase()) ?? null,
+            earningsWithin24h: earningsWithin24h(row.earnings.dateIso),
+          }),
         }))
     : [];
 

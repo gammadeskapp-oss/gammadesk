@@ -41,8 +41,11 @@ import { summarise } from '@/lib/log/types';
 import { readArchive } from '@/lib/scanner/archive';
 import { eventRow } from '@/lib/events';
 import { currentMarketStatus } from '@/lib/events';
+import { getMembership } from '@/lib/rs/membership';
+import { GICS_NAMES, sectorMap, type Gics } from '@/lib/rs/universe';
 import type { PositioningData } from '@/lib/types';
 import { macroAlignmentFor, earningsWithin24h } from './macroAlignment';
+import { macroFitCopy } from './macroFitCopy';
 import type {
   ForwardOutlookMock,
   GammaLevelsMock,
@@ -308,12 +311,25 @@ async function mapLeadership(): Promise<LeadershipMock | null> {
   return { sectors: sectorList, leaders, laggards };
 }
 
+// --- GICS sector lookup ------------------------------------------------------
+
+/**
+ * Symbol → GICS sector, from the weekly membership record. One read feeds every
+ * macro-alignment tag on a page, so the classification never varies by caller.
+ * An empty map (no membership yet) degrades to "no tilt" rather than throwing.
+ */
+async function loadSectorMap(): Promise<Map<string, Gics>> {
+  const m = await getMembership().catch(() => null);
+  return m ? sectorMap(m.members) : new Map();
+}
+
 // --- scanner shortlist -------------------------------------------------------
 
 async function mapScanner(now: Date = new Date()): Promise<ScannerShortlistMock | null> {
   const archive = await readArchive().catch(() => []);
   if (archive.length === 0) return null;
   const latest = archive.slice().sort((a, b) => b.date.localeCompare(a.date))[0];
+  const sectors = await loadSectorMap();
   const shortlist = latest.names
     .slice()
     .sort((a, b) => b.score - a.score)
@@ -321,7 +337,10 @@ async function mapScanner(now: Date = new Date()): Promise<ScannerShortlistMock 
     .map((n) => ({
       symbol: n.symbol,
       score: Math.round(n.score),
-      macro: macroAlignmentFor(n.symbol, earningsWithin24h(n.earningsDateIso, now)),
+      macro: macroAlignmentFor(n.symbol, {
+        sector: sectors.get(n.symbol.toUpperCase()) ?? null,
+        earningsWithin24h: earningsWithin24h(n.earningsDateIso, now),
+      }),
     }));
   // Watchlist membership is client-side only (localStorage), so there is no
   // server-side "what changed on your watchlist" to compute here.
@@ -383,40 +402,26 @@ async function mapTrackRecord(): Promise<TrackRecordMock | null> {
 export async function loadMacroFit(symbol: string, now: Date = new Date()): Promise<MacroFitMock | null> {
   const view = await getRichMacroBias().catch(() => null);
   if (!view) return null;
-  const alignment = macroAlignmentFor(symbol);
-  const backdrop = view.current.direction; // bullish | bearish | neutral
 
-  const sensitivity =
-    alignment === 'rate-sensitive'
-      ? 'Rate-sensitive'
-      : alignment === 'defensive'
-        ? 'Defensive'
-        : alignment === 'cyclical'
-          ? 'Cyclical, growth-geared'
-          : 'No strong macro tilt';
+  const sectors = await loadSectorMap();
+  const sector = sectors.get(symbol.toUpperCase()) ?? null;
+  const category = macroAlignmentFor(symbol, { sector });
 
-  // Defensives align with a risk-off backdrop; cyclicals/rate-sensitives fight
-  // it. The reverse holds when the backdrop is risk-on.
-  let fit: MacroFitMock['fit'] = 'neutral';
-  if (backdrop !== 'neutral' && alignment !== 'aligned') {
-    const defensiveName = alignment === 'defensive';
-    const riskOff = backdrop === 'bearish';
-    fit = defensiveName === riskOff ? 'aligned' : 'conflicted';
-  }
+  // Yield direction drives the growth read; it comes from the macro bias rates
+  // driver (rising = headwind, falling = tailwind), so the two always agree.
+  const ratesState = view.current.drivers.find((d) => d.key === 'rates')?.state ?? 'neutral';
+  const yields = ratesState === 'headwind' ? 'rising' : ratesState === 'tailwind' ? 'falling' : 'flat';
 
-  const why =
-    fit === 'conflicted'
-      ? `The macro backdrop is leaning ${backdrop === 'bearish' ? 'risk-off' : 'risk-on'}, which works against a ${sensitivity.toLowerCase()} name like this.`
-      : fit === 'aligned'
-        ? `The macro backdrop is leaning ${backdrop === 'bearish' ? 'risk-off' : 'risk-on'}, which favours a ${sensitivity.toLowerCase()} name like this.`
-        : 'No strong macro tilt for or against this name right now — the setup stands on its own.';
+  const copy = macroFitCopy({ category, backdrop: view.current.direction, yields });
 
   return {
     symbol,
-    sector: sensitivity,
-    sensitivity,
-    fit,
-    why,
+    // Name the real sector when we know it; otherwise fall back to the tilt line
+    // so an index ETF or an unmapped name does not show a blank sector.
+    sector: sector ? GICS_NAMES[sector] : copy.sensitivity,
+    sensitivity: copy.sensitivity,
+    fit: copy.fit,
+    why: copy.why,
     nextRisk: nextCatalyst(now).label,
   };
 }

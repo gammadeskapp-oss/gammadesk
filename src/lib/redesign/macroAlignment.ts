@@ -1,58 +1,87 @@
-/**
- * A light, honest macro-alignment tag for a ticker.
- *
- * The full "Macro alignment" scanner column the redesign spec calls for wants a
- * per-name classification against the live macro backdrop. A rigorous version
- * needs a sector/sensitivity model the app does not yet compute, so this is the
- * defensible interim: a static sensitivity map for the names that actually show
- * up on the scanner shortlist, plus an `event-risk` override when the name
- * reports inside a day. It never invents a number — it tags a category, and
- * falls back to `aligned` (i.e. "no macro conflict flagged") when the name is
- * not in the map.
- *
- * Shared so the Home shortlist preview and the Scanner column read the same
- * rule rather than drifting apart.
- */
-
+import type { Gics } from '@/lib/rs/universe';
 import type { MacroAlignment } from './mock';
 
-/** Rate-sensitive: banks, rate-plays, long-duration growth that reprices on yields. */
-const RATE_SENSITIVE = new Set([
-  'JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'SCHW', 'KRE', 'XLF',
-  'PLD', 'AMT', 'SPG', 'O', 'XLRE',
-]);
-
-/** Defensive: staples, utilities, healthcare — hold up when the backdrop sours. */
-const DEFENSIVE = new Set([
-  'WMT', 'COST', 'PG', 'KO', 'PEP', 'CL', 'MDLZ', 'XLP',
-  'NEE', 'DUK', 'SO', 'XLU',
-  'JNJ', 'UNH', 'ABBV', 'MRK', 'PFE', 'LLY', 'XLV',
-]);
-
-/** Cyclical: industrials, energy, materials, discretionary — geared to growth. */
-const CYCLICAL = new Set([
-  'CAT', 'DE', 'HON', 'GE', 'BA', 'UNP', 'XLI',
-  'XOM', 'CVX', 'COP', 'SLB', 'XLE',
-  'FCX', 'NUE', 'DOW', 'XLB',
-  'HD', 'NKE', 'SBUX', 'MCD', 'XLY',
-]);
+/**
+ * A macro-sensitivity tag for a ticker, driven by its GICS sector.
+ *
+ * Every S&P 500 name carries an official GICS sector in the membership record
+ * (`rs/membership`, refreshed weekly), so the tag is derived from that rather
+ * than a hand-maintained list — one lookup, full coverage, and it tracks index
+ * changes automatically. A small override list promotes names whose sector
+ * understates how they trade (Amazon and Tesla are Consumer Discretionary by
+ * GICS but move like growth). An earnings print inside a day overrides the
+ * standing sensitivity, because that is the nearer risk. "No strong macro tilt"
+ * is reserved for when the sector is genuinely unknown (an ETF that is not a
+ * constituent, a name missing from the parse).
+ *
+ * Shared so the Home shortlist, the Scanner column and filter, and the Decision
+ * macro-fit box all read the same rule rather than drifting apart.
+ */
 
 /**
- * Tag one name. `earningsWithin24h` promotes it to `event-risk`, which takes
- * precedence over its standing sensitivity because a print inside the window is
- * the nearer risk.
+ * GICS sector → macro category.
+ *
+ *   Technology, Communication Services            → growth (rate-sensitive via yields)
+ *   Financials, Real Estate                       → rate-sensitive
+ *   Consumer Staples, Utilities, Health Care      → defensive
+ *   Industrials, Energy, Materials, Cons. Disc.   → cyclical
+ *
+ * Consumer Discretionary is cyclical by default; the high-growth names within
+ * it are promoted by `MANUAL_OVERRIDE`.
  */
-export function macroAlignmentFor(
-  symbol: string,
-  earningsWithin24h = false,
-): MacroAlignment {
-  if (earningsWithin24h) return 'event-risk';
+export const SECTOR_CATEGORY: Record<Gics, MacroAlignment> = {
+  technology: 'growth',
+  'communication-services': 'growth',
+  financials: 'rate-sensitive',
+  'real-estate': 'rate-sensitive',
+  'consumer-staples': 'defensive',
+  utilities: 'defensive',
+  'health-care': 'defensive',
+  industrials: 'cyclical',
+  energy: 'cyclical',
+  materials: 'cyclical',
+  'consumer-discretionary': 'cyclical',
+};
+
+/**
+ * Names whose GICS sector understates how they trade against the macro backdrop.
+ * Checked before the sector map (but after an imminent earnings print).
+ */
+export const MANUAL_OVERRIDE: Record<string, MacroAlignment> = {
+  AMZN: 'growth',
+  TSLA: 'growth',
+};
+
+/**
+ * Sector / index ETFs are not index constituents, so they carry no GICS sector
+ * from membership. This keeps their tag sensible when one is looked up directly
+ * (e.g. on /decision for XLK) rather than falling through to "no tilt".
+ */
+const ETF_FALLBACK: Record<string, MacroAlignment> = {
+  XLK: 'growth', XLC: 'growth', SMH: 'growth', SOXX: 'growth', QQQ: 'growth', VGT: 'growth',
+  XLF: 'rate-sensitive', KRE: 'rate-sensitive', XLRE: 'rate-sensitive',
+  XLP: 'defensive', XLU: 'defensive', XLV: 'defensive',
+  XLI: 'cyclical', XLE: 'cyclical', XLB: 'cyclical', XLY: 'cyclical',
+};
+
+export interface MacroAlignmentOpts {
+  /** The name's GICS sector, from `sectorMap(members)`; null when unknown. */
+  sector?: Gics | null;
+  /** True when the name reports inside the next 24 hours. */
+  earningsWithin24h?: boolean;
+}
+
+/**
+ * Tag one name. Order of precedence: an imminent earnings print, then a manual
+ * override, then the GICS sector, then an ETF fallback, then "no tilt".
+ */
+export function macroAlignmentFor(symbol: string, opts: MacroAlignmentOpts = {}): MacroAlignment {
+  const { sector = null, earningsWithin24h: earnings = false } = opts;
+  if (earnings) return 'event-risk';
   const s = symbol.toUpperCase();
-  if (RATE_SENSITIVE.has(s)) return 'rate-sensitive';
-  if (DEFENSIVE.has(s)) return 'defensive';
-  if (CYCLICAL.has(s)) return 'cyclical';
-  // Not in the sensitivity map — nothing flags it as conflicting with the
-  // backdrop, so it reads as aligned rather than being given a made-up tag.
+  if (MANUAL_OVERRIDE[s]) return MANUAL_OVERRIDE[s];
+  if (sector) return SECTOR_CATEGORY[sector];
+  if (ETF_FALLBACK[s]) return ETF_FALLBACK[s];
   return 'aligned';
 }
 
