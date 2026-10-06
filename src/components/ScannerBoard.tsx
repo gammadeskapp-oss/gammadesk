@@ -467,11 +467,11 @@ function ComponentCell({
       {value === null ? (
         <span className="text-2xs italic tracking-tight">no data</span>
       ) : (
-        value.toFixed(0)
+        Math.round(value)
       )}
       <span className="sr-only">
         {' '}
-        {SCORE_LABEL[component]}: {value === null ? 'not measured' : value.toFixed(0)}. {detail}
+        {SCORE_LABEL[component]}: {value === null ? 'not measured' : Math.round(value)}. {detail}
       </span>
     </td>
   );
@@ -579,7 +579,7 @@ function ResultRow({
           <TickerLink symbol={row.symbol} />
         </th>
         <td className="border-b border-term-line/60 px-2 py-2 text-right align-top tabular-nums font-bold text-term-text">
-          {score.total.toFixed(0)}
+          {Math.round(score.total)}
         </td>
         {/*
           The seven components, each on the same 0-100 scale as the score they
@@ -713,11 +713,11 @@ function ResultRow({
 
               {/* What the score is made of, so the number is checkable. */}
               <p className="text-2xs leading-relaxed text-term-faint">
-                <span className="label-xs mr-1.5">Score {score.total.toFixed(1)}</span>
+                <span className="label-xs mr-1.5">Score {Math.round(score.total)}</span>
                 {SCORE_KEYS.map((key) => {
                   const value = score.components[key];
                   return `${SCORE_LABEL[key]} ${
-                    value === null ? 'not measured' : value.toFixed(0)
+                    value === null ? 'not measured' : Math.round(value)
                   } × ${SCORE_WEIGHTS[key]}`;
                 }).join(' · ')}
                 {score.missing.length > 0 && (

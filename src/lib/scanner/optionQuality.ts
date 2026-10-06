@@ -207,10 +207,25 @@ export function toQuality(
 /**
  * Pick the contract to grade out of everything in the window.
  *
- * Closest to the middle of the delta band, then tightest spread as the
- * tiebreak. Middle-of-band rather than highest-delta because the band is the
- * spec — a 0.70 delta is at its edge, and drifting to the edge every time
- * would quietly turn a 0.55-0.70 rule into a 0.70 rule.
+ * ## Tradability first, delta-proximity only as a tiebreak
+ *
+ * Every contract here already passed the delta window (0.55-0.70), so any of
+ * them satisfies the spec. The old picker then chose the one closest to the
+ * middle of the band and used spread only to break ties — which meant that when
+ * the near-middle strike was a dead one (zero open interest, a book quoted
+ * 100%+ wide) it was picked anyway, and the whole name graded `avoid` on a
+ * strike nobody would ever trade while a liquid strike sat untouched one step
+ * away in the same window. That is the single thing this gate must not do: let
+ * one unlucky strike condemn a name whose chain is perfectly tradable.
+ *
+ * So the ranking is now: a *usable* strike (open interest at or above the
+ * caution floor and a spread inside the caution ceiling) always beats an
+ * unusable one; among usable strikes the tightest spread wins, then the deepest
+ * open interest; and delta-proximity to the middle of the band is the final
+ * tiebreak so a genuine tie still lands mid-band rather than at its edge. When
+ * every in-window strike is unusable — a thin chain with nothing worth trading
+ * at any strike — the least-bad is still returned, so `gradeContract` reports an
+ * honest `avoid` rather than "no contract found".
  */
 export function pickContract(candidates: OptionContract[]): OptionContract | null {
   const target = (OPTION_WINDOW.minDelta + OPTION_WINDOW.maxDelta) / 2;
@@ -226,13 +241,18 @@ export function pickContract(candidates: OptionContract[]): OptionContract | nul
 
   if (inWindow.length === 0) return null;
 
+  const t = QUALITY_THRESHOLDS;
+  const spreadOf = (c: OptionContract) => c.spreadPctOfMid ?? Number.POSITIVE_INFINITY;
+  const oiOf = (c: OptionContract) => c.openInterest ?? 0;
+  // A strike is usable when it would not on its own force an `avoid` grade.
+  const usable = (c: OptionContract) =>
+    oiOf(c) >= t.avoidBelowOi && spreadOf(c) <= t.avoidAboveSpreadPct ? 0 : 1;
+
   return inWindow.sort((a, b) => {
-    const da = Math.abs((a.delta as number) - target);
-    const db = Math.abs((b.delta as number) - target);
-    if (Math.abs(da - db) > 0.01) return da - db;
-    const sa = a.spreadPctOfMid ?? Number.POSITIVE_INFINITY;
-    const sb = b.spreadPctOfMid ?? Number.POSITIVE_INFINITY;
-    return sa - sb;
+    if (usable(a) !== usable(b)) return usable(a) - usable(b);
+    if (spreadOf(a) !== spreadOf(b)) return spreadOf(a) - spreadOf(b);
+    if (oiOf(a) !== oiOf(b)) return oiOf(b) - oiOf(a);
+    return Math.abs((a.delta as number) - target) - Math.abs((b.delta as number) - target);
   })[0];
 }
 

@@ -107,7 +107,7 @@ function section(name) {
 /** A name that clears every filter, with every component measurable. */
 function row(overrides = {}) {
   const { metrics, ...rest } = overrides;
-  return {
+  const r = {
     symbol: 'TEST',
     price: 100,
     priceAsOf: '2026-08-31',
@@ -130,7 +130,6 @@ function row(overrides = {}) {
     equityTier: 'HIGH',
     optionsTier: 'HIGH',
     regime: 'positive',
-    netGex: 1e9,
     magnets: [],
     optionsVolume: 40_000,
     optionsOpenInterest: 120_000,
@@ -139,6 +138,14 @@ function row(overrides = {}) {
     optionQuality: null,
     ...rest,
   };
+  // netGex and the regime are one measurement in real data — a chain gives both
+  // or neither. The gamma component now scales by netGex strength, so a fixture
+  // that set a regime must carry a matching netGex (and a no-chain row, regime
+  // null, carries netGex null). Derived here unless a test sets it explicitly.
+  if (r.netGex === undefined) {
+    r.netGex = r.regime === null ? null : r.regime === 'positive' ? 1e9 : -1e9;
+  }
+  return r;
 }
 
 function contract(overrides = {}) {
@@ -1166,6 +1173,55 @@ ok(
   scoreAndJudge([passing({ metrics: { rsScore: 20 } })], D, MARKET).every(
     (e) => e.failingLabel.length > 15,
   ),
+);
+
+// --- the gamma component scales by strength ----------------------------------
+
+section('The ticker-gamma component scales by net-gamma strength');
+
+const tg = (netGex) => scoreRow(row({ regime: netGex >= 0 ? 'positive' : 'negative', netGex }), MARKET).components.tickerGamma;
+
+ok(
+  'a strongly positive gamma book approaches 100',
+  tg(1e9) > 95,
+);
+ok(
+  'a strongly negative gamma book approaches 0',
+  tg(-1e9) < 5,
+);
+ok(
+  'a flat book sits near the 50 midpoint',
+  Math.abs(tg(1) - 50) < 5,
+);
+ok(
+  'it is monotonic: stronger-positive outscores weaker-positive outscores negative',
+  tg(1e9) > tg(1e6) && tg(1e6) > tg(-1e6) && tg(-1e6) > tg(-1e9),
+);
+ok(
+  'no chain (regime and netGex both absent) leaves it unmeasured, never zero',
+  scoreRow(row({ regime: null, netGex: null }), MARKET).components.tickerGamma === null,
+);
+
+// --- the contract picker prefers a tradable strike ---------------------------
+
+section('The contract picker prefers a tradable strike over a dead one');
+
+ok(
+  'between two in-window calls it takes the liquid, tight one over the dead one nearer mid-delta',
+  (() => {
+    const liquid = contract({ delta: 0.68, openInterest: 2000, spreadPctOfMid: 2, bid: 4.9, ask: 5.0, mid: 4.95 });
+    const dead = contract({ delta: 0.62, openInterest: 0, spreadPctOfMid: 150, bid: 0.1, ask: 0.9, mid: 0.5 });
+    return pickContract([dead, liquid]) === liquid;
+  })(),
+);
+
+ok(
+  'when every in-window strike is untradable it still returns one, so the grade is an honest avoid',
+  (() => {
+    const deadA = contract({ delta: 0.6, openInterest: 0, spreadPctOfMid: 150 });
+    const deadB = contract({ delta: 0.65, openInterest: 5, spreadPctOfMid: 60 });
+    return pickContract([deadA, deadB]) !== null;
+  })(),
 );
 
 // --- result ------------------------------------------------------------------

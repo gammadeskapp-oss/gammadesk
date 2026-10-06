@@ -3,18 +3,18 @@ import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { RefreshStatus } from '@/components/RefreshStatus';
 import { ScannerBoard } from '@/components/ScannerBoard';
-import { ScannerRunRate } from '@/components/ScannerRunRate';
 import { ScannerTabs } from '@/components/ScannerTabs';
-import { ScannerMacroPanel } from '@/components/redesign/ScannerMacroPanel';
+import { ScannerMacroPanel, type MacroRow } from '@/components/redesign/ScannerMacroPanel';
 import { TosTrendTab } from '@/components/TosTrendTab';
 import { InfoTip } from '@/components/InfoTip';
 import { getBreadth } from '@/lib/breadth';
 import { breadthSentence } from '@/lib/breadth/wording';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { getScannerView, storeStatus } from '@/lib/scanner';
-import { DEFAULT_FILTERS } from '@/lib/scanner/score';
+import { DEFAULT_FILTERS, scoreRow } from '@/lib/scanner/score';
 import { SCANNER_TOP_N } from '@/lib/scanner/types';
 import { formatEtClock } from '@/lib/scanner/schedule';
+import { macroAlignmentFor, earningsWithin24h } from '@/lib/redesign/macroAlignment';
 import { formatAsOf } from '@/lib/time';
 
 export const metadata: Metadata = {
@@ -56,6 +56,46 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
   const breadth = await getBreadth().catch(() => null);
   const store = storeStatus();
   const { scan, latest, gamma, schedule } = view;
+
+  /*
+    The macro-alignment panel reads the real top names now, not a hardcoded
+    demo set. Each is scored with the same function the board uses and tagged
+    against the macro backdrop by `macroAlignmentFor`, so the panel and the list
+    below it can never disagree.
+  */
+  const macroRows: MacroRow[] = scan
+    ? [...scan.rows]
+        .map((row) => ({
+          row,
+          total: scoreRow(row, { spyRegime: scan.spyRegime }).total,
+        }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 6)
+        .map(({ row, total }) => ({
+          symbol: row.symbol,
+          score: Math.round(total),
+          macro: macroAlignmentFor(
+            row.symbol,
+            earningsWithin24h(row.earnings.dateIso),
+          ),
+        }))
+    : [];
+
+  /*
+    The one-line summary shown on the collapsed "Data notes" section: how much
+    of the index each reading covered, and the time the data is as of. The scan
+    time is the honest answer to "how fresh is this" — the readings are taken on
+    daily bars and a chain quoted before the open, minutes into the session, not
+    at yesterday's 4pm close.
+  */
+  const earningsDated = scan
+    ? scan.rows.filter((r) => r.earnings.state === 'known').length
+    : 0;
+  const notesSummary = scan
+    ? `${scan.coverage?.withGamma ?? 0} of ${scan.scored} names have options data · ` +
+      `earnings dates for ${earningsDated} · ` +
+      `data as of ${formatEtClock(new Date(scan.scannedAt))}`
+    : 'How the score is built, and what each reading covers.';
 
   return (
     <>
@@ -148,15 +188,8 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
           </p>
         </div>
 
-        {/*
-          Above the list, because a shortlist of three cannot be read without
-          it: three out of a typical twenty is a thin day, three out of a
-          typical four is an ordinary one, and the list itself cannot say which.
-        */}
-        <ScannerRunRate counts={view.counts} average={view.averagePassed} />
-
-        {/* Macro alignment column + filters (preview). */}
-        <ScannerMacroPanel />
+        {/* Macro alignment column + filters, on the real top names. */}
+        <ScannerMacroPanel rows={macroRows} />
 
         {scan ? (
           <ScannerBoard
@@ -224,197 +257,115 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
           </div>
         )}
 
-        {scan?.notes.map((note) => (
-          <p key={note} className="panel px-3.5 py-2.5 text-2xs leading-relaxed text-flip/80">
-            ! {note}
-          </p>
-        ))}
+        {/*
+          One collapsed section for everything that is not the list itself:
+          today's caveats first, then how the score is built. It used to be a
+          stack of yellow warning panels plus a nine-paragraph "How this is
+          built" essay, all open on the page above the ranking. Folded here
+          behind a one-line summary, it is still one click away but no longer
+          the first thing a reader wades through.
+        */}
+        <details className="panel px-3.5 py-3">
+          <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-1 text-2xs leading-relaxed marker:text-term-faint">
+            <span className="label-xs">Data notes &amp; how this works</span>
+            <span className="text-term-dim">{notesSummary}</span>
+          </summary>
 
-        <section className="panel px-3.5 py-3 text-2xs leading-relaxed text-term-faint">
-          <h2 className="label-xs">How this is built</h2>
+          <div className="mt-3 space-y-3 text-2xs leading-relaxed text-term-faint">
+            {(scan?.notes.length ||
+              (gamma && scan && gamma.date !== scan.date) ||
+              (!store.durable && store.note)) && (
+              <div className="space-y-1.5">
+                <h3 className="label-xs text-flip/80">Today&rsquo;s caveats</h3>
+                {scan?.notes.map((note) => (
+                  <p key={note} className="text-flip/80">
+                    ! {note}
+                  </p>
+                ))}
+                {gamma && scan && gamma.date !== scan.date && (
+                  <p className="text-flip/80">
+                    ! The stored gamma is dated {gamma.date} and this scan is
+                    dated {scan.date}; gamma from another session is treated as
+                    absent.
+                  </p>
+                )}
+                {!store.durable && store.note && (
+                  <p className="text-flip/80">! {store.note}</p>
+                )}
+              </div>
+            )}
 
-          <p className="mt-1.5">
-            <span className="text-term-dim">
-              One score, seven components, the whole index.{' '}
-            </span>
-            Every name the relative-strength engine can rank &mdash;{' '}
-            {scan ? scan.scored : 'all of them'} this morning, and the header
-            above always states the real figure rather than the size of the
-            index &mdash; gets a 0&ndash;100 composite: relative strength (counted double), trend, volume,
-            distance above its daily VWAP, its own dealer gamma, the
-            market&rsquo;s dealer gamma, and how well its options actually
-            trade. The top {SCANNER_TOP_N} by that score are always on the page,
-            and each of the seven is its own column, so the composite is a
-            number you can check rather than one you have to trust.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              The trend column is four readings averaged.{' '}
-            </span>
-            Above its 50-day average, above its 200-day average, the 50 above
-            the 200, and where its last month&rsquo;s return ranks against the
-            rest of the index. Averaged rather than ANDed, because the point of
-            a column is to tell a name that has three of the four from a name
-            that has none &mdash; and a reading that could not be taken is left
-            out of the average rather than counted against the name. Sort by it,
-            or by any other component, from the column heading.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              Filters narrow the list. They cannot empty it.{' '}
-            </span>
-            This used to be five rules ANDed together with the survivors
-            printed, and twice in a row that was zero names out of five hundred
-            &mdash; an empty page that could not tell you which rule ate the
-            list. Now the eight filters decide which rows are <em>marked</em> as
-            matching, and the table shows the top {SCANNER_TOP_N} by score
-            either way. They open on RS {DEFAULT_FILTERS.rsMin} and the turnover
-            floor with everything else switched off, so what you see first is
-            the ranking rather than one opinion about it. Your settings live in
-            the address bar, so a configuration can be bookmarked or sent to
-            someone, and every change is applied in the browser to the snapshot
-            the morning job stored &mdash; moving a control makes no network
-            request at all.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              Every row says why it is there, next to what to be careful about.{' '}
-            </span>
-            The reasons are assembled from the components that actually scored
-            highest, so the sentence and the columns cannot disagree, and when
-            nothing scores strongly the line says exactly that rather than
-            inventing a reason. The watch line beside it &mdash; earnings,
-            extension, a contract graded Caution, negative dealer positioning
-            &mdash; is rendered in the same size, on the same row, never behind
-            a toggle.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              The market regime is one component of seven.{' '}
-            </span>
-            It was a per-name gate once, which was a category error with a real
-            cost: one market-wide condition, identical for all five hundred
-            names, blanked the page on every volatile morning. Being identical
-            for everyone, it moves the whole list and never the order of it. It
-            is also stated once in plain English at the top.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              The contract filters, and deliberately does not score.{' '}
-            </span>
-            Cboe answers a limited number of chains per window and the{' '}
-            {schedule.gammaEt} gamma job has first call on them, so contracts
-            are graded for the top {view.contractTopN} by score and nothing
-            else. Making that grade part of the score would have meant the score
-            deciding who got graded and the grade changing the score. It marks a
-            row and cautions on it; it never moves a name up or down. Anything
-            ungraded reads{' '}
-            <span className="text-term-dim">contract not checked</span> in grey
-            &mdash; unknown, not failed.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              A filter cannot fail a name it could not read.{' '}
-            </span>
-            Dealer positioning comes from an option chain, and until recently
-            chains were rationed &mdash; the free source answers about sixty per
-            morning, so most of the index had no gamma reading and every one of
-            those names &ldquo;failed&rdquo; the gamma and market filters. That
-            is the request budget being reported as a fact about the market.
-            Now an untestable filter counts neither way: the row says{' '}
-            <span className="text-term-dim">not tested</span> beside the
-            filters in question, its component column says{' '}
-            <span className="text-term-dim">no data</span>, and the funnel
-            reports how many of the survivors at each step were untested rather
-            than folding them in. The header states how many of the scored
-            names actually had gamma, every morning, whatever that number is.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              Unknown is never folded into failed.{' '}
-            </span>
-            A component that could not be measured &mdash; no chain pulled for
-            that name, fewer than 200 daily bars, no volume history &mdash;
-            shows a dash and is dropped from the blend rather than scored zero.
-            Most of the index has no dealer-positioning reading at all, and
-            scoring those absences as zero would rank the whole market below the
-            few dozen names the morning job had budget for: a statement about
-            this site&rsquo;s request budget dressed up as a statement about
-            stocks.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              The VWAP here is a daily one, not the intraday one.{' '}
-            </span>
-            It is the volume-weighted average price of the last twenty{' '}
-            <em>daily</em> bars, not the session VWAP a trading platform draws
-            from the opening bell. The session figure cannot be had for five
-            hundred names without five hundred intraday requests every morning;
-            this one costs nothing and comes from price history already stored.
-            The column and its tooltip both say which it is.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              Scoring the whole index costs nothing upstream.{' '}
-            </span>
-            Every reading &mdash; the averages, the VWAP, the volume ratio, the
-            turnover, the one-month percentile &mdash; comes from the
-            relative-strength history this site already stores. The old scan
-            pulled three bar series per candidate, which is why it could only
-            ever look at the two dozen names that had already cleared a floor,
-            and why the floor could never be one of these controls.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              A ranking is an ordering, and nothing more.{' '}
-            </span>
-            A name at the top of the table is the name nothing scored higher
-            than. It is not a suggestion, the page does not say what to do about
-            it, and there is no position size, target or stop anywhere on it.
-            What this ranking has actually produced afterwards is a separate
-            question, answered with numbers rather than assurances on the{' '}
-            <a
-              href="/trackrecord"
-              className="underline decoration-dotted hover:text-term-text"
-            >
-              scanner track record
-            </a>{' '}
-            page &mdash; every pick logged, winners and losers alike.
-          </p>
-
-          <p className="mt-2">
-            <span className="text-term-dim">
-              Nadaraya-Watson is a line on the chart and nothing else.{' '}
-            </span>
-            It gates nothing and scores nothing. Current settings: bandwidth{' '}
-            {view.nw.bandwidth}, lookback {view.nw.lookback}, multiplier{' '}
-            {view.nw.mult}. The band is computed on 1H and daily only &mdash;
-            the bar source serves about half the window at the 4-hour interval,
-            and edges measured over the wrong window are worse than no edges.
-          </p>
-
-          {gamma && scan && gamma.date !== scan.date && (
-            <p className="mt-2 text-flip/80">
-              ! The stored gamma is dated {gamma.date} and this scan is dated{' '}
-              {scan.date}. The scan treats gamma from another session as absent
-              rather than using it.
-            </p>
-          )}
-
-          {!store.durable && store.note && (
-            <p className="mt-2 text-flip/80">! {store.note}</p>
-          )}
-        </section>
+            <div className="space-y-2">
+              <h3 className="label-xs">How the score works</h3>
+              <p>
+                <span className="text-term-dim">
+                  One score, seven components, the whole index.{' '}
+                </span>
+                Every ranked name gets a 0&ndash;100 composite &mdash; relative
+                strength (counted double), trend, volume, distance above its
+                daily VWAP, its own dealer gamma, the market&rsquo;s dealer
+                gamma, and option liquidity. Each is its own column, so the
+                number is checkable; the top {SCANNER_TOP_N} by score always
+                show.
+              </p>
+              <p>
+                <span className="text-term-dim">
+                  Filters narrow the list; they never empty it.{' '}
+                </span>
+                The eight filters only mark which rows match your settings &mdash;
+                the table shows the top {SCANNER_TOP_N} either way. They open on
+                RS {DEFAULT_FILTERS.rsMin} and the turnover floor, live in the
+                address bar, and are applied in the browser with no network
+                request.
+              </p>
+              <p>
+                <span className="text-term-dim">
+                  Unknown is never folded into failed.{' '}
+                </span>
+                A reading that could not be taken &mdash; no chain pulled, too
+                little history &mdash; shows a dash and drops out of the blend
+                rather than scoring zero.
+              </p>
+              <p>
+                <span className="text-term-dim">
+                  Dealer positioning comes from Polygon.{' '}
+                </span>
+                The {schedule.gammaEt} ET job pulls the whole index from
+                Polygon&rsquo;s options feed, with Cboe as the per-symbol
+                fallback. Contracts are graded for the top {view.contractTopN} by
+                score; below that a contract reads &ldquo;not checked&rdquo; in
+                grey &mdash; unknown, not failed. The grade cautions a row, it
+                never moves it up or down.
+              </p>
+              <p>
+                <span className="text-term-dim">
+                  A daily VWAP, a market banner, and a chart line.{' '}
+                </span>
+                VWAP is the volume-weighted average of the last twenty daily
+                bars, not the session one. SPY&rsquo;s regime is one component of
+                seven, stated once at the top rather than gating each name. The
+                Nadaraya-Watson band gates and scores nothing (bandwidth{' '}
+                {view.nw.bandwidth}, lookback {view.nw.lookback}, multiplier{' '}
+                {view.nw.mult}).
+              </p>
+              <p>
+                <span className="text-term-dim">
+                  A ranking is an ordering, and nothing more.{' '}
+                </span>
+                The top name is the one nothing scored higher than &mdash; not a
+                suggestion, and there is no size, target or stop anywhere on the
+                page. What the ranking produced afterwards is logged on the{' '}
+                <a
+                  href="/trackrecord"
+                  className="underline decoration-dotted hover:text-term-text"
+                >
+                  scanner track record
+                </a>
+                .
+              </p>
+            </div>
+          </div>
+        </details>
       </main>
 
       <Footer />

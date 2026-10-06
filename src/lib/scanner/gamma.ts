@@ -195,21 +195,20 @@ export async function refreshScannerGamma(
       `budget=${source.budget} wanted=${wanted.length} — ${source.reason}`,
   );
 
-  const failures: Array<{ symbol: string; reason: string }> = [];
   const symbols: Record<string, GammaEntry> = {};
   /** Symbols the primary could not serve and the fallback could. */
   const fellBack: string[] = [];
+  /** Reason captured per symbol that threw, for the stored failure list. */
+  const failureReason = new Map<string, string>();
 
   const read = async (symbol: string) => {
     try {
       const result = await readSymbol(symbol, source, closes.get(symbol) ?? undefined);
       symbols[symbol] = result.entry;
+      failureReason.delete(symbol);
       if (result.fellBackFrom) fellBack.push(symbol);
     } catch (error) {
-      failures.push({
-        symbol,
-        reason: error instanceof Error ? error.message : String(error),
-      });
+      failureReason.set(symbol, error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -220,23 +219,51 @@ export async function refreshScannerGamma(
    * there runs at the speed of the slowest chain in each wave; a continuous
    * pool with a per-symbol deadline covers the index instead of a third of it.
    */
-  const outcome: { skipped: string[]; timedOut?: string[] } =
+  const sweep = (names: string[], budgetMs: number) =>
     source.primary === 'polygon'
-      ? await runPool(wanted, read, {
+      ? runPool(names, read, {
           concurrency: config.scanner.polygonConcurrency,
           maxRequests: source.budget,
           perSymbolMs: config.scanner.polygonSymbolTimeoutMs,
           // The route allows five minutes; stop well before it so the document
           // is still written rather than the run being killed mid-flight.
-          budgetMs: 240_000,
+          budgetMs,
         })
-      : await runScan(wanted, read, {
+      : runScan(names, read, {
           concurrency: SCAN_CONCURRENCY,
           maxRequests: source.budget,
-          budgetMs: 240_000,
+          budgetMs,
         });
 
-  const timedOut = outcome.timedOut ?? [];
+  await sweep(wanted, 180_000);
+
+  /*
+   * Retry every name with no chain once, with the remaining budget.
+   *
+   * A chain can fail to arrive for reasons that have nothing to do with the
+   * stock — a single slow Polygon page, a transient 5xx, a per-symbol deadline
+   * that a wave of slower neighbours pushed it past. Quota is not the binding
+   * constraint on the Polygon path, and the leftover set is small, so one retry
+   * recovers most of these rather than letting a name lose its dealer
+   * positioning for the whole session over a blip. Names still missing after
+   * the retry are the ones genuinely without a readable chain.
+   */
+  const missingAfterFirst = wanted.filter((s) => !symbols[s]);
+  let retried = 0;
+  if (missingAfterFirst.length > 0) {
+    retried = missingAfterFirst.length;
+    await sweep(missingAfterFirst, 60_000);
+  }
+
+  // The final truth: anything still without a chain, whatever the path.
+  const stillMissing = wanted.filter((s) => !symbols[s]);
+  const failures: Array<{ symbol: string; reason: string }> = stillMissing.map((symbol) => ({
+    symbol,
+    reason: failureReason.get(symbol) ?? 'no chain returned before the per-symbol deadline',
+  }));
+  // Everything with no chain is now reported in `failures`; `skipped` is kept
+  // empty rather than double-counting the same names in two lists.
+  const timedOut: string[] = [];
 
   const byProvider = { polygon: 0, cboe: 0 };
   for (const entry of Object.values(symbols)) {
@@ -249,7 +276,7 @@ export async function refreshScannerGamma(
     refreshedAt: new Date().toISOString(),
     symbols,
     failures,
-    skipped: outcome.skipped,
+    skipped: timedOut,
     requested: wanted.length,
     source: describeSource(source, byProvider, fellBack.length, timedOut.length),
     byProvider,
@@ -258,7 +285,7 @@ export async function refreshScannerGamma(
   console.log(
     `[scanner/gamma] refreshed=${Object.keys(symbols).length}/${wanted.length} ` +
       `polygon=${byProvider.polygon} cboe=${byProvider.cboe} fellBack=${fellBack.length} ` +
-      `failed=${failures.length} timedOut=${timedOut.length} skipped=${outcome.skipped.length}`,
+      `failed=${failures.length} retried=${retried}`,
   );
 
   try {
@@ -274,7 +301,7 @@ export async function refreshScannerGamma(
     stored,
     refreshed: Object.keys(symbols).length,
     failed: failures.length,
-    skipped: outcome.skipped.length,
+    skipped: timedOut.length,
     requested: wanted.length,
     source,
     fellBack,

@@ -114,7 +114,7 @@ export const SCORE_EXPLANATION: Record<ScoreKey, string> = {
     "The last month's average volume against the three months before it. 1.0x — merely confirmed — scores low; heavy participation scores high.",
   vwap: 'How far the close sits above the volume-weighted average price of the last twenty sessions. This is a daily VWAP, not the intraday session one.',
   tickerGamma:
-    "This name's own dealer positioning. Positive scores higher. On a single stock the assumption about which side dealers are on is weak, which is why it is one vote of seven.",
+    "This name's own dealer positioning, scaled by strength: a strongly positive gamma book scores near 100, a flat one near the 50 midpoint, a strongly negative one near 0. On a single stock the assumption about which side dealers are on is weak, which is why it is one vote of seven.",
   spyGamma:
     "The wider market's dealer positioning. Identical for every name on the page — it moves the whole list, never the order of it.",
   optionLiquidity:
@@ -234,6 +234,39 @@ export function clampSettings(s: FilterSettings): FilterSettings {
 function ramp(value: number, low: number, high: number): number {
   if (!(high > low)) return 0;
   return Math.min(100, Math.max(0, ((value - low) / (high - low)) * 100));
+}
+
+/**
+ * Dealer positioning as a 0-100 strength, not a two-valued flag.
+ *
+ * ## Why this is a curve and not 100-or-25
+ *
+ * It used to be: positive regime scored 100, negative scored 25, nothing in
+ * between. That threw away the one thing net gamma exposure actually carries —
+ * magnitude. A name pinned by a billion dollars of positive dealer gamma and a
+ * name a hair above zero were scored identically, and a name mildly negative
+ * was punished as hard as one deeply so.
+ *
+ * `netGex` is signed exposure, and across the index its magnitude spans about
+ * three orders of magnitude (log10 roughly 5 to 8 for the bulk of names), so it
+ * is scaled on a log. The sign decides which half of the scale: strongly
+ * positive approaches 100, flat sits at the 50 midpoint, strongly negative
+ * approaches 0. A weak reading of either sign lands near neutral, which is the
+ * honest thing to say about a small number — it is barely a signal at all.
+ *
+ * Null when no chain was pulled, so the component drops out of the blend rather
+ * than scoring zero, exactly as before.
+ */
+const GEX_LOG_LOW = 5;
+const GEX_LOG_HIGH = 8;
+
+function gammaStrengthScore(netGex: number | null): number | null {
+  if (netGex === null || !Number.isFinite(netGex)) return null;
+  if (netGex === 0) return 50;
+  const magnitude = ramp(Math.log10(Math.abs(netGex)), GEX_LOG_LOW, GEX_LOG_HIGH);
+  // magnitude is 0-100; half of it is the distance from the 50 midpoint, and
+  // the sign decides the direction.
+  return netGex > 0 ? 50 + magnitude / 2 : 50 - magnitude / 2;
 }
 
 /**
@@ -357,15 +390,25 @@ export function scoreRow(
     vwap: m.pctAboveVwap === null ? null : ramp(m.pctAboveVwap, -5, 10),
 
     /*
-     * A two-valued reading, scored 100 and 25 rather than 100 and 0.
+     * Scaled 0-100 by the strength of net dealer gamma — see
+     * `gammaStrengthScore`. A strongly positive book approaches 100, a flat one
+     * sits near the 50 midpoint, a strongly negative one approaches 0.
      *
-     * Negative dealer gamma is a real caution and it is stated in words on
-     * every row that has it, but the single-name dealer-sign assumption is the
-     * weakest thing this site relies on — nobody publishes who is on which
-     * side of a single stock's chain. Scoring it zero would let an inference
-     * knock a name down the list as hard as a measured fact does.
+     * The single-name dealer-sign assumption is still the weakest thing this
+     * site relies on — nobody publishes who is on which side of one stock's
+     * chain — which is why it is one vote of seven and why a weak reading lands
+     * near neutral rather than swinging the score. Falls back to the old
+     * two-valued regime only when exposure is somehow missing but a regime is
+     * not, so a document from before `netGex` was stored still renders.
      */
-    tickerGamma: row.regime === null ? null : row.regime === 'positive' ? 100 : 25,
+    tickerGamma:
+      row.netGex !== null
+        ? gammaStrengthScore(row.netGex)
+        : row.regime === null
+          ? null
+          : row.regime === 'positive'
+            ? 100
+            : 25,
 
     /*
      * Identical for every name on the page, which is exactly why it is safe
