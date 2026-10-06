@@ -25,7 +25,13 @@ export interface MacroRow {
 export function ScannerMacroPanel({ rows: allRows }: { rows: MacroRow[] }) {
   const [active, setActive] = useState<MacroAlignment | null>(null);
 
-  if (allRows.length === 0) return null;
+  /*
+    Only worth showing when at least one top name carries a real macro tag.
+    `aligned` is the fallback — "nothing flags it as conflicting with the
+    backdrop" — so a table of all-`aligned` rows says nothing the board below it
+    does not, and the panel hides itself rather than padding the page with it.
+  */
+  if (!allRows.some((r) => r.macro !== 'aligned')) return null;
 
   const rows = active ? allRows.filter((r) => r.macro === active) : allRows;
 
