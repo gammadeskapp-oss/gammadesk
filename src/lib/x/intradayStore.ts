@@ -51,6 +51,10 @@ export async function recordIntradayPost(
     wild?: boolean;
     /** The day's levels to lock, if the morning post did not already lock them. */
     lockedLevels?: LockedLevels;
+    /** The fresh SPY-vs-RSP verdict at this post, to seed the day's opener. */
+    spyRspVerdict?: string | null;
+    /** True when this post called out a SPY-vs-RSP verdict change. */
+    spyRspMentioned?: boolean;
   },
 ): Promise<void> {
   try {
@@ -70,6 +74,10 @@ export async function recordIntradayPost(
       // Lock the levels once — the first post of the day that carries them wins.
       lockedLevels: current.lockedLevels ?? opts.lockedLevels,
       lastWildIso: opts.wild ? now.toISOString() : current.lastWildIso,
+      // Seed the opening verdict on the first post that has one; never overwrite
+      // it. Latch "mentioned" once so a flip is called out at most once a day.
+      openSpyRspVerdict: current.openSpyRspVerdict ?? opts.spyRspVerdict ?? null,
+      spyRspChangeMentioned: current.spyRspChangeMentioned || Boolean(opts.spyRspMentioned),
     });
   } catch {
     // Best effort — the log's once-a-day guard still stops a same-key repost.

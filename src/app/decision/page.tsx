@@ -15,7 +15,7 @@ import { PositioningRecordCard } from '@/components/PositioningRecordCard';
 import { ReadMode } from '@/components/ReadMode';
 import { RetestFeed } from '@/components/RetestFeed';
 import { SimpleRead } from '@/components/SimpleRead';
-import { getBreadth } from '@/lib/breadth';
+import { getBreadth, isRegularHours, isSpyRspStale } from '@/lib/breadth';
 import type { BreadthReading } from '@/lib/breadth/types';
 import { regimeOfMood } from '@/lib/regime';
 import { marketStatus } from '@/lib/marketPhase';
@@ -587,6 +587,11 @@ export default async function DecisionPage({ searchParams }: PageProps) {
       ].filter((l): l is ChartLevel => Boolean(l))
     : [];
 
+  const sr = breadth?.spyRsp ?? null;
+  // The verdict alone for the narrow context column; the dashboard card carries
+  // the SPY/RSP numbers.
+  const spyRspLine = sr && !isSpyRspStale(sr, { marketOpen: isRegularHours() }) ? sr.line : null;
+
   const band: ContextBandData | null = data
     ? buildContextBand({
         symbol: data.context.symbol,
@@ -605,6 +610,7 @@ export default async function DecisionPage({ searchParams }: PageProps) {
           : null,
         dailyBars,
         breadthPct: breadth?.computed?.pctAbovePriorClose ?? null,
+        spyRspLine,
         atmIv: positioning?.summary.atmIv ?? null,
         realisedVol: forecast?.volatility ?? null,
         regimeTracked: tracksLog,

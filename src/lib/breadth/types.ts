@@ -66,6 +66,9 @@ export interface BreadthReading {
   source: 'tradier' | 'yahoo' | null;
   /** Method B. Null only when the two-symbol fetch itself failed. */
   spread: EqualWeightSpread | null;
+  /** SPY vs RSP — the day's gap, one-month ratio and plain-English verdict.
+   *  Null before the first fetch of the session. */
+  spyRsp: import('./spyRspCore').SpyRspReading | null;
   /** Earlier samples from today, oldest first, for the sparkline. */
   series: BreadthSample[];
   /** Anything that limits how the numbers above should be read. */

@@ -52,6 +52,20 @@ export interface DeskSnapshot {
   losers: DayMover[];
   /** The day's top news headline, one plain line, or null. */
   headline: string | null;
+  /**
+   * The SPY-vs-RSP breadth line, prebuilt in `deskData.ts` (e.g.
+   * "Big vs avg stock: SPY ▲ · RSP ▼ (narrow)"), or null when there is no fresh
+   * reading. Dropped first when a post runs over the limit.
+   */
+  spyRspLine: string | null;
+  /**
+   * The SPY-vs-RSP verdict key (e.g. "narrow") and its plain line, for the
+   * intraday post's "the verdict just changed" mention. Null with no fresh
+   * reading. These never appear in the fixed morning/closing templates — those
+   * use `spyRspLine` — they exist only so the intraday builder can detect a flip.
+   */
+  spyRspVerdict: string | null;
+  spyRspVerdictText: string | null;
   /** ISO timestamp the SPY figure was read at — the freshness clock. */
   dataIso: string;
 }
@@ -209,7 +223,7 @@ export function plainEnglish(s: DeskSnapshot): string {
  */
 export interface Line {
   text: string;
-  drop?: 'news' | 'weak';
+  drop?: 'spyRsp' | 'news' | 'weak';
 }
 
 /**
@@ -224,7 +238,7 @@ export function fit(lines: Line[]): { text: string; dropped: string[] } {
   let current = lines;
   if (xLen(render(current)) <= X_LIMIT) return { text: render(current), dropped };
 
-  for (const tag of ['news', 'weak'] as const) {
+  for (const tag of ['spyRsp', 'news', 'weak'] as const) {
     if (!current.some((l) => l.drop === tag)) continue;
     current = current.filter((l) => l.drop !== tag);
     dropped.push(tag);
@@ -251,6 +265,9 @@ export function composeMorning(s: DeskSnapshot): Composed {
     lines.push({ text: `Gets wild only under: ${formatStrike(s.flip)}` });
   }
   lines.push({ text: `Plain English: ${plainEnglish(s)}` });
+  if (s.spyRspLine) {
+    lines.push({ text: s.spyRspLine, drop: 'spyRsp' });
+  }
   if (s.strong.length > 0) {
     lines.push({ text: `💪 Strong: ${cashtags(s.strong.slice(0, 3))}` });
   }
@@ -277,6 +294,9 @@ export function composeClosing(s: DeskSnapshot): Composed {
   }
   if (s.dayLow !== null && s.dayHigh !== null) {
     lines.push({ text: `Range today: ${money(s.dayLow)}–${money(s.dayHigh)}` });
+  }
+  if (s.spyRspLine) {
+    lines.push({ text: s.spyRspLine, drop: 'spyRsp' });
   }
   const top = s.strong[0];
   const worst = s.weak[0];

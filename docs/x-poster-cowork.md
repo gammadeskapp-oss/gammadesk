@@ -31,6 +31,7 @@ omit a whole section rather than sending an empty or "unavailable" one.
 | `dateLabel` | string | e.g. "Monday, Oct 5 2026" |
 | `asOfLabel` | string | e.g. "as of 7:53 AM CT · cash open 8:30 AM CT" |
 | `snapshot` | `[{symbol, price, changePct?, sub?}]` | **required**; the 5 cards. `changePct` omitted → shows `n/a`. `price`/`changePct` are numbers (769.26, -0.24) |
+| `spyRsp` | string | one line under the snapshot: SPY vs the equal-weight RSP, e.g. "Big vs average stock: SPY ▲0.6% · RSP ▼0.2% → Narrow — big stocks carrying it". Use GammaDesk's own reading (`/api/health` → `scanner`/breadth, or the `/scanner` line) — don't recompute it, so every surface agrees. Omit when there is no fresh reading |
 | `vixSwing` | `{vix, expectedSwingPct, caption?}` | morning gauge; numbers (16.16, 0.9) |
 | `news` | `[{text, tag?}]` | up to 5 rows; `tag` is a short label (e.g. "Fed") |
 | `mostTalked` | `[{name, mentions?}]` | up to 6 chips |
@@ -75,6 +76,7 @@ fit. Preview both at `/admin/x-posts` before enabling.
       { "symbol": "IWM", "price": 281.52, "sub": "pre-open" },
       { "symbol": "VIX", "price": 16.16, "changePct": 5.56, "sub": "index level" }
     ],
+    "spyRsp": "Big vs average stock: SPY ▲0.6% · RSP ▼0.2% → Narrow — big stocks carrying it",
     "vixSwing": {
       "vix": 16.16,
       "expectedSwingPct": 0.9,

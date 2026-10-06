@@ -53,6 +53,10 @@ export interface RunOutcome {
   phraseId?: string;
   /** For an intraday post: true when it used "wild/bigger moves" wording. */
   wild?: boolean;
+  /** For an intraday post: the fresh SPY-vs-RSP verdict, and whether this post
+   *  called out a change in it. Passed on to the intraday state recorder. */
+  spyRspVerdict?: string | null;
+  spyRspMentioned?: boolean;
 }
 
 /** A short wait between transient X retries. */
@@ -256,7 +260,7 @@ export async function runSlot(slot: PostSlot, options: RunOptions = {}): Promise
       text: built.text, length: built.length, outcome: 'sent', reason,
       tweetId: result.tweetId, asOfLabel: built.asOfLabel, numbers: built.numbers, phraseId: built.phraseId,
     });
-    return { ...base, status: 'sent', reason, text: built.text, length: built.length, tweetId: result.tweetId, asOfLabel: built.asOfLabel, situation: built.situation, phraseId: built.phraseId, wild: built.wild };
+    return { ...base, status: 'sent', reason, text: built.text, length: built.length, tweetId: result.tweetId, asOfLabel: built.asOfLabel, situation: built.situation, phraseId: built.phraseId, wild: built.wild, spyRspVerdict: built.spyRspVerdict, spyRspMentioned: built.spyRspMentioned };
   }
 
   // Only genuinely bad credentials (`auth`) and out-of-credit (`billing`) pause

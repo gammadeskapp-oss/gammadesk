@@ -1,5 +1,7 @@
 import { PreviewCard } from './PreviewCard';
 import { MacroAlignmentBadge } from './MacroAlignmentBadge';
+import { InfoTip } from '@/components/InfoTip';
+import { Sparkline } from '@/components/Sparkline';
 import { TickerLink } from '@/components/TickerLink';
 import { formatPrice } from '@/lib/format';
 import type {
@@ -48,7 +50,50 @@ export function MarketHealthPreview({ data }: { data: MarketHealthMock }) {
           </li>
         ))}
       </ul>
+      {data.spyRsp && <SpyRspRow data={data.spyRsp} />}
     </PreviewCard>
+  );
+}
+
+/** Signed arrow + magnitude, matching the shared post/summary wording. */
+function srLeg(label: string, p: number) {
+  const up = p > 0.05;
+  const down = p < -0.05;
+  const tone = up ? 'text-bull' : down ? 'text-bear' : 'text-term-faint';
+  return (
+    <span className={`font-bold tabular-nums ${tone}`}>
+      {label} {up ? '▲' : down ? '▼' : '▬'}
+      {Math.abs(p).toFixed(1)}%
+    </span>
+  );
+}
+
+function SpyRspRow({ data }: { data: NonNullable<MarketHealthMock['spyRsp']> }) {
+  const monthUp = (data.monthRatioChangePct ?? 0) >= 0;
+  return (
+    <div className="mt-3 border-t border-term-line pt-3">
+      <div className="flex items-center gap-1.5">
+        <span className="text-2xs uppercase tracking-[0.12em] text-term-faint">Big vs average stock</span>
+        <InfoTip for="spyRsp" />
+      </div>
+      <div className="mt-1.5 flex items-center justify-between gap-3">
+        <div className="flex items-baseline gap-2 text-xs">
+          {srLeg('SPY', data.spyPct)}
+          <span className="text-term-faint">·</span>
+          {srLeg('RSP', data.rspPct)}
+        </div>
+        {data.monthRatioSeries && data.monthRatioSeries.length >= 2 && (
+          <Sparkline
+            values={data.monthRatioSeries}
+            rising={monthUp}
+            label={`One-month RSP-to-SPY ratio, ${monthUp ? 'rising' : 'falling'}`}
+            width={64}
+            height={18}
+          />
+        )}
+      </div>
+      <div className="mt-1 text-xs text-term-dim">{data.line}</div>
+    </div>
   );
 }
 

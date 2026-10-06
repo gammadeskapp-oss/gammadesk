@@ -210,6 +210,8 @@ export async function GET(request: Request) {
         // Lock the levels here too, in case the poster started mid-day and the
         // morning post never ran. `recordLockedLevels`/this both lock once.
         lockedLevels: locked ?? undefined,
+        spyRspVerdict: outcome.spyRspVerdict,
+        spyRspMentioned: outcome.spyRspMentioned,
       });
     }
   } else {

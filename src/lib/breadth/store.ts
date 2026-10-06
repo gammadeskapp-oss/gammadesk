@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createJsonStore } from '../jsonStore';
 import { marketToday } from '../time';
+import type { SpyRspReading } from './spyRspCore';
 import type { BreadthSample, EqualWeightSpread } from './types';
 import type { BreadthSource } from './universe';
 
@@ -34,6 +35,9 @@ export interface BreadthDoc {
   /** Latest Method B reading. Only the newest is kept; it is a cross-check on
    *  the current sample, not a series in its own right. */
   spread: EqualWeightSpread | null;
+  /** Latest SPY-vs-RSP reading (the day's gap plus the one-month ratio). The
+   *  single source every surface renders; only the newest is kept. */
+  spyRsp: SpyRspReading | null;
   updatedAt: string;
 }
 
@@ -54,6 +58,7 @@ function empty(): BreadthDoc {
     samples: [],
     source: null,
     spread: null,
+    spyRsp: null,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -99,6 +104,7 @@ export async function appendSample(
   sample: BreadthSample | null,
   spread: EqualWeightSpread | null,
   source: BreadthSource | null,
+  spyRsp: SpyRspReading | null,
   now: Date = new Date(),
 ): Promise<BreadthDoc> {
   const today = marketToday(now);
@@ -116,6 +122,9 @@ export async function appendSample(
       // A failed Method B leaves the previous cross-check in place rather than
       // blanking it. One timed-out request is not evidence the spread changed.
       spread: spread ?? base.spread,
+      // Same rule for the SPY-vs-RSP reading: a failed fetch keeps the last
+      // good one rather than blanking the card mid-session.
+      spyRsp: spyRsp ?? base.spyRsp,
       updatedAt: now.toISOString(),
     };
   });

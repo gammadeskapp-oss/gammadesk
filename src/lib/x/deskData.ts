@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { getBreadth, isRegularHours } from '../breadth';
+import { isSpyRspStale, spyRspPostLine } from '../breadth/spyRsp';
 import { getGroupsSnapshot } from '../groups';
 import { moverSymbols } from '../groups/definitions';
 import { rankTickers } from '../groups/ranking';
@@ -52,13 +54,14 @@ async function loadDayMovers(): Promise<{ gainers: DayMover[]; losers: DayMover[
  */
 export async function loadDeskSnapshot(now: Date = new Date()): Promise<DeskSnapshot> {
   const date = marketToday(now);
-  const [positioning, groups, live, quote, scan, movers] = await Promise.all([
+  const [positioning, groups, live, quote, scan, movers, breadth] = await Promise.all([
     getPositioning(),
     getGroupsSnapshot().catch(() => null),
     getSpotQuote('SPY').catch(() => null),
     fetchCboeQuote('SPY').catch(() => null),
     readScanForDate(date).catch(() => null),
     loadDayMovers().catch(() => ({ gainers: [], losers: [] })),
+    getBreadth().catch(() => null),
   ]);
 
   const s = positioning.summary;
@@ -87,6 +90,12 @@ export async function loadDeskSnapshot(now: Date = new Date()): Promise<DeskSnap
   const story = scan?.top?.[0] ?? null;
   const headline = story ? xLine(story) : null;
 
+  // The SPY-vs-RSP line, only when the reading is fresh — a stale one is left
+  // off the post rather than quoted as if it were today's.
+  const sr = breadth?.spyRsp ?? null;
+  const spyRspFresh = sr && !isSpyRspStale(sr, { marketOpen: isRegularHours(now), now }) ? sr : null;
+  const spyRspLine = spyRspFresh ? spyRspPostLine(spyRspFresh) : null;
+
   return {
     spot,
     changePct,
@@ -101,6 +110,9 @@ export async function loadDeskSnapshot(now: Date = new Date()): Promise<DeskSnap
     gainers: movers.gainers,
     losers: movers.losers,
     headline,
+    spyRspLine,
+    spyRspVerdict: spyRspFresh ? spyRspFresh.verdict : null,
+    spyRspVerdictText: spyRspFresh ? spyRspFresh.line : null,
     dataIso: stalestIso(priceIso, positioning.meta.quoteDateIso) ?? new Date().toISOString(),
   };
 }

@@ -281,10 +281,24 @@ export const mockMacro: MacroBiasMock = {
 
 // --- market health -----------------------------------------------------------
 
+/** SPY-vs-RSP as the health card renders it — a flattened, already-fresh view. */
+export interface SpyRspMock {
+  spyPct: number;
+  rspPct: number;
+  /** The plain-English verdict line. */
+  line: string;
+  /** One-month RSP/SPY ratio change in percent, or null. */
+  monthRatioChangePct: number | null;
+  /** Short RSP/SPY ratio series for the tiny line, or null. */
+  monthRatioSeries: number[] | null;
+}
+
 export interface MarketHealthMock {
   breadthPct: number;
   vix: { value: number; changePct: number };
   indices: { symbol: string; last: number; changePct: number }[];
+  /** Null when there is no fresh SPY-vs-RSP reading to show. */
+  spyRsp: SpyRspMock | null;
 }
 
 export const mockHealth: MarketHealthMock = {
@@ -295,6 +309,13 @@ export const mockHealth: MarketHealthMock = {
     { symbol: 'QQQ', last: 486.1, changePct: 0.61 },
     { symbol: 'IWM', last: 221.7, changePct: -0.18 },
   ],
+  spyRsp: {
+    spyPct: 0.42,
+    rspPct: -0.18,
+    line: 'Narrow — big stocks carrying it',
+    monthRatioChangePct: -1.3,
+    monthRatioSeries: [1.02, 1.01, 1.0, 0.995, 0.99, 0.985, 0.98],
+  },
 };
 
 // --- forward outlook ---------------------------------------------------------

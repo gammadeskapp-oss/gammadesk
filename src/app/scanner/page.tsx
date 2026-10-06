@@ -7,7 +7,7 @@ import { ScannerTabs } from '@/components/ScannerTabs';
 import { ScannerMacroPanel, type MacroRow } from '@/components/redesign/ScannerMacroPanel';
 import { TosTrendTab } from '@/components/TosTrendTab';
 import { InfoTip } from '@/components/InfoTip';
-import { getBreadth } from '@/lib/breadth';
+import { getBreadth, isRegularHours, isSpyRspStale, spyRspSummaryLine } from '@/lib/breadth';
 import { breadthSentence } from '@/lib/breadth/wording';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { getScannerView, storeStatus } from '@/lib/scanner';
@@ -164,6 +164,16 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
             </span>
           </p>
         )}
+
+        {breadth?.spyRsp &&
+          !isSpyRspStale(breadth.spyRsp, { marketOpen: isRegularHours() }) && (
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-2xs text-term-faint">
+              <span className="label-xs">Big vs average stock</span>
+              <InfoTip for="spyRsp" />
+              <span className="text-term-text">{spyRspSummaryLine(breadth.spyRsp)}</span>
+              <span className="text-term-dim">Context only — it is not part of the score.</span>
+            </p>
+          )}
 
         {/*
           Above the list, because it changes how every row on it reads. The

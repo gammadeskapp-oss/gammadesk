@@ -243,6 +243,12 @@ function Market({ band, view }: { band: ContextBandData; view: HorizonView }) {
           value={m.breadthPct === null ? '—' : `${Math.round(m.breadthPct)}%`}
           tone={breadthTone}
         />
+        {m.spyRspLine && (
+          <>
+            <div className="border-t border-term-line" />
+            <Row label="Big vs average stock" value={m.spyRspLine} />
+          </>
+        )}
         <div className="border-t border-term-line" />
         <Row label="Window" value={windowLabel} />
         <div className="border-t border-term-line" />
@@ -279,7 +285,10 @@ function Market({ band, view }: { band: ContextBandData; view: HorizonView }) {
             The <span className="text-term-dim">gamma regime</span> says how the tape
             tends to behave: calm above the flip, where dealer hedging leans against
             moves, and wilder below it. <span className="text-term-dim">Breadth</span> is
-            how much of the wider market is taking part, and{' '}
+            how much of the wider market is taking part — and{' '}
+            <span className="text-term-dim">Big vs average stock</span> compares SPY
+            with the equal-weight RSP, so a narrow move driven by a few giants shows
+            up as RSP lagging. Then{' '}
             <span className="text-term-dim">VRP</span> is how much dearer the next
             month&rsquo;s options are than the movement price has actually delivered.
           </p>

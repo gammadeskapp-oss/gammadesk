@@ -72,7 +72,10 @@ function sectionShell(label: string, note: string | undefined, bodyHeight: numbe
 function snapshotBlock(data: PosterData): Block {
   const cards = data.snapshot.slice(0, 5);
   const cardW = (CONTENT_W - (cards.length - 1) * 14) / cards.length;
+  const spyRspH = data.spyRsp ? 30 : 0;
+  const bodyH = 142 + spyRspH;
   const body = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
     <div style={{ display: 'flex', flexDirection: 'row', gap: 14 }}>
       {cards.map((s) => (
         <div
@@ -100,9 +103,15 @@ function snapshotBlock(data: PosterData): Block {
         </div>
       ))}
     </div>
+      {data.spyRsp ? (
+        <div style={{ display: 'flex', fontSize: 15, color: C.faint }}>{clip(data.spyRsp, 90)}</div>
+      ) : (
+        <div />
+      )}
+    </div>
   );
   const note = data.kind === 'morning' ? 'pre-open levels' : 'at the close';
-  return { id: 'snapshot', label: 'Market Snapshot', order: 0, priority: 0, height: LABEL_H + 142, node: sectionShell('Market Snapshot', note, 142, body) };
+  return { id: 'snapshot', label: 'Market Snapshot', order: 0, priority: 0, height: LABEL_H + bodyH, node: sectionShell('Market Snapshot', note, bodyH, body) };
 }
 
 function vixBlock(data: PosterData): Block | null {

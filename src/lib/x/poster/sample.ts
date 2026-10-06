@@ -20,6 +20,7 @@ const MORNING: PosterData = {
     { symbol: 'IWM', price: 281.52, sub: 'pre-open' },
     { symbol: 'VIX', price: 16.16, changePct: 5.56, sub: 'index level' },
   ],
+  spyRsp: 'Big vs average stock: SPY ▲0.6% · RSP ▼0.2% → Narrow — big stocks carrying it',
   vixSwing: {
     vix: 16.16,
     expectedSwingPct: 0.9,

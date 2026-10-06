@@ -81,6 +81,8 @@ export interface MarketBand {
   breadthPct: number | null;
   /** Green over 50, red under, neutral when unmeasured. */
   breadthTone: 'up' | 'down' | 'neutral';
+  /** SPY-vs-RSP verdict line, or null when there is no fresh reading. */
+  spyRspLine: string | null;
   /** Honest one-liner: an index ETF has no earnings; a stock is not tracked. */
   earnings: string;
   vrp: {
@@ -128,6 +130,8 @@ export interface BuildContextBandInput {
   /** Daily bars, oldest first, for the hold-rate backtest. */
   dailyBars: DailyBar[];
   breadthPct: number | null;
+  /** SPY-vs-RSP verdict line, or null when there is no fresh reading. */
+  spyRspLine: string | null;
   /** Implied vol (annualised decimal) of the ~1-month ATM contract, or null. */
   atmIv: number | null;
   /** Annualised realised volatility, as the forecast measured it, or null. */
@@ -295,6 +299,7 @@ export function buildContextBand(input: BuildContextBandInput): ContextBand {
     breadthPct,
     breadthTone:
       breadthPct === null ? 'neutral' : breadthPct >= 50 ? 'up' : 'down',
+    spyRspLine: input.spyRspLine,
     earnings: earningsLine(input.symbol),
     vrp: buildVrp(input.atmIv, input.realisedVol),
   };

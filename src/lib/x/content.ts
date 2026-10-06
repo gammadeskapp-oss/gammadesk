@@ -17,6 +17,8 @@ import {
 } from './compose';
 import { composeIntradayPhrase } from './phrases';
 import { loadDeskSnapshot } from './deskData';
+import { readIntradayState } from './intradayStore';
+import { NFA, xLen, X_LIMIT } from './compose';
 import type { PostNumbers, PostSlotKind } from './types';
 
 /**
@@ -71,6 +73,12 @@ export interface BuiltPost {
   phraseId?: string;
   /** For an intraday post: true when it used "wild/bigger moves" wording. */
   wild?: boolean;
+  /** For an intraday post: the fresh SPY-vs-RSP verdict, so the recorder can
+   *  remember the day's opening verdict. Null when there is no fresh reading. */
+  spyRspVerdict?: string | null;
+  /** For an intraday post: true when this post called out a verdict change,
+   *  so the recorder marks it mentioned for the rest of the day. */
+  spyRspMentioned?: boolean;
 }
 
 function fromComposed(c: Composed, note?: string, image?: BuiltPost['image']): BuiltPost {
@@ -100,15 +108,69 @@ async function buildIntraday(ctx: BuildContext, now: Date): Promise<BuiltPost> {
     usage: ctx.phraseUsage ?? {},
     allowWild: ctx.allowWild ?? true,
   });
-  if (picked) {
-    return {
-      ...fromComposed(picked.composed, `phrase: ${picked.situation}`),
-      situation: picked.situation,
-      phraseId: picked.phraseId,
-      wild: picked.wild,
-    };
+
+  const base = picked
+    ? {
+        ...fromComposed(picked.composed, `phrase: ${picked.situation}`),
+        situation: picked.situation,
+        phraseId: picked.phraseId,
+        wild: picked.wild,
+      }
+    : fromComposed(composeIntradayFallback(snapshot), 'no renderable phrase, used fallback');
+
+  return withSpyRspChange(base, snapshot, now);
+}
+
+/**
+ * Call out a SPY-vs-RSP verdict change on the intraday post — but only once per
+ * session, and only when the verdict has actually moved off the day's opening
+ * reading. Everything is read from the stored state the recorder maintains; the
+ * flags returned here are what tell the recorder to remember the opening verdict
+ * and that a change has now been mentioned.
+ */
+async function withSpyRspChange(
+  post: BuiltPost,
+  snapshot: DeskSnapshot,
+  now: Date,
+): Promise<BuiltPost> {
+  const verdict = snapshot.spyRspVerdict;
+  // No fresh reading: nothing to track or mention.
+  if (!verdict || !snapshot.spyRspVerdictText) return post;
+
+  const state = await readIntradayState(marketToday(now)).catch(() => null);
+  const openVerdict = state?.openSpyRspVerdict ?? null;
+  const alreadyMentioned = state?.spyRspChangeMentioned ?? false;
+
+  // A change is only a change against a known opening verdict, said at most once.
+  const changed = openVerdict !== null && verdict !== openVerdict && !alreadyMentioned;
+  if (!changed) {
+    // Still report the current verdict so the recorder can seed the opening one.
+    return { ...post, spyRspVerdict: verdict };
   }
-  return fromComposed(composeIntradayFallback(snapshot), 'no renderable phrase, used fallback');
+
+  // Insert the mention just before the disclaimer, and only if it still fits —
+  // the intraday post is already near its length budget, so a flip that would
+  // overflow is recorded as mentioned-skipped rather than shown truncated.
+  const mention = `Big vs avg stock flipped → ${snapshot.spyRspVerdictText}`;
+  const lines = post.text.split('\n');
+  const nfaAt = lines.lastIndexOf(NFA);
+  const withLine =
+    nfaAt >= 0
+      ? [...lines.slice(0, nfaAt), mention, ...lines.slice(nfaAt)].join('\n')
+      : `${post.text}\n${mention}`;
+
+  if (xLen(withLine) > X_LIMIT) {
+    return { ...post, spyRspVerdict: verdict };
+  }
+
+  return {
+    ...post,
+    text: withLine,
+    length: xLen(withLine),
+    spyRspVerdict: verdict,
+    spyRspMentioned: true,
+    note: post.note ? `${post.note}; spy-vs-rsp flip noted` : 'spy-vs-rsp flip noted',
+  };
 }
 
 /**

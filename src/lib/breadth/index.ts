@@ -4,6 +4,7 @@ import { cached } from '../cache';
 import { marketNow } from '../time';
 import { breadthBand, GREEN_LOOKBACK_MINUTES, type BreadthBand } from './compute';
 import { fetchEqualWeightSpread } from './spread';
+import { fetchSpyRsp } from './spyRsp';
 import {
   appendPrices,
   appendSample,
@@ -15,6 +16,16 @@ import { sweepConstituents, type BreadthSource } from './universe';
 
 export { breadthBand, FLAT_BAND_PCT, GREEN_LOOKBACK_MINUTES } from './compute';
 export type { BreadthBand } from './compute';
+export {
+  buildSpyRspReading,
+  isSpyRspStale,
+  spyRspPostLine,
+  spyRspSummaryLine,
+  spyRspVerdict,
+  SPY_RSP_VERDICT_LINE,
+  SPY_RSP_VERDICT_TAG,
+} from './spyRspCore';
+export type { SpyRspReading, SpyRspVerdict } from './spyRspCore';
 export { storeStatus } from './store';
 export type * from './types';
 
@@ -75,9 +86,10 @@ export async function refreshBreadth(now: Date = new Date()): Promise<RefreshRes
   // project's own earlier snapshot — see `store.ts`.
   const prior = await readPriorPrices(GREEN_LOOKBACK_MINUTES, now);
 
-  const [sweep, spread] = await Promise.all([
+  const [sweep, spread, spyRsp] = await Promise.all([
     sweepConstituents(now, prior.prices),
     fetchEqualWeightSpread().catch(() => null),
+    fetchSpyRsp().catch(() => null),
   ]);
 
   const notes = [...sweep.notes];
@@ -103,7 +115,7 @@ export async function refreshBreadth(now: Date = new Date()): Promise<RefreshRes
     notes.push('The RSP-against-SPY cross-check could not be read this refresh.');
   }
 
-  const doc = await appendSample(sample, spread, sweep.source, now);
+  const doc = await appendSample(sample, spread, sweep.source, spyRsp, now);
 
   /*
    * The price ring is written even when the sample was refused. A holiday or a
@@ -147,6 +159,7 @@ export function getBreadth(): Promise<BreadthReading> {
       computed: latest,
       source: doc.source,
       spread: doc.spread,
+      spyRsp: doc.spyRsp,
       series: doc.samples,
       notes,
     } satisfies BreadthReading;

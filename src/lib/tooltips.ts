@@ -625,6 +625,14 @@ const ENTRIES = {
     detail:
       'Values are from FRED (Federal Reserve Bank of St. Louis): fed funds target upper limit (DFEDTARU), 10-year Treasury yield (DGS10), and CPI year-over-year (CPIAUCSL). Regime context only — it feeds no score, verdict, or forecast.',
   },
+
+  spyRsp: {
+    label: 'SPY vs RSP',
+    plain:
+      'RSP gives every S&P 500 stock equal weight. If it lags SPY, only a few big stocks are pushing the market.',
+    detail:
+      "SPY is weighted by company size, so the biggest names drive it; RSP (Invesco S&P 500 Equal Weight) counts all 500 the same. The day's gap is RSP's move minus SPY's; the one-month line is the RSP/SPY ratio. Context only — it feeds no score or verdict.",
+  },
 };
 
 export type TooltipKey = keyof typeof ENTRIES;

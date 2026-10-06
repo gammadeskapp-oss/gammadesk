@@ -90,6 +90,8 @@ export async function GET(request: Request) {
       phraseId: outcome.phraseId,
       wild: outcome.wild,
       lockedLevels: locked,
+      spyRspVerdict: outcome.spyRspVerdict,
+      spyRspMentioned: outcome.spyRspMentioned,
     });
   }
 

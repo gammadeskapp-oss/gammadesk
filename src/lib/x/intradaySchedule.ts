@@ -50,6 +50,13 @@ export interface IntradayState {
   summarySent?: boolean;
   /** When the "stale during market hours" alert last fired, ISO — throttles it. */
   staleAlertedAt?: string;
+  /**
+   * The SPY-vs-RSP verdict as of the day's first intraday observation, and
+   * whether a verdict change has already been mentioned today. The intraday
+   * post calls out a flip from the opening verdict exactly once per session.
+   */
+  openSpyRspVerdict?: string | null;
+  spyRspChangeMentioned?: boolean;
 }
 
 /**

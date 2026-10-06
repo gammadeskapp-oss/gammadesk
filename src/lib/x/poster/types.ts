@@ -108,6 +108,12 @@ export interface PosterData {
   asOfLabel?: string;
 
   snapshot: PosterSnap[];
+  /**
+   * The SPY-vs-RSP breadth verdict line, shown under the market snapshot, e.g.
+   * "Big vs average stock: SPY ▲0.6% · RSP ▼0.2% → Narrow — big stocks carrying
+   * it". Supply it from the shared GammaDesk reading (see `docs/x-poster-cowork.md`).
+   */
+  spyRsp?: string;
 
   // morning-leaning
   vixSwing?: PosterVixSwing;
@@ -217,6 +223,8 @@ export function validatePoster(raw: unknown, kind: PosterKind, date: string): Po
   if (dateLabel) data.dateLabel = dateLabel;
   const asOfLabel = str(raw.asOfLabel, 120);
   if (asOfLabel) data.asOfLabel = asOfLabel;
+  const spyRsp = str(raw.spyRsp, 120);
+  if (spyRsp) data.spyRsp = spyRsp;
 
   // VIX swing
   if (isObj(raw.vixSwing)) {

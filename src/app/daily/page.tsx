@@ -6,6 +6,7 @@ import { TickerLinks } from '@/components/daily/TickerLinks';
 import { EmailSignup } from '@/components/email/EmailSignup';
 import { CopyTradingViewButton } from '@/components/daily/CopyTradingViewButton';
 import { buildLevelCode } from '@/lib/tradingview/code';
+import { getBreadth, isRegularHours, isSpyRspStale, spyRspSummaryLine } from '@/lib/breadth';
 import { getPositioning } from '@/lib/positioning';
 import { buildSimpleRead } from '@/lib/simple/translate';
 import { fetchCboeQuotes } from '@/lib/x/cboeQuote';
@@ -75,12 +76,18 @@ export default async function DailyPage() {
   // Positioning drives the SPY map; the compact Cboe quotes drive the index
   // cards; the morning brief supplies the highlights. Each is allowed to fail
   // on its own — a dead quote feed must not blank the whole page.
-  const [positioning, quotes, brief, todayScan] = await Promise.all([
+  const [positioning, quotes, brief, todayScan, breadth] = await Promise.all([
     getPositioning().catch(() => null),
     fetchCboeQuotes(['SPY', 'QQQ', 'IWM', 'VIX']).catch(() => new Map()),
     readBriefForDate(marketToday(now)).catch(() => null),
     readScanForDate(marketToday(now)).catch(() => null),
+    getBreadth().catch(() => null),
   ]);
+
+  // The SPY-vs-RSP line under the index cards, only when fresh.
+  const sr = breadth?.spyRsp ?? null;
+  const spyRspLine =
+    sr && !isSpyRspStale(sr, { marketOpen: isRegularHours(now), now }) ? spyRspSummaryLine(sr) : null;
 
   // Prefer today's scan; on a quiet morning before the first scan, fall back to
   // the most recent stored one so the section is not empty for no reason.
@@ -202,6 +209,11 @@ export default async function DailyPage() {
                 );
               })}
             </div>
+            {spyRspLine && (
+              <p className="text-xs text-term-faint">
+                <span className="font-bold text-term-dim">Big vs average stock:</span> {spyRspLine}
+              </p>
+            )}
           </section>
         )}
 

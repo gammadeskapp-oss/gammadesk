@@ -26,7 +26,8 @@ import { formatUsd } from '@/lib/format';
 import { buildGammaProfile, type GammaProfileData } from '@/lib/gammaProfile';
 import { peekPositioningView } from '@/lib/positioning';
 import { getSpotQuote } from '@/lib/spot';
-import { getBreadth } from '@/lib/breadth';
+import { getBreadth, isRegularHours } from '@/lib/breadth';
+import { isSpyRspStale } from '@/lib/breadth/spyRsp';
 import type { BreadthReading } from '@/lib/breadth/types';
 import { getMarketContextQuotes, type MarketContextQuotes } from '@/lib/marketContext/quotes';
 import { getRichMacroBias, type RichMacroView } from '@/lib/macroBias';
@@ -216,10 +217,25 @@ function mapHealth(breadth: BreadthReading | null, quotes: MarketContextQuotes |
     .filter((q) => q.symbol !== '^VIX')
     .map((q) => ({ symbol: q.label, last: q.price, changePct: q.changePct }));
   if (breadthPct === null && !vixQuote && indices.length === 0) return null;
+
+  // Shown only when fresh — a stale SPY-vs-RSP reading is hidden, never faked.
+  const sr = breadth?.spyRsp ?? null;
+  const spyRsp =
+    sr && !isSpyRspStale(sr, { marketOpen: isRegularHours() })
+      ? {
+          spyPct: sr.spyPct,
+          rspPct: sr.rspPct,
+          line: sr.line,
+          monthRatioChangePct: sr.monthRatioChangePct,
+          monthRatioSeries: sr.monthRatioSeries,
+        }
+      : null;
+
   return {
     breadthPct: breadthPct === null ? 0 : Math.round(breadthPct),
     vix: vixQuote ? { value: vixQuote.price, changePct: vixQuote.changePct } : { value: 0, changePct: 0 },
     indices,
+    spyRsp,
   };
 }
 
