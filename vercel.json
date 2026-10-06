@@ -116,6 +116,10 @@
     {
       "path": "/api/macro-bias/refresh",
       "schedule": "30 12 * * 1-5"
+    },
+    {
+      "path": "/api/macro-bias/refresh",
+      "schedule": "40 13,14 * * 1-5"
     }
   ]
 }
