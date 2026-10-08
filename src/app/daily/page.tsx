@@ -17,6 +17,7 @@ import { marketToday } from '@/lib/time';
 import { formatPrice } from '@/lib/format';
 import { formatAsOf } from '@/lib/time';
 import { snapshotStaleness } from '@/lib/events';
+import { todaysMergedEvents } from '@/lib/events/merged';
 import {
   buildLevelScale,
   changeTone,
@@ -76,12 +77,13 @@ export default async function DailyPage() {
   // Positioning drives the SPY map; the compact Cboe quotes drive the index
   // cards; the morning brief supplies the highlights. Each is allowed to fail
   // on its own — a dead quote feed must not blank the whole page.
-  const [positioning, quotes, brief, todayScan, breadth] = await Promise.all([
+  const [positioning, quotes, brief, todayScan, breadth, events] = await Promise.all([
     getPositioning().catch(() => null),
     fetchCboeQuotes(['SPY', 'QQQ', 'IWM', 'VIX']).catch(() => new Map()),
     readBriefForDate(marketToday(now)).catch(() => null),
     readScanForDate(marketToday(now)).catch(() => null),
     getBreadth().catch(() => null),
+    todaysMergedEvents(now).catch(() => []),
   ]);
 
   // The SPY-vs-RSP line under the index cards, only when fresh.
@@ -214,6 +216,35 @@ export default async function DailyPage() {
                 <span className="font-bold text-term-dim">Big vs average stock:</span> {spyRspLine}
               </p>
             )}
+          </section>
+        )}
+
+        {/* Today's scheduled events (Fed, Treasury, data) */}
+        {events.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="text-2xs font-bold uppercase tracking-[0.18em] text-term-faint">
+              On the calendar today
+            </h2>
+            <ul className="space-y-1.5">
+              {events.map((e) => (
+                <li key={`${e.timeEt}-${e.name}`} className="flex items-baseline gap-2.5 text-xs">
+                  <span className="w-24 shrink-0 tabular-nums text-term-dim">
+                    {e.timeCt ?? e.timeEt} CT
+                  </span>
+                  <span
+                    className={`font-bold ${
+                      e.importance === 'high'
+                        ? 'text-bear'
+                        : e.importance === 'medium'
+                          ? 'text-flip'
+                          : 'text-term-dim'
+                    }`}
+                  >
+                    {e.name}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
 

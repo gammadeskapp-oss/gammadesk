@@ -11,6 +11,8 @@ import { getSpotQuote } from '../spot';
 import { readScanForDate } from '../news/store';
 import { xLine } from '../news/view';
 import { fetchCboeQuote, fetchCboeQuotes } from './cboeQuote';
+import { todaysMergedEvents } from '../events/merged';
+import { morningEventsLine } from './eventsLine';
 import { stalestIso } from './compose';
 import type { DayMover, DeskSnapshot, ScoredName } from './compose';
 
@@ -96,6 +98,11 @@ export async function loadDeskSnapshot(now: Date = new Date()): Promise<DeskSnap
   const spyRspFresh = sr && !isSpyRspStale(sr, { marketOpen: isRegularHours(now), now }) ? sr : null;
   const spyRspLine = spyRspFresh ? spyRspPostLine(spyRspFresh) : null;
 
+  // The day's high/medium scheduled-event line (Fed, Treasury, CPI/jobs). A
+  // dead store degrades to the bundled calendar; a throw degrades to no line.
+  const events = await todaysMergedEvents(now).catch(() => []);
+  const eventsLine = morningEventsLine(events, marketToday(now));
+
   return {
     spot,
     changePct,
@@ -111,6 +118,7 @@ export async function loadDeskSnapshot(now: Date = new Date()): Promise<DeskSnap
     losers: movers.losers,
     headline,
     spyRspLine,
+    eventsLine,
     spyRspVerdict: spyRspFresh ? spyRspFresh.verdict : null,
     spyRspVerdictText: spyRspFresh ? spyRspFresh.line : null,
     dataIso: stalestIso(priceIso, positioning.meta.quoteDateIso) ?? new Date().toISOString(),

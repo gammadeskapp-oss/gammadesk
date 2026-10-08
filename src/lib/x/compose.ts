@@ -59,6 +59,13 @@ export interface DeskSnapshot {
    */
   spyRspLine: string | null;
   /**
+   * The day's high/medium scheduled-event line, prebuilt in `deskData.ts` (e.g.
+   * "📅 Today: FOMC minutes 1 PM CT · Fed speakers"), or null when nothing
+   * high/medium is on. Optional so existing callers and fixtures that predate
+   * it still type-check. Dropped after the SPY-vs-RSP line when a post runs long.
+   */
+  eventsLine?: string | null;
+  /**
    * The SPY-vs-RSP verdict key (e.g. "narrow") and its plain line, for the
    * intraday post's "the verdict just changed" mention. Null with no fresh
    * reading. These never appear in the fixed morning/closing templates — those
@@ -223,7 +230,7 @@ export function plainEnglish(s: DeskSnapshot): string {
  */
 export interface Line {
   text: string;
-  drop?: 'spyRsp' | 'news' | 'weak';
+  drop?: 'spyRsp' | 'events' | 'news' | 'weak';
 }
 
 /**
@@ -238,7 +245,7 @@ export function fit(lines: Line[]): { text: string; dropped: string[] } {
   let current = lines;
   if (xLen(render(current)) <= X_LIMIT) return { text: render(current), dropped };
 
-  for (const tag of ['spyRsp', 'news', 'weak'] as const) {
+  for (const tag of ['spyRsp', 'events', 'news', 'weak'] as const) {
     if (!current.some((l) => l.drop === tag)) continue;
     current = current.filter((l) => l.drop !== tag);
     dropped.push(tag);
@@ -265,6 +272,9 @@ export function composeMorning(s: DeskSnapshot): Composed {
     lines.push({ text: `Gets wild only under: ${formatStrike(s.flip)}` });
   }
   lines.push({ text: `Plain English: ${plainEnglish(s)}` });
+  if (s.eventsLine) {
+    lines.push({ text: s.eventsLine, drop: 'events' });
+  }
   if (s.spyRspLine) {
     lines.push({ text: s.spyRspLine, drop: 'spyRsp' });
   }

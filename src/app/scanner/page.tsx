@@ -9,6 +9,7 @@ import { TosTrendTab } from '@/components/TosTrendTab';
 import { InfoTip } from '@/components/InfoTip';
 import { getBreadth, isRegularHours, isSpyRspStale, spyRspSummaryLine } from '@/lib/breadth';
 import { breadthSentence } from '@/lib/breadth/wording';
+import { todaysMergedEvents } from '@/lib/events/merged';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { getScannerView, storeStatus } from '@/lib/scanner';
 import { DEFAULT_FILTERS, scoreRow } from '@/lib/scanner/score';
@@ -54,6 +55,7 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
   const view = await getScannerView();
   // Reads a stored document, so it costs the scan nothing.
   const breadth = await getBreadth().catch(() => null);
+  const events = await todaysMergedEvents().catch(() => []);
   const store = storeStatus();
   const { scan, latest, gamma, schedule } = view;
 
@@ -174,6 +176,20 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
               <span className="text-term-dim">Context only — it is not part of the score.</span>
             </p>
           )}
+
+        {events.length > 0 && (
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-2xs text-term-faint">
+            <span className="label-xs">Event risk</span>
+            {events.some((e) => e.importance === 'high') && (
+              <span className="font-bold text-bear">High-impact event today.</span>
+            )}
+            <span className="text-term-dim">
+              {events
+                .map((e) => `${e.name} ${e.timeCt ?? e.timeEt} CT`)
+                .join(' · ')}
+            </span>
+          </p>
+        )}
 
         {/*
           Above the list, because it changes how every row on it reads. The

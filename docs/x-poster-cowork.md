@@ -206,3 +206,17 @@ A successful POST returns, e.g.:
   brief still saved); the post falls back to text-only. Fix the field named and
   re-POST. The legacy `image` field (a pre-rendered PNG) is no longer needed for
   morning/closing and can be dropped.
+
+## Scheduled events (Fed, Treasury, data)
+
+GammaDesk now publishes today's Fed Board and Treasury events (merged with the
+CPI/jobs calendar) on the dashboard and `/daily`, led by the Central-time clock
+with importance (HIGH/MEDIUM/LOW) and the official source link. The autonomous
+feed refreshes at 6:00 AM and 12:00 PM CT; health is at `/admin/events`.
+
+When composing the Discord/Cowork brief, include the day's HIGH and MEDIUM
+events as a short "On the calendar today" line — the same list the site shows —
+e.g. `FOMC minutes 1:00 PM CT · Chair Powell 11:30 AM CT`. State times and names
+only; never a direction. The morning X post already carries this line
+automatically (dropped first only if the post runs over 280), and an intraday
+heads-up fires ~15 minutes before a HIGH/MEDIUM event (max two a day).

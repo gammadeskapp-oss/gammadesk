@@ -57,6 +57,12 @@ export interface IntradayState {
    */
   openSpyRspVerdict?: string | null;
   spyRspChangeMentioned?: boolean;
+  /**
+   * Keys of scheduled-event heads-ups already posted today (see
+   * `eventHeadsUpKey`). Capped at two a day; a key here is never re-posted, so a
+   * redeploy or an extra cron firing cannot double a heads-up.
+   */
+  eventHeadsUps?: string[];
 }
 
 /**

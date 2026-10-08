@@ -2,7 +2,7 @@ import 'server-only';
 
 import { config } from '../config';
 import { getBreadth } from '../breadth';
-import { eventRow, highImportanceToday } from '../events';
+import { mergedEventRow, mergedHighImportanceToday } from '../events/merged';
 import { marketToday } from '../time';
 import { fetchFredSeries, FRED_SERIES } from './fred';
 import { computeMacroBias } from './compute';
@@ -59,10 +59,12 @@ async function refreshRichMacroBias(): Promise<RefreshResult['rich']> {
       getBreadth().catch(() => null),
     ]);
 
-    const rows = eventRow();
+    const rows = await mergedEventRow();
     const nextEventLabel = rows[0]?.name ?? 'None scheduled';
     const imminent = rows.find((e) => e.importance === 'high' && e.when === 'today');
-    const imminentEventLabel = highImportanceToday() ? (imminent?.name ?? 'High-impact event') : null;
+    const imminentEventLabel = (await mergedHighImportanceToday())
+      ? (imminent?.name ?? 'High-impact event')
+      : null;
 
     const dateKey = marketToday();
     const now = new Date().toISOString();

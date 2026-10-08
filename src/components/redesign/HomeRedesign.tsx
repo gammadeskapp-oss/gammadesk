@@ -1,5 +1,6 @@
 import { HeroRegime } from './HeroRegime';
 import { MacroBiasCard } from './MacroBiasCard';
+import { TodaysEventsCard } from './TodaysEventsCard';
 import { HomeLevels } from './HomeLevels';
 import { MethodDrawer } from './MethodDrawer';
 import {
@@ -60,6 +61,9 @@ export function HomeRedesign({ data }: { data: HomeData }) {
 
       {/* 3 — macro bias, first-class, directly under the hero */}
       {data.macro ? <MacroBiasCard macro={data.macro} /> : <Unavailable title="Macro bias" />}
+
+      {/* 3b — today's scheduled events (Fed, Treasury, data) */}
+      <TodaysEventsCard events={data.events} />
 
       {/*
         4 + 5–11 — the gamma map and the preview teasers, side by side.

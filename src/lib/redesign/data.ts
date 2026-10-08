@@ -39,8 +39,9 @@ import { getFlowSnapshot } from '@/lib/flow';
 import { readLog } from '@/lib/log/store';
 import { summarise } from '@/lib/log/types';
 import { readArchive } from '@/lib/scanner/archive';
-import { eventRow } from '@/lib/events';
 import { currentMarketStatus } from '@/lib/events';
+import { mergedEventRow, todaysMergedEvents } from '@/lib/events/merged';
+import type { EventRow } from '@/lib/events';
 import type { PositioningData } from '@/lib/types';
 import { macroAlignmentFor, earningsWithin24h } from './macroAlignment';
 import type {
@@ -71,6 +72,8 @@ export interface HomeData {
   scanner: ScannerShortlistMock | null;
   flow: OptionsFlowMock | null;
   trackRecord: TrackRecordMock | null;
+  /** Today's scheduled events (Fed, Treasury, CPI, jobs), bundled + fetched. */
+  events: EventRow[];
 }
 
 // --- status bar (pure, no upstream) -----------------------------------------
@@ -197,8 +200,8 @@ function mapMacro(
 
 // --- next catalyst (shared by macro bias + macro fit) ------------------------
 
-function nextCatalyst(now: Date = new Date()): MacroBiasMock['nextCatalyst'] {
-  const rows = eventRow(now);
+async function nextCatalyst(now: Date = new Date()): Promise<MacroBiasMock['nextCatalyst']> {
+  const rows = await mergedEventRow(now);
   const next = rows.find((e) => e.importance === 'high') ?? rows[0] ?? null;
   if (!next) return { label: 'No scheduled catalyst', when: 'this session', hoursAway: 0 };
   return {
@@ -417,17 +420,17 @@ export async function loadMacroFit(symbol: string, now: Date = new Date()): Prom
     sensitivity,
     fit,
     why,
-    nextRisk: nextCatalyst(now).label,
+    nextRisk: (await nextCatalyst(now)).label,
   };
 }
 
 // --- the whole bundle --------------------------------------------------------
 
 export async function loadHomeData(now: Date = new Date()): Promise<HomeData> {
-  const catalyst = nextCatalyst(now);
-
-  const [book, breadth, quotes, richMacro, outlook, netLiquidity, leadership, scanner, flow, trackRecord] =
+  const [catalyst, events, book, breadth, quotes, richMacro, outlook, netLiquidity, leadership, scanner, flow, trackRecord] =
     await Promise.all([
+      nextCatalyst(now),
+      todaysMergedEvents(now).catch((): EventRow[] => []),
       peekPositioningView(config.symbol).catch((): PositioningData | null => null),
       getBreadth().catch((): BreadthReading | null => null),
       getMarketContextQuotes().catch((): MarketContextQuotes | null => null),
@@ -460,5 +463,6 @@ export async function loadHomeData(now: Date = new Date()): Promise<HomeData> {
     scanner,
     flow,
     trackRecord,
+    events,
   };
 }

@@ -36,7 +36,10 @@ import { peekForecast } from '@/lib/forecast';
 import type { ForecastResult } from '@/lib/forecast/types';
 import { formatStrike } from '@/lib/format';
 import { peekPositioningView } from '@/lib/positioning';
-import { eventsBetween, priorSessionLabel, snapshotStaleness } from '@/lib/events';
+import { priorSessionLabel, snapshotStaleness } from '@/lib/events';
+import { mergedEventsBetween } from '@/lib/events/merged';
+import { addDays as addCalendarDays } from '@/lib/events/feed/merge';
+import { marketToday } from '@/lib/time';
 import { StaleDataBanner, mutedIf } from '@/components/StaleDataBanner';
 import { MethodologyDrawer } from '@/components/MethodologyDrawer';
 import { positioningMethodology, type Methodology } from '@/lib/methodology';
@@ -521,6 +524,17 @@ export default async function DecisionPage({ searchParams }: PageProps) {
   const priorLabel = data ? priorSessionLabel(data.context.quoteDateIso) : null;
 
   /*
+   * The merged calendar (hand-maintained CPI/jobs + the fetched Fed Board and
+   * Treasury events) for a wide upcoming window, fetched once here so the
+   * synchronous context-band callback below can filter it in memory to
+   * whatever window it asks for. A dead store degrades to the bundled
+   * calendar; a thrown read degrades to nothing, never a broken page.
+   */
+  const upcomingEvents = data
+    ? await mergedEventsBetween(marketToday(), addCalendarDays(marketToday(), 45)).catch(() => [])
+    : [];
+
+  /*
    * Market clock, for the levels' volume view. When there is no live session
    * the "today's activity" volume is really the last completed session's, so
    * the panel relabels it "Last session" and names the date. Read fresh each
@@ -624,7 +638,7 @@ export default async function DecisionPage({ searchParams }: PageProps) {
               : null,
         })),
         eventsInWindow: (from, to) => {
-          const events = eventsBetween(from, to);
+          const events = upcomingEvents.filter((ev) => ev.date >= from && ev.date <= to);
           return { count: events.length, names: events.map((ev) => ev.name) };
         },
       })

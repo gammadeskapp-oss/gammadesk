@@ -38,6 +38,24 @@ export interface ScheduledEvent {
    * the CPI print the warning refers to is our guess at the date.
    */
   confirmed: boolean;
+
+  /*
+   * The fields below are optional and carried only by the fetched Fed/Treasury
+   * events (see `feed/`). The hand-maintained `calendar.json` omits them, and
+   * everything that renders a `ScheduledEvent` treats them as "nice to have":
+   * the name and the ET time are always enough on their own.
+   */
+
+  /** New York → Central wall clock, 24-hour, e.g. `13:00`. CT = ET − 1h. */
+  timeCt?: string;
+  /** Who is speaking or acting, e.g. `Chair Powell`, `Governor Waller`. */
+  who?: string;
+  /** A short topic line, when the source gives one. */
+  topic?: string;
+  /** Which feed produced this event, for the admin health view. */
+  source?: string;
+  /** The official page this event was read from, for a reader to verify. */
+  sourceUrl?: string;
 }
 
 export interface MarketDay {
@@ -206,6 +224,17 @@ export function validateCalendar(raw: unknown): string[] {
     }
     if (typeof e?.confirmed !== 'boolean') {
       problems.push(`${at}: confirmed must be true or false, never absent.`);
+    }
+    // The fetched events carry optional extras; when present they must be
+    // strings, and a CT time must be a wall clock like the ET one.
+    if (e?.timeCt !== undefined && !isTime(e.timeCt)) {
+      problems.push(`${at}: timeCt, when present, must be HH:MM.`);
+    }
+    for (const key of ['who', 'topic', 'source', 'sourceUrl'] as const) {
+      const v = (e as unknown as Record<string, unknown> | null)?.[key];
+      if (v !== undefined && typeof v !== 'string') {
+        problems.push(`${at}: ${key}, when present, must be a string.`);
+      }
     }
   }
 

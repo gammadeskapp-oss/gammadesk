@@ -120,6 +120,14 @@
     {
       "path": "/api/macro-bias/refresh",
       "schedule": "*/15 13-15 * * 1-5"
+    },
+    {
+      "path": "/api/events/refresh",
+      "schedule": "0 11,12 * * 1-5"
+    },
+    {
+      "path": "/api/events/refresh",
+      "schedule": "0 17,18 * * 1-5"
     }
   ]
 }

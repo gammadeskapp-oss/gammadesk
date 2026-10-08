@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
 import { marketSessionRules } from '@/lib/events';
-import { marketToday } from '@/lib/time';
+import { todaysMergedEvents } from '@/lib/events/merged';
+import { marketNow, marketToday } from '@/lib/time';
 import { chicagoNow, isTradingDay } from '@/lib/x/schedule';
 import { loadDeskSnapshot } from '@/lib/x/deskData';
+import { dueEventHeadsUp, eventHeadsUpText } from '@/lib/x/eventsLine';
+import { checkPost, xLen } from '@/lib/x/compose';
 import { applyLockedLevels, decideIntraday, lockableLevels, pendingTrigger, phraseUsage } from '@/lib/x/intradaySchedule';
-import { readIntradayState, recordIntradayPost } from '@/lib/x/intradayStore';
-import { runSlot } from '@/lib/x/run';
-import { readLog, storeStatus } from '@/lib/x/store';
+import { readIntradayState, recordEventHeadsUp, recordIntradayPost } from '@/lib/x/intradayStore';
+import { postingEnabled, runSlot } from '@/lib/x/run';
+import { postTweet, readCredentials } from '@/lib/x/client';
+import { appendLog, isPaused, readLog, storeStatus } from '@/lib/x/store';
 import type { PostSlot } from '@/lib/x/types';
 
 export const dynamic = 'force-dynamic';
@@ -54,6 +58,57 @@ export async function GET(request: Request) {
   }
 
   const state = await readIntradayState(date);
+
+  /*
+   * Scheduled-event heads-up. Before the ordinary update, check whether a
+   * high/medium event (Fed, Treasury, CPI/jobs) is about to start — within 15
+   * minutes — and has not been flagged yet, under the day's cap of two. When one
+   * is due this firing posts the heads-up instead of a normal update. It is a
+   * fixed, safe template (no model call), gated by the same posting switches and
+   * deduped per event in the intraday state, so a redeploy or an extra firing
+   * never doubles it.
+   */
+  {
+    const events = await todaysMergedEvents(now).catch(() => []);
+    const clk = marketNow(now);
+    const due = dueEventHeadsUp(events, {
+      today: date,
+      etMinutesNow: clk.hour * 60 + clk.minute,
+      postedKeys: state.eventHeadsUps ?? [],
+      postedCount: (state.eventHeadsUps ?? []).length,
+    });
+    if (due) {
+      const text = eventHeadsUpText(due.event, due.minutesUntil);
+      const checks = checkPost(text);
+      if (preview || dry) {
+        return NextResponse.json({ status: 'preview', kind: 'event-headsup', text, checks, key: due.key });
+      }
+      if (checks.length === 0) {
+        if (!postingEnabled()) {
+          return NextResponse.json({ status: 'skipped', kind: 'event-headsup', reason: 'Posting is disabled.' });
+        }
+        if (!force && (await isPaused())) {
+          return NextResponse.json({ status: 'skipped', kind: 'event-headsup', reason: 'Posting is paused.' });
+        }
+        if (!readCredentials()) {
+          return NextResponse.json({ status: 'skipped', kind: 'event-headsup', reason: 'X credentials are not configured.' });
+        }
+        const result = await postTweet(text);
+        if (result.ok) {
+          await recordEventHeadsUp(date, due.key);
+          await appendLog({
+            at: now.toISOString(), date, slot: 'intraday', slotKey: due.key,
+            text, length: xLen(text), outcome: 'sent', reason: 'Scheduled-event heads-up.',
+          });
+          return NextResponse.json({ status: 'sent', kind: 'event-headsup', text, key: due.key, store: storeStatus() });
+        }
+        return NextResponse.json({ status: 'skipped', kind: 'event-headsup', reason: `Heads-up post failed (${result.kind}).` });
+      }
+      // The heads-up text failed its own self-check (an event name tripped a
+      // banned word): skip it quietly and fall through to the normal update.
+    }
+  }
+
   // Same locked-levels overlay and wild throttle as the autonomous tick.
   const locked = state.lockedLevels ?? lockableLevels(snapshot);
   const intradaySnapshot = applyLockedLevels(snapshot, locked);

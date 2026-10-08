@@ -98,6 +98,21 @@ export async function recordLockedLevels(date: string, levels: LockedLevels): Pr
   }
 }
 
+/**
+ * Record that a scheduled-event heads-up posted. Appends its key (idempotent)
+ * so the same event is never flagged twice and the day's count is the array
+ * length. Best effort — a missed mark only risks one extra heads-up.
+ */
+export async function recordEventHeadsUp(date: string, key: string): Promise<void> {
+  try {
+    const current = await readIntradayState(date);
+    const eventHeadsUps = [...new Set([...(current.eventHeadsUps ?? []), key])];
+    await stateStore.write({ ...current, date, eventHeadsUps });
+  } catch {
+    // Best effort.
+  }
+}
+
 /** Mark that today's 4:30 CT summary email has been sent. */
 export async function markSummarySent(date: string): Promise<void> {
   try {
