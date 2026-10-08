@@ -20,9 +20,24 @@
  *
  * Wider than the breadth shape's `FLAT_BAND_PCT` (0.15) on purpose: this gates
  * a plain-English verdict a reader acts on, so a gap has to be clearly one-sided
- * — a third of a percent — before the wording commits to "narrow" or "leading".
+ * — more than a third of a percent — before the wording commits to "narrow",
+ * "leading" or "lagging".
  */
 export const GAP_BAND_PCT = 0.3;
+
+/**
+ * The quiet band, in percent. When *both* legs sit inside ±0.3% and there is no
+ * real gap between them, nothing happened worth a verdict — the honest word is
+ * "quiet", not "broad selling" off two readings a whisker below zero.
+ */
+export const QUIET_BAND_PCT = 0.3;
+
+/**
+ * The broad band, in percent. "Broad move" / "Broad selling" is only said when
+ * *both* legs are clearly beyond ±0.5% in the same direction — a real, wide
+ * session, not a drift. Between the quiet and broad bands the tape is "mixed".
+ */
+export const BROAD_BAND_PCT = 0.5;
 
 /** Trading days in the one-month look-back for the RSP/SPY ratio. */
 export const MONTH_LOOKBACK_SESSIONS = 21;
@@ -45,7 +60,8 @@ export type SpyRspVerdict =
   | 'broad-down'
   | 'big-lagging'
   | 'narrow-down'
-  | 'even';
+  | 'quiet'
+  | 'mixed';
 
 /** Plain-English line per verdict. No buy/sell wording, ever. */
 export const SPY_RSP_VERDICT_LINE: Record<SpyRspVerdict, string> = {
@@ -55,7 +71,8 @@ export const SPY_RSP_VERDICT_LINE: Record<SpyRspVerdict, string> = {
   'broad-down': 'Broad selling',
   'big-lagging': 'Big stocks lagging, the rest holding up',
   'narrow-down': 'Narrow — a few big stocks holding the line',
-  even: 'Moving together',
+  quiet: 'Quiet day, no clear difference',
+  mixed: 'Mixed day',
 };
 
 /** One short word for the compact contexts (scanner header, X tags). */
@@ -66,7 +83,8 @@ export const SPY_RSP_VERDICT_TAG: Record<SpyRspVerdict, string> = {
   'broad-down': 'broad selling',
   'big-lagging': 'big lagging',
   'narrow-down': 'narrow',
-  even: 'even',
+  quiet: 'quiet',
+  mixed: 'mixed',
 };
 
 export interface SpyRspReading {
@@ -84,9 +102,26 @@ export interface SpyRspReading {
   monthRatioChangePct: number | null;
   /** A short RSP/SPY ratio series for the tiny line, oldest first, or null. */
   monthRatioSeries: number[] | null;
+  /**
+   * The verdict shown everywhere. This is the *settled* verdict after the
+   * anti-flicker rule (see `settleSpyRspVerdict`): it only moves off the last
+   * shown verdict once a new one has held for two refreshes in a row.
+   */
   verdict: SpyRspVerdict;
-  /** The plain-English line for the verdict. */
+  /** The plain-English line for `verdict`. */
   line: string;
+  /**
+   * The verdict the two changes imply *this* refresh, before the anti-flicker
+   * rule. Equal to `verdict` on a settled reading; differs for the one refresh
+   * a change is still being confirmed. Kept for the health view and the tests.
+   */
+  rawVerdict: SpyRspVerdict;
+  /**
+   * A new verdict seen once and waiting for a second refresh to confirm, or
+   * null when the shown verdict is steady. Carries the anti-flicker state
+   * across refreshes.
+   */
+  pendingVerdict: SpyRspVerdict | null;
   /** When this reading was taken, ISO-8601 UTC — the real data time. */
   at: string;
 }
@@ -94,30 +129,91 @@ export interface SpyRspReading {
 /**
  * The verdict from the day's two changes. Pure, so every case is testable.
  *
- * Ordered so the five named cases read exactly as specified, with honest
- * wording for the two that fall outside them (a down tape where the average
- * stock is doing worse, and a dead-flat tape).
+ * The order is the priority the wording commits to:
+ *
+ *   1. A clear gap (> ±0.3pp) between the two is the strongest thing to say —
+ *      the index and the average stock are genuinely parting ways, so that is
+ *      the verdict whatever the absolute sizes.
+ *   2. Otherwise, if both legs sit inside ±0.3%, nothing happened: "quiet".
+ *   3. Otherwise, if both legs are clearly beyond ±0.5% the same way, the whole
+ *      tape moved together: "broad".
+ *   4. Everything in between — one leg out past the quiet band, no clear gap,
+ *      not a wide move — is honestly just a "mixed" day.
  */
 export function spyRspVerdict(spyPct: number, rspPct: number): SpyRspVerdict {
   const gap = rspPct - spyPct;
 
-  // Divergence: index down while the average stock is up (or vice versa). The
-  // clearest "it is only the giants" signals there are, so they go first.
-  if (spyPct < 0 && rspPct > 0) return 'big-lagging';
-  if (spyPct > 0 && rspPct < 0) return 'narrow';
-
-  // Same direction (or one leg flat): the gap decides.
-  if (gap > GAP_BAND_PCT) return 'avg-leading';
+  // 1. A clear gap: the index and the average stock are parting ways.
+  if (gap > GAP_BAND_PCT) {
+    // Average stock ahead of the index. With the index itself red that is the
+    // giants lagging while the rest hold up; otherwise the average is leading.
+    return spyPct < 0 ? 'big-lagging' : 'avg-leading';
+  }
   if (gap < -GAP_BAND_PCT) {
-    // Average stock clearly behind. On an up tape that is the giants carrying
-    // it; on a down tape it is the giants holding the line.
+    // Average stock behind the index — the giants are doing the work. On an up
+    // tape that is them carrying it; on a down tape, holding the line.
     return spyPct > 0 ? 'narrow' : 'narrow-down';
   }
 
-  // Gap inside the flat band — a broad move in whichever direction the tape is.
-  if (spyPct > 0 && rspPct > 0) return 'broad-up';
-  if (spyPct < 0 && rspPct < 0) return 'broad-down';
-  return 'even';
+  // 2. No gap worth noting, and both legs barely off zero: a quiet day.
+  if (Math.abs(spyPct) <= QUIET_BAND_PCT && Math.abs(rspPct) <= QUIET_BAND_PCT) {
+    return 'quiet';
+  }
+
+  // 3. Both legs clearly out, the same way: a broad move.
+  if (spyPct > BROAD_BAND_PCT && rspPct > BROAD_BAND_PCT) return 'broad-up';
+  if (spyPct < -BROAD_BAND_PCT && rspPct < -BROAD_BAND_PCT) return 'broad-down';
+
+  // 4. Neither quiet nor broad nor clearly split.
+  return 'mixed';
+}
+
+/**
+ * The anti-flicker rule. Pure.
+ *
+ * The raw verdict can jitter between two readings when the gap or a leg is
+ * sitting right on a band edge, and a card whose headline flips every refresh
+ * reads as noise. So a *change* only takes effect once the new verdict has held
+ * for two refreshes in a row: the first refresh records it as pending and keeps
+ * showing the old one, the second confirms it.
+ *
+ * `prev` is the last shown reading (with its `verdict` and `pendingVerdict`);
+ * pass null on the first reading of a session, which adopts the raw verdict at
+ * once — there is nothing to flicker against yet.
+ */
+export function settleSpyRspVerdict(
+  prev: Pick<SpyRspReading, 'verdict' | 'pendingVerdict'> | null,
+  raw: SpyRspVerdict,
+): { verdict: SpyRspVerdict; pendingVerdict: SpyRspVerdict | null } {
+  // Nothing shown yet, or the raw verdict already matches what is shown: steady.
+  if (!prev || raw === prev.verdict) {
+    return { verdict: raw, pendingVerdict: null };
+  }
+  // The raw verdict differs from what is shown. If it is the same candidate we
+  // saw last refresh, it has now held twice — switch. Otherwise hold the shown
+  // verdict and remember this one as the new candidate.
+  if (prev.pendingVerdict === raw) {
+    return { verdict: raw, pendingVerdict: null };
+  }
+  return { verdict: prev.verdict, pendingVerdict: raw };
+}
+
+/**
+ * Apply the anti-flicker rule to a freshly built reading, given the last shown
+ * one. Returns the reading to store and render: same numbers and `rawVerdict`,
+ * but `verdict`/`line`/`pendingVerdict` settled against `prev`.
+ */
+export function applySpyRspHysteresis(
+  prev: SpyRspReading | null,
+  next: SpyRspReading,
+): SpyRspReading {
+  const settled = settleSpyRspVerdict(prev, next.rawVerdict);
+  return {
+    ...next,
+    verdict: settled.verdict,
+    line: SPY_RSP_VERDICT_LINE[settled.verdict],
+    pendingVerdict: settled.pendingVerdict,
+  };
 }
 
 /** Assemble a reading from its parts. Pure. */
@@ -135,8 +231,13 @@ export function buildSpyRspReading(input: {
     gapPct: input.rspPct - input.spyPct,
     monthRatioChangePct: input.monthRatioChangePct,
     monthRatioSeries: input.monthRatioSeries,
+    // A freshly built reading is its own raw verdict; the anti-flicker rule
+    // (see `applySpyRspHysteresis`) settles it against the last shown reading
+    // at store time, and a store with no prior reading adopts it as-is.
     verdict,
     line: SPY_RSP_VERDICT_LINE[verdict],
+    rawVerdict: verdict,
+    pendingVerdict: null,
     at: input.at,
   };
 }
@@ -166,7 +267,8 @@ function arrow(pct: number): string {
 }
 
 function fmtPct(pct: number): string {
-  return `${Math.abs(pct).toFixed(1)}%`;
+  // `+ 0` collapses a negative zero so a -0.04% reading never prints "-0.0%".
+  return `${(Math.abs(pct) + 0).toFixed(1)}%`;
 }
 
 /**
