@@ -2,7 +2,7 @@ import 'server-only';
 
 import { createJsonStore } from '../jsonStore';
 import { marketToday } from '../time';
-import type { SpyRspReading } from './spyRspCore';
+import { applySpyRspHysteresis, type SpyRspReading } from './spyRspCore';
 import type { BreadthSample, EqualWeightSpread } from './types';
 import type { BreadthSource } from './universe';
 
@@ -115,6 +115,15 @@ export async function appendSample(
 
     const samples = sample ? [...base.samples, sample] : base.samples;
 
+    // Settle the new SPY-vs-RSP verdict against the last shown one so a verdict
+    // only changes after it has held for two refreshes in a row (anti-flicker).
+    // A failed fetch (null) keeps the last good reading untouched. Done here,
+    // inside the atomic update, because this is the one place with the prior
+    // reading to compare against. When the day has rolled, `base` is empty and
+    // its `spyRsp` is null, so the first reading of a session adopts its verdict
+    // at once rather than being settled against yesterday.
+    const nextSpyRsp = spyRsp ? applySpyRspHysteresis(base.spyRsp, spyRsp) : base.spyRsp;
+
     return {
       ...base,
       samples: samples.slice(-MAX_SAMPLES),
@@ -122,9 +131,7 @@ export async function appendSample(
       // A failed Method B leaves the previous cross-check in place rather than
       // blanking it. One timed-out request is not evidence the spread changed.
       spread: spread ?? base.spread,
-      // Same rule for the SPY-vs-RSP reading: a failed fetch keeps the last
-      // good one rather than blanking the card mid-session.
-      spyRsp: spyRsp ?? base.spyRsp,
+      spyRsp: nextSpyRsp,
       updatedAt: now.toISOString(),
     };
   });

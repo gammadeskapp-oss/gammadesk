@@ -19,10 +19,14 @@ registerTsImports();
 const {
   spyRspVerdict,
   buildSpyRspReading,
+  settleSpyRspVerdict,
+  applySpyRspHysteresis,
   isSpyRspStale,
   spyRspSummaryLine,
   spyRspPostLine,
   GAP_BAND_PCT,
+  QUIET_BAND_PCT,
+  BROAD_BAND_PCT,
   STALE_AFTER_MINUTES,
   SPY_RSP_VERDICT_LINE,
 } = await import('../src/lib/breadth/spyRspCore.ts');
@@ -41,36 +45,100 @@ function section(name) {
   console.log(`\n${name}`);
 }
 
-// --- the five named verdict cases from the brief -----------------------------
+// --- the four worked examples from the brief ---------------------------------
 
-section('Each verdict case reads as specified');
+section('The brief\'s four worked examples read exactly as specified');
 
-ok('both up, gap in band -> broad-up', spyRspVerdict(0.6, 0.5) === 'broad-up');
-ok('SPY up, RSP down -> narrow', spyRspVerdict(0.6, -0.2) === 'narrow');
-ok('SPY up, RSP down a lot -> narrow', spyRspVerdict(0.6, -1.4) === 'narrow');
-ok('SPY up, gap < -0.3 (RSP up less) -> narrow', spyRspVerdict(0.6, 0.1) === 'narrow');
-ok('RSP up more than SPY (gap > +0.3) -> avg-leading', spyRspVerdict(0.2, 0.9) === 'avg-leading');
-ok('both down, gap in band -> broad-down', spyRspVerdict(-0.5, -0.4) === 'broad-down');
-ok('SPY down, RSP up -> big-lagging', spyRspVerdict(-0.4, 0.3) === 'big-lagging');
+ok('SPY -0.1 / RSP 0.0 -> quiet', spyRspVerdict(-0.1, 0.0) === 'quiet');
+ok('  ... its line is "Quiet day, no clear difference"',
+  SPY_RSP_VERDICT_LINE[spyRspVerdict(-0.1, 0.0)] === 'Quiet day, no clear difference');
+ok('SPY -0.8 / RSP -0.7 -> broad-down (Broad selling)', spyRspVerdict(-0.8, -0.7) === 'broad-down');
+ok('  ... its line is "Broad selling"',
+  SPY_RSP_VERDICT_LINE[spyRspVerdict(-0.8, -0.7)] === 'Broad selling');
+ok('SPY +0.6 / RSP -0.2 -> narrow (big stocks carrying it)', spyRspVerdict(0.6, -0.2) === 'narrow');
+ok('  ... its line carries the "carrying it" wording',
+  SPY_RSP_VERDICT_LINE[spyRspVerdict(0.6, -0.2)].includes('carrying it'));
+ok('SPY -0.6 / RSP +0.1 -> big-lagging (rest holding up)', spyRspVerdict(-0.6, 0.1) === 'big-lagging');
+ok('  ... its line is "Big stocks lagging, the rest holding up"',
+  SPY_RSP_VERDICT_LINE[spyRspVerdict(-0.6, 0.1)] === 'Big stocks lagging, the rest holding up');
 
-// --- the two honest cases outside the five -----------------------------------
+// --- rule 1: broad only when BOTH legs are beyond ±0.5% ----------------------
 
-section('The cases the brief does not name still read honestly');
+section('Rule 1 — "broad" needs both legs beyond ±0.5%');
 
-ok('both down, RSP worse -> narrow-down (not up-tape narrow)', spyRspVerdict(-0.3, -0.9) === 'narrow-down');
-ok('dead flat -> even', spyRspVerdict(0, 0) === 'even');
-ok('narrow-down wording is a down-tape line, not "carrying it"',
-  SPY_RSP_VERDICT_LINE['narrow-down'].includes('holding the line'));
-ok('narrow wording is the up-tape "carrying it"',
-  SPY_RSP_VERDICT_LINE['narrow'].includes('carrying it'));
+ok('both clearly up -> broad-up', spyRspVerdict(0.6, 0.7) === 'broad-up');
+ok('both clearly down -> broad-down', spyRspVerdict(-0.6, -0.7) === 'broad-down');
+ok('only one leg past 0.5 (0.6/0.45) is NOT broad', spyRspVerdict(0.6, 0.45) === 'mixed');
+ok('both exactly at +0.5 (not beyond) is NOT broad', spyRspVerdict(0.5, 0.5) !== 'broad-up');
+ok('BROAD_BAND_PCT is 0.5', BROAD_BAND_PCT === 0.5);
 
-// --- the gap band edges land on the right side -------------------------------
+// --- rule 2: quiet when BOTH legs are within ±0.3% ---------------------------
 
-section('Gap-band edges (±0.3 pts)');
+section('Rule 2 — "quiet" when both legs are within ±0.3%');
+
+ok('both tiny negative (-0.1/-0.0x) -> quiet, not broad selling', spyRspVerdict(-0.1, -0.04) === 'quiet');
+ok('both at the +0.3 edge, no gap -> still quiet', spyRspVerdict(0.3, 0.3) === 'quiet');
+ok('one leg just past 0.3 -> no longer quiet', spyRspVerdict(0.1, 0.35) !== 'quiet');
+ok('both zero -> quiet', spyRspVerdict(0, 0) === 'quiet');
+ok('QUIET_BAND_PCT is 0.3', QUIET_BAND_PCT === 0.3);
+
+// --- rule 3: gap verdicts only when the gap exceeds 0.3% ----------------------
+
+section('Rule 3 — gap verdicts only when |gap| > 0.3%');
 
 ok('gap +0.29 (inside band) is NOT avg-leading', spyRspVerdict(0.1, 0.39) !== 'avg-leading');
 ok('gap +0.32 is avg-leading', spyRspVerdict(0.1, 0.42) === 'avg-leading');
+ok('gap -0.5 on an up tape -> narrow', spyRspVerdict(0.6, 0.1) === 'narrow');
+ok('gap -0.6 on a down tape -> narrow-down', spyRspVerdict(-0.3, -0.9) === 'narrow-down');
 ok('GAP_BAND_PCT is 0.3', GAP_BAND_PCT === 0.3);
+
+// --- rule 4: everything else is a mixed day ----------------------------------
+
+section('Rule 4 — in between is a "mixed" day');
+
+ok('one leg out, no gap, not broad -> mixed', spyRspVerdict(-0.45, -0.4) === 'mixed');
+ok('mixed wording is "Mixed day"', SPY_RSP_VERDICT_LINE['mixed'] === 'Mixed day');
+ok('narrow-down wording is a down-tape line, not "carrying it"',
+  SPY_RSP_VERDICT_LINE['narrow-down'].includes('holding the line'));
+
+// --- rule 5: a verdict only changes after holding for two refreshes -----------
+
+section('Rule 5 — anti-flicker: a change holds for two refreshes before showing');
+
+ok('first reading of the day adopts its verdict at once',
+  settleSpyRspVerdict(null, 'broad-down').verdict === 'broad-down');
+ok('an unchanged verdict stays put', settleSpyRspVerdict({ verdict: 'quiet', pendingVerdict: null }, 'quiet').verdict === 'quiet');
+
+// refresh 1: raw flips quiet -> broad-down. Keep showing quiet, remember candidate.
+const flip1 = settleSpyRspVerdict({ verdict: 'quiet', pendingVerdict: null }, 'broad-down');
+ok('a new verdict does NOT show on its first refresh', flip1.verdict === 'quiet');
+ok('the new verdict is recorded as pending', flip1.pendingVerdict === 'broad-down');
+
+// refresh 2: raw still broad-down, matching the pending candidate -> switch.
+const flip2 = settleSpyRspVerdict(flip1, 'broad-down');
+ok('the new verdict shows once it has held twice in a row', flip2.verdict === 'broad-down');
+ok('pending clears after the switch', flip2.pendingVerdict === null);
+
+// a candidate that does not repeat is replaced, not shown.
+const jitter = settleSpyRspVerdict(flip1, 'mixed');
+ok('a one-off different reading does not flip the shown verdict', jitter.verdict === 'quiet');
+ok('the newest candidate replaces the stale one', jitter.pendingVerdict === 'mixed');
+
+// applySpyRspHysteresis settles the whole reading, keeping the raw verdict.
+const prevReading = buildSpyRspReading({ spyPct: -0.1, rspPct: 0.0, monthRatioChangePct: null, monthRatioSeries: null, at: '2026-10-06T14:00:00Z' });
+const rawNext = buildSpyRspReading({ spyPct: -0.8, rspPct: -0.7, monthRatioChangePct: null, monthRatioSeries: null, at: '2026-10-06T14:01:00Z' });
+const settledNext = applySpyRspHysteresis(prevReading, rawNext);
+ok('settled reading keeps showing the prior verdict on the first flip', settledNext.verdict === 'quiet');
+ok('settled reading records the raw verdict for the health view', settledNext.rawVerdict === 'broad-down');
+ok('settled reading line matches its shown verdict', settledNext.line === SPY_RSP_VERDICT_LINE['quiet']);
+
+// --- rule 6: never render "-0.0%" --------------------------------------------
+
+section('Rule 6 — a negative-zero reading never prints "-0.0%"');
+
+const negZero = buildSpyRspReading({ spyPct: -0.04, rspPct: -0.02, monthRatioChangePct: null, monthRatioSeries: null, at: '2026-10-06T14:00:00Z' });
+ok('summary line shows 0.0%, never -0.0%', !spyRspSummaryLine(negZero).includes('-0.0'), spyRspSummaryLine(negZero));
+ok('both legs round to 0.0% here', spyRspSummaryLine(negZero).includes('SPY ▬0.0%') && spyRspSummaryLine(negZero).includes('RSP ▬0.0%'), spyRspSummaryLine(negZero));
 
 // --- no direction/advice wording anywhere ------------------------------------
 
