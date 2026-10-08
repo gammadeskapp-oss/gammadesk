@@ -10,7 +10,7 @@ import { schedulePopulate } from '../schedulePopulate';
 import { readCachedDecision, writeCachedDecision } from './decisionCache';
 import { getSpotQuote } from '../spot';
 import { clearsSpotDeadZone, nearestStrongWall } from '../simple/walls';
-import { formatExpiryLabel } from '../time';
+import { formatAsOf, formatExpiryLabel } from '../time';
 import { normaliseSymbol } from '../ticker/bars';
 import { getTradeability } from '../ticker/liquidity';
 import { confirmedByVolume } from './activity';
@@ -261,6 +261,11 @@ async function build(symbol: string): Promise<DecisionResult> {
     asOfLabel: positioning.meta.asOfLabel,
     quoteDateLabel: positioning.meta.quoteDateLabel,
     quoteDateIso: positioning.meta.quoteDateIso,
+    // The price's own timestamp — the live quote's when the overlay took, the
+    // chain's only as a fallback when the live quote was unavailable.
+    spotAsOfIso: live?.asOfIso ?? positioning.meta.quoteDateIso,
+    spotAsOfLabel: live ? formatAsOf(new Date(live.asOfIso)) : positioning.meta.quoteDateLabel,
+    spotLive: live !== null,
   };
 
   // Whichever wall price is closer to is the one the move is heading into.
@@ -389,8 +394,51 @@ export async function peekDecision(rawSymbol: string): Promise<DecisionResult | 
   if (symbol !== config.symbol) return getDecision(symbol);
 
   const cachedPayload = await readCachedDecision();
-  if (cachedPayload) return cachedPayload.data;
+  if (cachedPayload) return overlayFreshSpot(cachedPayload.data);
 
   schedulePopulate(() => getDecision(config.symbol));
   return null;
+}
+
+/** Recompute a wall's distance against a new spot; strike/strength unchanged. */
+function reDistance(wall: Wall | null, spot: number): Wall | null {
+  if (!wall) return null;
+  return { ...wall, distancePct: spot > 0 ? ((wall.strike - spot) / spot) * 100 : 0 };
+}
+
+/**
+ * Re-overlay a fresh spot quote onto a (possibly minutes-stale) decision
+ * payload, at request time.
+ *
+ * The persisted decision `/decision` serves is rebuilt only every few minutes
+ * (by the X-snapshot cron — there is no decision cron), and the spot is baked
+ * into it at build time. Served as-is, the price the reader sees lags the tape
+ * by the payload's whole age, and worse, its "as of" was the chain's
+ * open-interest date, which lags further still. The page is `force-dynamic`, so
+ * here we re-read the short-cached live quote (Cboe, ≤60s) on every request and
+ * recompute only the spot-derived display fields — the price, its own
+ * timestamp, the flip distance and the two wall distances. The levels (strikes,
+ * walls, gamma) stay exactly as built: those are the stable part the chain
+ * supplies and the reason the payload is cached at all. A failed quote leaves
+ * the payload untouched (the baked spot and its stamp stand, `spotLive` already
+ * false), so this never blocks or blanks the page.
+ */
+async function overlayFreshSpot(result: DecisionResult): Promise<DecisionResult> {
+  const live = await getSpotQuote(result.context.symbol).catch(() => null);
+  if (!live) return result;
+
+  const spot = live.price;
+  const flip = result.context.flipLevel;
+  const context: DecisionContext = {
+    ...result.context,
+    spot,
+    aboveFlip: flip === null ? null : spot > flip,
+    flipDistancePct: flip === null || flip === 0 ? null : ((spot - flip) / flip) * 100,
+    magnetAbove: reDistance(result.context.magnetAbove, spot),
+    magnetBelow: reDistance(result.context.magnetBelow, spot),
+    spotAsOfIso: live.asOfIso,
+    spotAsOfLabel: formatAsOf(new Date(live.asOfIso)),
+    spotLive: true,
+  };
+  return { ...result, context };
 }

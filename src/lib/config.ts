@@ -70,7 +70,11 @@ export const config = {
    * per window per symbol, which a paid plan spends without noticing.
    */
   get spotCacheSeconds(): number {
-    return Math.min(this.cacheSeconds, Math.max(30, num(process.env.GAMMADESK_SPOT_CACHE_SECONDS, 90)));
+    // 60s by default: the Cboe compact quote is itself a ~15-min delayed feed,
+    // so the price can never be fresher than that — but the cache we add on top
+    // must stay small (≤~1 min) to keep the total within ~16 min of the tape.
+    // Bounded below by 30s and never longer than the chain cache.
+    return Math.min(this.cacheSeconds, Math.max(30, num(process.env.GAMMADESK_SPOT_CACHE_SECONDS, 60)));
   },
   /**
    * How long a ticker consensus is reused. Daily bars only change once a
