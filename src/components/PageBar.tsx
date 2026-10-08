@@ -13,6 +13,7 @@ export function PageBar({
   description,
   meta,
   asOfLabel,
+  asOfCaption = 'Data as of',
   titleLevel = 1,
 }: {
   title: string;
@@ -30,6 +31,9 @@ export function PageBar({
   /** Short right-aligned detail, e.g. counts or timestamps. */
   meta?: string;
   asOfLabel?: string;
+  /** The caption above `asOfLabel`. Defaults to "Data as of"; /decision uses
+   *  "Price as of" because its stamp is the spot price's own timestamp. */
+  asOfCaption?: string;
   /**
    * Demote the heading to an `h2`.
    *
@@ -62,7 +66,7 @@ export function PageBar({
 
         {asOfLabel && (
           <div className="text-right">
-            <div className="label-xs">Data as of</div>
+            <div className="label-xs">{asOfCaption}</div>
             <div className="text-xs tabular-nums text-term-dim">{asOfLabel}</div>
           </div>
         )}

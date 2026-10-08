@@ -60,6 +60,19 @@ export interface DecisionContext {
    * staleness guard needs a real instant to compare against the session clock.
    */
   quoteDateIso: string;
+  /**
+   * The spot price's OWN timestamp and label, from the short-cached live quote
+   * (`getSpotQuote` → Cboe), not the chain. The displayed SPY price is the live
+   * overlay (`displaySpot`), so the age the reader is shown beside it must be
+   * the price's own stamp — the chain's `quoteDateIso` dates the levels (open
+   * interest), which are a separate, older thing. Falls back to the chain stamp
+   * when the live quote could not be read (then `spotLive` is false).
+   */
+  spotAsOfIso: string;
+  spotAsOfLabel: string;
+  /** True when the displayed spot is the live quote, false when it fell back to
+   *  the chain's echoed spot (the live fetch was unavailable this render). */
+  spotLive: boolean;
 }
 
 export interface Check {

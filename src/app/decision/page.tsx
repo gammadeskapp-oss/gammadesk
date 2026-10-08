@@ -639,8 +639,15 @@ export default async function DecisionPage({ searchParams }: PageProps) {
           title="Decision"
           description={PAGE_DESCRIPTIONS['/decision']}
           meta="one screen, top to bottom"
-          /* The book's stamp, not the render clock — see DecisionContext. */
-          asOfLabel={data?.context.quoteDateLabel}
+          /*
+           * The headline stamp is the PRICE's own timestamp (the live spot
+           * quote), not the chain's — the SPY figure the page leads with is the
+           * live overlay, so dating it by the older open-interest snapshot made
+           * a ~15-min-delayed price look ~18-20 min stale. The chain's own date
+           * still stamps the levels via the "Open interest as of" line below.
+           */
+          asOfCaption="Price as of"
+          asOfLabel={data?.context.spotAsOfLabel ?? data?.context.quoteDateLabel}
         />
 
         {priorLabel && (
