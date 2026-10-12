@@ -5,25 +5,32 @@ import { runScan, scanSymbols } from '../scanUniverse';
 import { formatExpiryLabel, formatAsOf, marketToday } from '../time';
 import { FLOW_SCHEMA } from './types';
 import {
+  LARGE_PREMIUM_USD,
   MIN_OI,
   MIN_RATIO,
   MIN_VOLUME,
   PER_SYMBOL_CAP,
   TOTAL_CAP,
 } from './types';
-import type { FlowRow, FlowSnapshot, FlowSymbolSummary, UnusualLevel } from './types';
+import type { FlowRow, FlowSnapshot, FlowSymbolSummary } from './types';
+import { flagFor, multiLegNote, shortNote, unusualScore } from './score';
 
 /**
  * Unusual options activity across the tracked symbols.
  *
- * The measure is volume relative to open interest. Open interest is yesterday's
- * settled position count, so a contract trading more than its own open interest
- * in a single session means most of today's activity is opening new exposure
- * rather than shuffling existing positions. That is the standard screen, and it
- * is the only one available here — Cboe publishes today's volume but no history
- * of it, so a true "versus recent average volume" comparison is not possible
- * without storing our own daily series. That limitation is stated on the page
- * rather than papered over with a worse proxy.
+ * A row earns its place one of two ways: it traded more than its own open
+ * interest (unusual by ratio), or more than a quarter-million dollars changed
+ * hands in it (large by money). Open interest is yesterday's settled position
+ * count, so a contract trading more than its own open interest in a session
+ * means most of today's activity is opening new exposure; the dollars path
+ * catches the big print that a ratio gate alone would drop. The table then
+ * ranks by dollars, because that is what a reader is really asking "where did
+ * the money go today".
+ *
+ * A true "versus recent average volume" screen is still not possible here —
+ * Cboe publishes today's volume but no history of it, so it would take a stored
+ * daily series this app does not keep. That is stated on the page rather than
+ * papered over with a worse proxy.
  *
  * None of this says who traded, or in which direction. A large print can be an
  * opening buy, an opening sell, a hedge leg, or a roll. The page labels the
@@ -67,37 +74,6 @@ interface CboePayload {
     last_trade_time?: string;
     options?: CboeContract[];
   };
-}
-
-function levelFor(ratio: number): UnusualLevel {
-  if (ratio >= 10) return 'extreme';
-  if (ratio >= 3) return 'high';
-  return 'notable';
-}
-
-function noteFor(row: {
-  ratio: number;
-  volume: number;
-  openInterest: number;
-  type: 'call' | 'put';
-  distancePct: number;
-}): string {
-  const side = row.type === 'call' ? 'calls' : 'puts';
-  const where =
-    Math.abs(row.distancePct) < 1
-      ? 'right at the money'
-      : `${Math.abs(row.distancePct).toFixed(1)}% ${row.distancePct > 0 ? 'above' : 'below'} spot`;
-
-  const multiple =
-    row.ratio >= 10
-      ? `over ${Math.floor(row.ratio)}x`
-      : `${row.ratio.toFixed(1)}x`;
-
-  return (
-    `${row.volume.toLocaleString('en-US')} ${side} traded against ` +
-    `${row.openInterest.toLocaleString('en-US')} already open — ${multiple} the ` +
-    `existing position, ${where}.`
-  );
 }
 
 async function scanSymbol(
@@ -186,10 +162,17 @@ async function scanSymbol(
     if (volume < MIN_VOLUME || openInterest < MIN_OI) continue;
 
     const ratio = volume / openInterest;
-    if (ratio < MIN_RATIO) continue;
+    const price = contractPrice(c);
+    const premium = price === null ? null : volume * price * 100;
+
+    // Two ways onto the table: unusual by ratio, or large by money. The second
+    // path is what makes a premium-ranked screen honest — a $2M print at 2x its
+    // open interest is exactly the kind of flow a ratio-only gate would drop.
+    const unusualByRatio = ratio >= MIN_RATIO;
+    const largeByMoney = premium !== null && premium >= LARGE_PREMIUM_USD;
+    if (!unusualByRatio && !largeByMoney) continue;
 
     const distancePct = ((parsed.strike - spot) / spot) * 100;
-    const price = contractPrice(c);
 
     candidates.push({
       symbol,
@@ -200,10 +183,19 @@ async function scanSymbol(
       volume,
       openInterest,
       volumeToOi: ratio,
-      premium: price === null ? null : volume * price * 100,
+      premium,
+      unusualScore: unusualScore({ premium, volumeToOi: ratio, distancePct }),
       shareOfChain: 0, // filled once the chain total is known
-      level: levelFor(ratio),
-      note: noteFor({ ratio, volume, openInterest, type: parsed.type, distancePct }),
+      flag: flagFor({ volumeToOi: ratio, premium }),
+      note: shortNote({
+        premium,
+        volume,
+        openInterest,
+        volumeToOi: ratio,
+        type: parsed.type,
+        distancePct,
+      }),
+      multiLegNote: multiLegNote({ distancePct, volume }),
       spot,
       distancePct,
     });
@@ -214,9 +206,14 @@ async function scanSymbol(
       ...r,
       shareOfChain: totalVolume > 0 ? (r.volume / totalVolume) * 100 : 0,
     }))
-    // Rank by ratio, then raw size, so a genuinely large print outranks a
-    // high ratio on a small contract.
-    .sort((a, b) => b.volumeToOi - a.volumeToOi || b.volume - a.volume)
+    // Rank by dollars first, then the score, then raw volume, so the biggest
+    // money leads and a null premium cannot outrank a known one.
+    .sort(
+      (a, b) =>
+        (b.premium ?? -1) - (a.premium ?? -1) ||
+        b.unusualScore - a.unusualScore ||
+        b.volume - a.volume,
+    )
     .slice(0, PER_SYMBOL_CAP);
 
   return {
@@ -280,7 +277,12 @@ export async function computeFlowSnapshot(): Promise<FlowSnapshot> {
     schema: FLOW_SCHEMA,
     sessionDate,
     rows: rows
-      .sort((a, b) => b.volumeToOi - a.volumeToOi || b.volume - a.volume)
+      .sort(
+        (a, b) =>
+          (b.premium ?? -1) - (a.premium ?? -1) ||
+          b.unusualScore - a.unusualScore ||
+          b.volume - a.volume,
+      )
       .slice(0, TOTAL_CAP),
     symbols: summaries.sort((a, b) => b.totalVolume - a.totalVolume),
     asOfLabel: formatAsOf(now),

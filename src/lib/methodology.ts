@@ -1,5 +1,12 @@
 import { dealerConventionCaveat } from './dealerConvention';
-import { MIN_OI, MIN_RATIO, MIN_VOLUME } from './flow/types';
+import {
+  EXTREME_PREMIUM_USD,
+  EXTREME_RATIO,
+  LARGE_PREMIUM_USD,
+  MIN_OI,
+  MIN_RATIO,
+  MIN_VOLUME,
+} from './flow/types';
 import type { DataMeta, IvSource, PositioningData } from './types';
 
 /**
@@ -158,29 +165,57 @@ export function positioningMethodology(
  * Same shape as the positioning drawer on purpose: a reader who has opened one
  * should not have to learn a second layout to read the other.
  */
+/** `$250k` / `$1M` — clean round-dollar labels for the methodology prose. */
+function formatUsdPlain(value: number): string {
+  if (value >= 1_000_000) {
+    const m = value / 1_000_000;
+    return `$${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  }
+  if (value >= 1_000) {
+    const k = value / 1_000;
+    return `$${Number.isInteger(k) ? k : k.toFixed(1)}k`;
+  }
+  return `$${value}`;
+}
+
 export function flowMethodology(computedAtLabel: string | null): Methodology {
   return {
     title: 'How this is calculated',
     facts: [
       {
-        label: 'The rule',
-        value: 'Session volume divided by open interest, per contract',
-        note: `A contract is listed when it trades at least ${MIN_VOLUME.toLocaleString('en-US')} contracts, carries at least ${MIN_OI} open interest, and its ratio is at least ${MIN_RATIO.toFixed(1)}×.`,
+        label: 'What gets listed',
+        value: 'Contracts that are unusual by ratio, or large by money',
+        note: `A contract earns a place when it trades at least ${MIN_VOLUME.toLocaleString('en-US')} contracts against at least ${MIN_OI} open interest, AND either its volume is at least ${MIN_RATIO.toFixed(1)}× that open interest or at least ${formatUsdPlain(LARGE_PREMIUM_USD)} of premium changed hands in it.`,
       },
       {
-        label: 'Why that ratio means anything',
-        value: 'Open interest is yesterday’s settled position count',
-        note: 'So a contract trading more than its own open interest in one session means most of today’s activity is opening new exposure rather than shuffling existing positions.',
+        label: 'How it is ranked',
+        value: 'Biggest dollars first',
+        note: 'Premium — what actually changed hands — is the default sort, so the table answers “where did the money go today” rather than “which tiny contract had the loudest ratio”.',
       },
       {
-        label: 'Open interest as of',
-        value: 'The prior session’s settlement',
-        note: 'It is published after the close and does not move intraday, which is precisely what makes it a usable denominator for today’s volume.',
+        label: 'Premium',
+        value: 'Volume × price × 100',
+        note: 'Price is the mid of the quoted bid and ask, falling back to the last trade when only that is available. It is NOT an average of actual fills — the delayed feed carries no per-trade prices — so read it as an order-of-magnitude figure, not a to-the-dollar one.',
+      },
+      {
+        label: 'Unusual score (0–100)',
+        value: 'Premium size, Vol/OI, and nearness to spot',
+        note: 'A weighted blend, leaning on dollars, with the ratio and how close the strike sits to spot folded in. It is a sort key with a number on it, not a probability of anything.',
+      },
+      {
+        label: 'The flags',
+        value: 'EXTREME and LARGE, both money-gated',
+        note: `EXTREME needs both a ratio over ${EXTREME_RATIO}× and over ${formatUsdPlain(EXTREME_PREMIUM_USD)} of premium; LARGE needs over ${formatUsdPlain(LARGE_PREMIUM_USD)}. Everything else carries no flag rather than a reassuring-looking one.`,
+      },
+      {
+        label: 'Vol/OI',
+        value: 'Session volume ÷ prior-session open interest',
+        note: 'Open interest is published after the close and does not move intraday, which is what makes it a usable denominator for today’s volume.',
       },
       {
         label: 'Volume as of',
         value: computedAtLabel ?? 'not yet computed',
-        note: 'Today’s traded contracts, from the same snapshot as the open interest.',
+        note: 'Today’s traded contracts, from the same delayed snapshot as the open interest and the spot.',
       },
       {
         label: 'This level is derived from',
@@ -190,7 +225,7 @@ export function flowMethodology(computedAtLabel: string | null): Methodology {
       {
         label: 'What it cannot tell you',
         value: 'Direction, or who traded',
-        note: 'A large print can be an opening buy, an opening sell, a hedge leg, or a roll. The chain records the trade, never the intent behind it.',
+        note: 'A large print can be an opening buy, an opening sell, a hedge leg, or a roll. The chain records the trade, never the intent behind it — so heavy put volume is not, by itself, a bearish bet.',
       },
       {
         label: 'The comparison not being made',
@@ -199,7 +234,7 @@ export function flowMethodology(computedAtLabel: string | null): Methodology {
       },
     ],
     assumption:
-      'No dealer-positioning assumption is applied on this page. The ratio is a count divided by a count — it inherits none of the modelling that the gamma levels rest on, and equally none of their interpretation.',
+      'No dealer-positioning assumption is applied on this page. Premium, volume and open interest are measured quantities — they inherit none of the modelling that the gamma levels rest on, and equally none of their interpretation.',
     caveat: null,
     notes: [],
   };

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { FlowFilters } from '@/components/FlowFilters';
+import { FlowHowItWorks } from '@/components/FlowHowItWorks';
 import { MethodologyDrawer } from '@/components/MethodologyDrawer';
 import { RefreshStatus } from '@/components/RefreshStatus';
 import { flowMethodology } from '@/lib/methodology';
@@ -192,6 +193,15 @@ export default async function FlowPage({ searchParams }: PageProps) {
             </div>
           </dl>
         </section>
+
+        {snapshot && filtered && (
+          <FlowHowItWorks
+            scanned={snapshot.scanned}
+            universe={snapshot.universe ?? null}
+            flaggedTotal={snapshot.rows.length}
+            visible={filtered.rows.length}
+          />
+        )}
 
         {priorSession && (
           <div

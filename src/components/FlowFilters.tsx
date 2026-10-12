@@ -4,35 +4,39 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { InfoTip } from './InfoTip';
 import { TickerLink } from './TickerLink';
-import type { FlowRow, UnusualLevel } from '@/lib/flow/types';
+import type { FlowFlag, FlowRow } from '@/lib/flow/types';
+import { DEFAULT_MIN_PREMIUM_USD } from '@/lib/flow/types';
+import { flowTotals, groupByTicker, topTickers } from '@/lib/flow/group';
 import { formatContracts, formatStrike, formatUsd } from '@/lib/format';
 
 /**
- * Filter bar and results table for /flow.
+ * Filter bar, summary strip and grouped results table for /flow.
  *
- * Everything filters in memory over rows the server already sent — the table
- * is capped at sixty rows, so shipping them all costs less than a single
- * refetch would, and typing never touches the network.
+ * Everything filters and groups in memory over rows the server already sent —
+ * the table is capped, so shipping them all costs less than a single refetch
+ * and typing never touches the network.
  *
- * Filter state is held locally and *mirrored* into the URL, so a filtered view
- * is still shareable and still survives a refresh. The mirror is written with
- * `history.replaceState` rather than `router.replace`: this route is
- * force-dynamic, so a router navigation would re-run the server component on
- * every keystroke — invisible to the user, but a real request per character
- * against a page that reads the flow store. replaceState touches nothing but
- * the address bar, and keeps the back button free of one entry per keystroke.
+ * Filter state is held locally and mirrored into the URL with
+ * `history.replaceState` (not `router.replace`), so a filtered view is still
+ * shareable and survives a refresh without re-running the force-dynamic server
+ * component on every keystroke.
  */
 
-const LEVEL: Record<UnusualLevel, { text: string; label: string }> = {
+const FLAG: Record<'extreme' | 'large', { text: string; label: string }> = {
   extreme: { text: 'text-bear', label: 'EXTREME' },
-  high: { text: 'text-flip', label: 'HIGH' },
-  notable: { text: 'text-term-dim', label: 'NOTABLE' },
+  large: { text: 'text-flip', label: 'LARGE' },
 };
 
 type Side = 'both' | 'calls' | 'puts';
 type Expiry = 'all' | '0dte' | 'week' | 'month';
+type View = 'grouped' | 'flat';
 
-const PREMIUM_CHIPS = [
+/**
+ * Premium filter steps. `null` is "Any" and is distinct from the default: the
+ * screen hides sub-$50k rows out of the box, so "Any" is the one choice that
+ * shows them (and rows whose premium could not be priced at all).
+ */
+const PREMIUM_CHIPS: { value: number; label: string }[] = [
   { value: 0, label: 'Any' },
   { value: 50_000, label: '$50k' },
   { value: 250_000, label: '$250k' },
@@ -55,16 +59,12 @@ const SIDE_CHIPS: { value: Side; label: string }[] = [
 // --- date helpers -------------------------------------------------------------
 
 /**
- * Window ends, derived from the session date the server passed down.
- *
- * Pure string arithmetic on `YYYY-MM-DD` via UTC, so the browser's own time
- * zone never shifts a boundary — a user in Tokyo and one in Chicago get the
- * same "this week".
+ * Window ends, derived from the session date the server passed down. Pure
+ * string arithmetic on `YYYY-MM-DD` via UTC, so the browser's own time zone
+ * never shifts a boundary.
  */
 function endOfWeek(today: string): string {
   const d = new Date(`${today}T00:00:00Z`);
-  // Friday is the last expiry of a normal week; Sunday counts as the week
-  // that is about to start, not the one that just ended.
   const dow = d.getUTCDay();
   const toFriday = dow === 0 ? 5 : 5 - dow;
   d.setUTCDate(d.getUTCDate() + Math.max(0, toFriday));
@@ -76,6 +76,35 @@ function endOfMonth(today: string): string {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0))
     .toISOString()
     .slice(0, 10);
+}
+
+// --- small presentational pieces ---------------------------------------------
+
+/** Horizontal call-vs-put money bar. Bull (calls) left, bear (puts) right. */
+function SplitBar({ call, put, height = 'h-1.5' }: { call: number; put: number; height?: string }) {
+  const total = call + put;
+  const callPct = total > 0 ? (call / total) * 100 : 50;
+  return (
+    <div className={`flex w-full overflow-hidden rounded-sm bg-bear ${height}`}>
+      <div className="h-full bg-bull" style={{ width: `${callPct}%` }} aria-hidden />
+    </div>
+  );
+}
+
+function FlagBadge({ flag }: { flag: FlowFlag }) {
+  if (flag === null) return <span className="text-term-faint">—</span>;
+  const f = FLAG[flag];
+  return (
+    <span
+      className={`border px-1.5 py-0.5 text-2xs font-bold tracking-[0.1em] ${f.text} border-current/40`}
+    >
+      {f.label}
+    </span>
+  );
+}
+
+function ratioLabel(r: number): string {
+  return r >= 100 ? `${Math.floor(r)}x` : `${r.toFixed(1)}x`;
 }
 
 // --- component ----------------------------------------------------------------
@@ -92,8 +121,6 @@ export function FlowFilters({
   head: string;
   cell: string;
 }) {
-  // Read once, on mount, to seed the controls. After that this component owns
-  // the state and the URL only follows it.
   const initial = useSearchParams();
 
   const [side, setSide] = useState<Side>(() => {
@@ -104,12 +131,17 @@ export function FlowFilters({
     const v = initial.get('expiry');
     return v === '0dte' || v === 'week' || v === 'month' ? v : 'all';
   });
-  const [minPremium, setMinPremium] = useState<number>(
-    () => Number(initial.get('minPremium') ?? 0) || 0,
-  );
+  // Absent from the URL means the default hide (<$50k); an explicit `0` means
+  // the reader chose "Any" and wants everything, including unpriced rows.
+  const [minPremium, setMinPremium] = useState<number>(() => {
+    const raw = initial.get('minPremium');
+    return raw === null ? DEFAULT_MIN_PREMIUM_USD : Number(raw) || 0;
+  });
   const [tickerText, setTickerText] = useState(() => initial.get('ticker') ?? '');
+  const [view, setView] = useState<View>(() =>
+    initial.get('view') === 'flat' ? 'flat' : 'grouped',
+  );
 
-  /** The debounced value the filter actually uses. */
   const [tickerApplied, setTickerApplied] = useState(tickerText);
 
   useEffect(() => {
@@ -127,7 +159,9 @@ export function FlowFilters({
     write('ticker', tickerApplied || null);
     write('side', side === 'both' ? null : side);
     write('expiry', expiry === 'all' ? null : expiry);
-    write('minPremium', minPremium ? String(minPremium) : null);
+    // The default is kept out of the URL; "Any" (0) and the higher steps are written.
+    write('minPremium', minPremium === DEFAULT_MIN_PREMIUM_USD ? null : String(minPremium));
+    write('view', view === 'grouped' ? null : view);
 
     const query = merged.toString();
     window.history.replaceState(
@@ -135,11 +169,10 @@ export function FlowFilters({
       '',
       query ? `${window.location.pathname}?${query}` : window.location.pathname,
     );
-  }, [tickerApplied, side, expiry, minPremium]);
+  }, [tickerApplied, side, expiry, minPremium, view]);
 
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // --- filtering ---
   const wanted = useMemo(
     () =>
       tickerApplied
@@ -154,7 +187,6 @@ export function FlowFilters({
     const monthEnd = endOfMonth(today);
 
     return rows.filter((r) => {
-      // Partial match, so "NV" finds NVDA while a full symbol still works.
       if (wanted.length > 0 && !wanted.some((w) => r.symbol.includes(w))) return false;
       if (side === 'calls' && r.type !== 'call') return false;
       if (side === 'puts' && r.type !== 'put') return false;
@@ -163,26 +195,30 @@ export function FlowFilters({
       if (expiry === 'week' && r.expiration > weekEnd) return false;
       if (expiry === 'month' && r.expiration > monthEnd) return false;
 
-      // An unknown premium is excluded rather than treated as zero, which
-      // would let it pass every threshold.
+      // An unknown premium is excluded rather than treated as zero, which would
+      // let it pass every threshold. "Any" (0) keeps it.
       if (minPremium > 0 && (r.premium === null || r.premium < minPremium)) return false;
 
       return true;
     });
   }, [rows, wanted, side, expiry, minPremium, today]);
 
+  const groups = useMemo(() => groupByTicker(filtered), [filtered]);
+  const totals = useMemo(() => flowTotals(filtered), [filtered]);
+  const top = useMemo(() => topTickers(groups, 5), [groups]);
+
   const activeCount =
     (wanted.length > 0 ? 1 : 0) +
     (side !== 'both' ? 1 : 0) +
     (expiry !== 'all' ? 1 : 0) +
-    (minPremium > 0 ? 1 : 0);
+    (minPremium !== DEFAULT_MIN_PREMIUM_USD ? 1 : 0);
 
   const clearAll = () => {
     setTickerText('');
     setTickerApplied('');
     setSide('both');
     setExpiry('all');
-    setMinPremium(0);
+    setMinPremium(DEFAULT_MIN_PREMIUM_USD);
   };
 
   const chip = (active: boolean) =>
@@ -262,15 +298,18 @@ export function FlowFilters({
             </button>
           ))}
         </div>
+        <p className="mt-1 text-2xs text-term-faint">
+          Hidden below $50k by default. &ldquo;Any&rdquo; also shows rows whose
+          premium could not be priced.
+        </p>
       </div>
 
       {/*
-        Deliberately disabled rather than omitted, so it is clear this was
-        considered. A sweep is an execution type — one order routed across
-        several exchanges at once — and it is only knowable from a live trade
-        tape with condition codes. Cboe's delayed feed is an end-of-day quote
-        snapshot: bid, ask, volume, open interest and greeks, with no trade
-        metadata at all. Any "sweeps only" toggle here would be guessing.
+        Deliberately disabled rather than omitted. A sweep is an execution type
+        — one order routed across several exchanges at once — knowable only from
+        a live trade tape with condition codes. Cboe's delayed feed is an
+        end-of-day quote snapshot with no trade metadata, so any "sweeps only"
+        toggle here would be guessing.
       */}
       <div>
         <span className="label-xs block">Sweeps only</span>
@@ -335,12 +374,36 @@ export function FlowFilters({
         <div className="flex flex-wrap items-start gap-x-6 gap-y-3">{controls}</div>
       </div>
 
-      {/* Count and clear, always visible so an empty table is explainable. */}
+      {/* Day's money summary, over the rows currently shown. */}
+      <SummaryBar totals={totals} top={top} count={filtered.length} />
+
+      {/* Count, view toggle, and clear — always visible so an empty table is explainable. */}
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-2xs text-term-faint">
           <span className="text-term-dim">{filtered.length}</span> of {rows.length}{' '}
           contracts
+          {view === 'grouped' && groups.length > 0 && (
+            <>
+              {' '}
+              · <span className="text-term-dim">{groups.length}</span> tickers
+            </>
+          )}
         </p>
+
+        <div role="group" aria-label="View" className="flex gap-1">
+          {(['grouped', 'flat'] as View[]).map((v) => (
+            <button
+              key={v}
+              type="button"
+              aria-pressed={view === v}
+              onClick={() => setView(v)}
+              className={chip(view === v)}
+            >
+              {v === 'grouped' ? 'By ticker' : 'All contracts'}
+            </button>
+          ))}
+        </div>
+
         {activeCount > 0 && (
           <button
             type="button"
@@ -367,76 +430,216 @@ export function FlowFilters({
             Clear all filters
           </button>
         </div>
-      ) : (
+      ) : view === 'flat' ? (
         <section className="panel">
           <div className="scroll-term max-h-[70vh] overflow-auto">
-            <table className="w-full border-separate border-spacing-0 text-right text-xs tabular-nums">
-              <caption className="sr-only">
-                Contracts trading heavily relative to their open interest.
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col" className={`${head} text-left`}>Ticker</th>
-                  <th scope="col" className={head}>Expiry</th>
-                  <th scope="col" className={head}>Strike</th>
-                  <th scope="col" className={head}>Type</th>
-                  <th scope="col" className={head}>Volume</th>
-                  <th scope="col" className={head}>Open int.</th>
-                  <th scope="col" className={head}>Premium</th>
-                  <th scope="col" className={head}>Vol/OI</th>
-                  <th scope="col" className={`${head} text-left`}>Flag</th>
-                  <th scope="col" className={`${head} text-left`}>What happened</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r) => {
-                  const tone = LEVEL[r.level];
-                  return (
-                    <tr key={`${r.symbol}-${r.expiration}-${r.strike}-${r.type}`}>
-                      <th scope="row" className={`${cell} text-left font-bold text-term-text`}>
-                        <TickerLink symbol={r.symbol} />
-                      </th>
-                      <td className={`${cell} text-term-dim`}>{r.expiryLabel}</td>
-                      <td className={`${cell} text-term-text`}>{formatStrike(r.strike)}</td>
-                      <td
-                        className={`${cell} font-bold ${
-                          r.type === 'call' ? 'text-bull' : 'text-bear'
-                        }`}
-                      >
-                        {r.type === 'call' ? 'CALL' : 'PUT'}
-                      </td>
-                      <td className={`${cell} text-term-text`}>
-                        {formatContracts(r.volume)}
-                      </td>
-                      <td className={`${cell} text-term-dim`}>
-                        {formatContracts(r.openInterest)}
-                      </td>
-                      <td className={`${cell} text-term-dim`}>
-                        {r.premium === null ? '—' : formatUsd(r.premium)}
-                      </td>
-                      <td className={`${cell} font-bold ${tone.text}`}>
-                        {r.volumeToOi >= 100
-                          ? `${Math.floor(r.volumeToOi)}x`
-                          : `${r.volumeToOi.toFixed(1)}x`}
-                      </td>
-                      <td className={`${cell} text-left`}>
-                        <span
-                          className={`border px-1.5 py-0.5 text-2xs font-bold tracking-[0.1em] ${tone.text} border-current/40`}
-                        >
-                          {tone.label}
-                        </span>
-                      </td>
-                      <td className={`${cell} max-w-[26rem] text-left text-2xs text-term-dim`}>
-                        {r.note}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <ContractTable rows={filtered} head={head} cell={cell} showTicker />
           </div>
         </section>
+      ) : (
+        <GroupedTable groups={groups} head={head} cell={cell} />
       )}
     </div>
+  );
+}
+
+// --- summary bar --------------------------------------------------------------
+
+function SummaryBar({
+  totals,
+  top,
+  count,
+}: {
+  totals: { callPremium: number; putPremium: number; total: number };
+  top: { symbol: string; callPremium: number; putPremium: number; total: number }[];
+  count: number;
+}) {
+  if (count === 0) return null;
+  const { callPremium, putPremium, total } = totals;
+  const callPct = total > 0 ? Math.round((callPremium / total) * 100) : 0;
+
+  return (
+    <section className="panel px-3.5 py-3" aria-label="Today's option money">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <div>
+          <div className="flex items-baseline justify-between">
+            <h2 className="label-xs">Call money vs put money (shown)</h2>
+            <span className="text-2xs text-term-faint">{callPct}% calls</span>
+          </div>
+          <div className="mt-2">
+            <SplitBar call={callPremium} put={putPremium} height="h-2.5" />
+          </div>
+          <div className="mt-1.5 flex items-center justify-between text-xs tabular-nums">
+            <span className="font-bold text-bull">{formatUsd(callPremium)} calls</span>
+            <span className="font-bold text-bear">{formatUsd(putPremium)} puts</span>
+          </div>
+          {/* The one line that stops the bar above from being read as a signal. */}
+          <p className="mt-2 text-2xs leading-relaxed text-term-dim">
+            We can&rsquo;t see if these were bought or sold. Big put volume can be
+            hedging or selling, not just bearish bets.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="label-xs">Top tickers by money</h2>
+          <ul className="mt-2 space-y-1.5">
+            {top.map((t) => (
+              <li key={t.symbol} className="flex items-center gap-2.5 text-xs">
+                <span className="w-14 shrink-0 font-bold text-term-text">
+                  <TickerLink symbol={t.symbol} />
+                </span>
+                <span className="w-20 shrink-0 text-right tabular-nums text-term-dim">
+                  {formatUsd(t.total)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <SplitBar call={t.callPremium} put={t.putPremium} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// --- grouped table ------------------------------------------------------------
+
+function GroupedTable({
+  groups,
+  head,
+  cell,
+}: {
+  groups: ReturnType<typeof groupByTicker>;
+  head: string;
+  cell: string;
+}) {
+  // The busiest ticker starts open so the page is not a wall of closed rows;
+  // everything else is collapsed until asked for.
+  const [open, setOpen] = useState<Record<string, boolean>>(() =>
+    groups.length > 0 ? { [groups[0].symbol]: true } : {},
+  );
+
+  const toggle = (symbol: string) =>
+    setOpen((prev) => ({ ...prev, [symbol]: !prev[symbol] }));
+
+  return (
+    <div className="space-y-2">
+      {groups.map((g) => {
+        const isOpen = open[g.symbol] ?? false;
+        const callPct = g.totalPremium > 0 ? Math.round((g.callPremium / g.totalPremium) * 100) : 0;
+        return (
+          <section key={g.symbol} className="panel overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggle(g.symbol)}
+              aria-expanded={isOpen}
+              className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-term-raised/50"
+            >
+              <span
+                className={`shrink-0 text-term-faint transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                aria-hidden
+              >
+                ▸
+              </span>
+              <span className="w-16 shrink-0 text-sm font-bold text-term-text">
+                {g.symbol}
+              </span>
+              <span className="hidden w-24 shrink-0 text-right text-xs tabular-nums text-term-dim sm:block">
+                {formatUsd(g.totalPremium)}
+              </span>
+              <span className="min-w-0 flex-1">
+                <SplitBar call={g.callPremium} put={g.putPremium} />
+              </span>
+              <span className="hidden shrink-0 gap-2 text-2xs tabular-nums text-term-faint md:flex">
+                <span className="text-bull">{formatUsd(g.callPremium)} C</span>
+                <span className="text-bear">{formatUsd(g.putPremium)} P</span>
+              </span>
+              <span className="w-20 shrink-0 text-right text-2xs text-term-faint">
+                {g.strikeCount} {g.strikeCount === 1 ? 'strike' : 'strikes'}
+                <span className="hidden lg:inline"> · {callPct}% C</span>
+              </span>
+            </button>
+
+            {isOpen && (
+              <div className="scroll-term max-h-[60vh] overflow-auto border-t border-term-line">
+                <ContractTable rows={g.rows} head={head} cell={cell} showTicker={false} />
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+// --- shared contract table ----------------------------------------------------
+
+function ContractTable({
+  rows,
+  head,
+  cell,
+  showTicker,
+}: {
+  rows: FlowRow[];
+  head: string;
+  cell: string;
+  showTicker: boolean;
+}) {
+  return (
+    <table className="w-full border-separate border-spacing-0 text-right text-xs tabular-nums">
+      <caption className="sr-only">
+        Contracts where the most option money moved, biggest first.
+      </caption>
+      <thead>
+        <tr>
+          {showTicker && <th scope="col" className={`${head} text-left`}>Ticker</th>}
+          <th scope="col" className={head}>Expiry</th>
+          <th scope="col" className={head}>Strike</th>
+          <th scope="col" className={head}>Type</th>
+          <th scope="col" className={head}>Premium</th>
+          <th scope="col" className={head}>Volume</th>
+          <th scope="col" className={head}>Open int.</th>
+          <th scope="col" className={head}>Vol/OI</th>
+          <th scope="col" className={head}>Score</th>
+          <th scope="col" className={`${head} text-left`}>Flag</th>
+          <th scope="col" className={`${head} text-left`}>What happened</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={`${r.symbol}-${r.expiration}-${r.strike}-${r.type}`}>
+            {showTicker && (
+              <th scope="row" className={`${cell} text-left font-bold text-term-text`}>
+                <TickerLink symbol={r.symbol} />
+              </th>
+            )}
+            <td className={`${cell} text-term-dim`}>{r.expiryLabel}</td>
+            <td className={`${cell} text-term-text`}>{formatStrike(r.strike)}</td>
+            <td
+              className={`${cell} font-bold ${r.type === 'call' ? 'text-bull' : 'text-bear'}`}
+            >
+              {r.type === 'call' ? 'CALL' : 'PUT'}
+            </td>
+            <td className={`${cell} font-bold text-term-text`}>
+              {r.premium === null ? '—' : formatUsd(r.premium)}
+            </td>
+            <td className={`${cell} text-term-dim`}>{formatContracts(r.volume)}</td>
+            <td className={`${cell} text-term-dim`}>{formatContracts(r.openInterest)}</td>
+            <td className={`${cell} text-term-dim`}>{ratioLabel(r.volumeToOi)}</td>
+            <td className={`${cell} font-bold text-term-text`}>{r.unusualScore}</td>
+            <td className={`${cell} text-left`}>
+              <FlagBadge flag={r.flag} />
+            </td>
+            <td className={`${cell} max-w-[26rem] text-left text-2xs text-term-dim`}>
+              {r.note}
+              {r.multiLegNote && (
+                <span className="mt-0.5 block text-term-faint">{r.multiLegNote}</span>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
