@@ -10,16 +10,38 @@
 
 /** Contracts below this volume are noise regardless of ratio. */
 export const MIN_VOLUME = 250;
-/** Below this ratio nothing is unusual enough to report. */
+/** Below this ratio a row needs real dollars (see `LARGE_PREMIUM_USD`) to earn a place. */
 export const MIN_RATIO = 1.0;
 /** Guards against a ratio blowing up on a contract with almost no open interest. */
 export const MIN_OI = 50;
 /** Most rows kept per symbol, so one busy name cannot swamp the table. */
-export const PER_SYMBOL_CAP = 6;
+export const PER_SYMBOL_CAP = 8;
 /** Overall table cap. */
-export const TOTAL_CAP = 60;
+export const TOTAL_CAP = 80;
 
-export type UnusualLevel = 'notable' | 'high' | 'extreme';
+/** Dollars that make a print "large" — the LARGE flag, and an inclusion path in its own right. */
+export const LARGE_PREMIUM_USD = 250_000;
+/** Dollars required, alongside a >10x ratio, for the EXTREME flag. */
+export const EXTREME_PREMIUM_USD = 1_000_000;
+/** Vol/OI required, alongside >$1M, for the EXTREME flag. */
+export const EXTREME_RATIO = 10;
+/** Rows below this premium are hidden by default; the filter can show them. */
+export const DEFAULT_MIN_PREMIUM_USD = 50_000;
+/** A strike further than this (percent) from spot is probably a spread leg. */
+export const FAR_OTM_PCT = 50;
+/** Volume that makes a far-OTM strike worth the multi-leg caveat. */
+export const HUGE_VOLUME = 1_000;
+
+/** Premium at which the score's money component reads 0 (the display floor). */
+export const SCORE_FLOOR_PREMIUM_USD = 50_000;
+/** Premium at which the score's money component saturates at full marks. */
+export const SCORE_FULL_PREMIUM_USD = 50_000_000;
+
+/**
+ * The flag shown on a row. `null` is a first-class value — most rows carry no
+ * flag, and that is said with an empty cell rather than a soothing label.
+ */
+export type FlowFlag = 'extreme' | 'large' | null;
 
 export interface FlowRow {
   symbol: string;
@@ -30,21 +52,34 @@ export interface FlowRow {
   type: 'call' | 'put';
   volume: number;
   openInterest: number;
-  /** volume / open interest. The core unusualness measure. */
+  /** volume / open interest. One unusualness measure among several now. */
   volumeToOi: number;
   /**
    * Dollars that changed hands: volume x price x 100.
    *
    * Priced off the mid where both sides are quoted, falling back to the last
    * trade. Null when neither is available, so the filter can exclude the row
-   * rather than treat an unknown as zero.
+   * rather than treat an unknown as zero. This is the default sort key.
    */
   premium: number | null;
+  /**
+   * The 0–100 "Unusual score": a blend of premium size, Vol/OI and nearness to
+   * spot. A sort key with a number attached, not a probability — see
+   * `score.ts`.
+   */
+  unusualScore: number;
   /** Share of the symbol's whole-chain volume sitting in this one contract. */
   shareOfChain: number;
-  level: UnusualLevel;
-  /** One line of plain language describing what is unusual. */
+  /** EXTREME, LARGE, or no flag. */
+  flag: FlowFlag;
+  /** One line of plain language describing what moved — about twelve words. */
   note: string;
+  /**
+   * The multi-leg caveat when the strike is far from spot yet heavily traded,
+   * else null. Kept apart from `note` so the table can show it as a quieter
+   * aside rather than fold it into the headline.
+   */
+  multiLegNote: string | null;
   /** Underlying price at snapshot, for context on how far out the strike is. */
   spot: number;
   /** Percent the strike sits away from spot. */
@@ -68,7 +103,7 @@ export interface FlowSymbolSummary {
  * recomputed rather than passing validation and missing a field the page now
  * reads. Same reasoning as the sectors store.
  */
-export const FLOW_SCHEMA = 3;
+export const FLOW_SCHEMA = 4;
 
 export interface FlowSnapshot {
   schema: number;
