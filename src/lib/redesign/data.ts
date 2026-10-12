@@ -172,12 +172,20 @@ function formatHistoryDate(iso: string): string {
 function mapMacro(
   view: RichMacroView,
   catalyst: MacroBiasMock['nextCatalyst'],
+  /** Live VIX, so the volatility line shows the same number as market health. */
+  liveVix: number | null,
 ): MacroBiasMock {
   const c = view.current;
   const drivers: MacroDriverMock[] = c.drivers.map((d) => ({
     key: d.key,
     label: d.label,
-    value: d.value,
+    // The volatility driver is scored from the FRED daily close like the other
+    // macro factors, but the number shown is swapped to the live VIX so it
+    // matches the market-health card on the same page. Display only — the state
+    // and its "calm/stressed" reasoning stay as scored. The two buckets agree
+    // in all but rare cases where the live print has crossed a threshold the
+    // daily close has not yet; that is the accepted cost of one shared number.
+    value: d.key === 'vol' && liveVix !== null ? `VIX ${liveVix.toFixed(1)}` : d.value,
     state: d.state as DriverState,
     note: d.sub,
   }));
@@ -213,12 +221,29 @@ function nextCatalyst(now: Date = new Date()): MacroBiasMock['nextCatalyst'] {
 
 // --- market health -----------------------------------------------------------
 
-function mapHealth(breadth: BreadthReading | null, quotes: MarketContextQuotes | null): MarketHealthMock | null {
+function mapHealth(
+  breadth: BreadthReading | null,
+  quotes: MarketContextQuotes | null,
+  /** The page's canonical spot, so the SPY row matches the hero and gamma map. */
+  spot: number | null,
+): MarketHealthMock | null {
   const breadthPct = breadth?.computed?.pctAbovePriorClose ?? null;
   const vixQuote = quotes?.quotes.find((q) => q.symbol === '^VIX') ?? null;
   const indices = (quotes?.quotes ?? [])
     .filter((q) => q.symbol !== '^VIX')
-    .map((q) => ({ symbol: q.label, last: q.price, changePct: q.changePct }));
+    .map((q) => {
+      // The SPY row shows the canonical spot rather than this card's own quote
+      // provider, so one page never prints two different SPY prices. The change
+      // is re-based onto the same prior close the quote implies, so price and
+      // percentage stay internally consistent.
+      if (q.symbol === config.symbol && spot !== null && spot > 0) {
+        const priorClose = q.price / (1 + q.changePct / 100);
+        const changePct =
+          priorClose > 0 ? ((spot - priorClose) / priorClose) * 100 : q.changePct;
+        return { symbol: q.label, last: spot, changePct };
+      }
+      return { symbol: q.label, last: q.price, changePct: q.changePct };
+    });
   if (breadthPct === null && !vixQuote && indices.length === 0) return null;
 
   // Shown only when fresh — a stale SPY-vs-RSP reading is hidden, never faked.
@@ -431,7 +456,7 @@ export async function loadMacroFit(symbol: string, now: Date = new Date()): Prom
 export async function loadHomeData(now: Date = new Date()): Promise<HomeData> {
   const catalyst = nextCatalyst(now);
 
-  const [book, breadth, quotes, richMacro, outlook, netLiquidity, leadership, scanner, flow, trackRecord] =
+  const [book, breadth, quotes, richMacro, outlook, netLiquidity, leadership, scanner, flow, trackRecord, liveSpot] =
     await Promise.all([
       peekPositioningView(config.symbol).catch((): PositioningData | null => null),
       getBreadth().catch((): BreadthReading | null => null),
@@ -443,22 +468,39 @@ export async function loadHomeData(now: Date = new Date()): Promise<HomeData> {
       mapScanner(now),
       mapFlow(),
       mapTrackRecord(),
+      getSpotQuote(config.symbol).catch(() => null),
     ]);
+
+  /*
+   * One spot and one VIX for the whole page.
+   *
+   * Every card that shows the underlying price or the VIX now reads from the
+   * same two values, so the hero, the gamma map and the market-health row can
+   * no longer disagree about what SPY is trading at, and the macro-bias
+   * volatility line shows the same VIX the health card does.
+   *
+   * - Spot is the canonical live quote (`getSpotQuote` → Cboe), the same price
+   *   the levels are measured against, falling back to the chain's echoed spot.
+   * - VIX is the live context quote the health row already used; the macro bias
+   *   keeps scoring its backdrop from the FRED daily close (see `mapMacro`), and
+   *   only the number it *displays* is swapped to this live one.
+   */
+  const spot = liveSpot?.price ?? book?.spot ?? null;
+  const liveVix = quotes?.quotes.find((q) => q.symbol === '^VIX')?.price ?? null;
 
   let levels: GammaLevelsMock | null = null;
   let profile: GammaProfileData | null = null;
   if (book) {
-    const spot = (await getSpotQuote(config.symbol).catch(() => null))?.price ?? book.spot;
     profile = buildGammaProfile(book);
-    levels = mapLevels(book, profile, spot);
+    levels = mapLevels(book, profile, spot ?? book.spot);
   }
 
   return {
     status: loadMarketStatus(now),
     levels,
     profile,
-    macro: richMacro ? mapMacro(richMacro, catalyst) : null,
-    health: mapHealth(breadth, quotes),
+    macro: richMacro ? mapMacro(richMacro, catalyst, liveVix) : null,
+    health: mapHealth(breadth, quotes, spot),
     outlook,
     netLiquidity,
     leadership,
