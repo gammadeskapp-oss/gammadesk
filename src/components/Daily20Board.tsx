@@ -10,6 +10,8 @@ import {
 } from '@/lib/scanner/directionScore';
 import { SETUP_LABEL, type Daily20, type Daily20Entry } from '@/lib/scanner/daily20';
 import type { SectorConfirm } from '@/lib/scanner/sectorConfirmation';
+import { JournalPanel } from './JournalControls';
+import type { JournalNow } from '@/lib/scanner/journal';
 
 /**
  * The Daily 20 — ten bullish leaders beside ten bearish laggards, each with its
@@ -163,9 +165,11 @@ function SideColumn({
 export function Daily20Board({
   daily20,
   sectorConfirmations = {},
+  journalNow = {},
 }: {
   daily20: Daily20;
   sectorConfirmations?: Record<string, SectorConfirm>;
+  journalNow?: Record<string, JournalNow>;
 }) {
   return (
     <div className="space-y-3">
@@ -185,6 +189,8 @@ export function Daily20Board({
           sectorConfirmations={sectorConfirmations}
         />
       </div>
+      <JournalPanel nowBySymbol={journalNow} />
+
       <p className="px-1 text-2xs leading-relaxed text-term-faint">
         Gated first, then ranked. Each name shows its strength label and, separately, its setup —
         a high score is not a signal to act. Every component of the score is printed beside the

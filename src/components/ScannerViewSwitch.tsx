@@ -6,6 +6,7 @@ import { Daily20Board } from './Daily20Board';
 import { ScannerBoard } from './ScannerBoard';
 import type { Daily20 } from '@/lib/scanner/daily20';
 import type { SectorConfirm } from '@/lib/scanner/sectorConfirmation';
+import type { JournalNow } from '@/lib/scanner/journal';
 
 /**
  * The scanner's two views: the Daily 20 (default) and the full scored index.
@@ -22,10 +23,12 @@ type View = 'daily20' | 'full';
 export function ScannerViewSwitch({
   daily20,
   sectorConfirmations,
+  journalNow,
   board,
 }: {
   daily20: Daily20;
   sectorConfirmations: Record<string, SectorConfirm>;
+  journalNow: Record<string, JournalNow>;
   board: ComponentProps<typeof ScannerBoard>;
 }) {
   const initial = useSearchParams();
@@ -67,7 +70,7 @@ export function ScannerViewSwitch({
       </div>
 
       {view === 'daily20' ? (
-        <Daily20Board daily20={daily20} sectorConfirmations={sectorConfirmations} />
+        <Daily20Board daily20={daily20} sectorConfirmations={sectorConfirmations} journalNow={journalNow} />
       ) : (
         <ScannerBoard {...board} />
       )}

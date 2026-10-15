@@ -21,6 +21,7 @@ import { sectorMap } from '@/lib/rs/universe';
 import { loadDaily20 } from '@/lib/scanner/loadDaily20';
 import type { Daily20 } from '@/lib/scanner/daily20';
 import type { SectorConfirm } from '@/lib/scanner/sectorConfirmation';
+import type { JournalNow } from '@/lib/scanner/journal';
 import { recordAndDiffDaily20 } from '@/lib/scanner/daily20Snapshots';
 import type { ChangeLine } from '@/lib/scanner/daily20Diff';
 import { formatAsOf } from '@/lib/time';
@@ -83,6 +84,7 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
   // than taking the page down.
   let daily20: Daily20 | null = null;
   let sectorConfirmations: Record<string, SectorConfirm> = {};
+  const journalNow: Record<string, JournalNow> = {};
   let changes: ChangeLine[] = [];
   if (scan) {
     const loaded = await loadDaily20().catch(() => null);
@@ -97,6 +99,16 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
       changes = scan.date
         ? await recordAndDiffDaily20(loaded.daily20, scan.date, sectorBySymbol).catch(() => [])
         : [];
+
+      // Today's reading for each name, so the journal panel can show how a saved
+      // thesis has aged (score then → now, lifecycle shift).
+      for (const e of [...loaded.daily20.bullish, ...loaded.daily20.bearish]) {
+        journalNow[e.symbol.toUpperCase()] = {
+          score: e.score.total,
+          lifecycleLabel: e.lifecycle.label,
+          extended: e.gate.observations.extended,
+        };
+      }
     }
   }
 
@@ -250,6 +262,7 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
           <ScannerViewSwitch
             daily20={daily20}
             sectorConfirmations={sectorConfirmations}
+            journalNow={journalNow}
             board={{
               scan,
               nwSettings: {

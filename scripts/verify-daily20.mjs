@@ -504,5 +504,28 @@ ok('unknown gamma room shows a dash', calm.find((i) => i.label === 'Gamma room')
 ok('unknown IV shows a dash', calm.find((i) => i.label === 'IV (quoted)')?.value === '—');
 ok('TIGHT_INVALIDATION_PCT is 3', TIGHT_INVALIDATION_PCT === 3);
 
+// --- decision journal (step 14) ----------------------------------------------
+
+const { journalSurfaceLine, STYLE_LABEL } = await import('../src/lib/scanner/journal.ts');
+
+section('Journal — the later surface line');
+const jEntry = {
+  id: 'x', symbol: 'NVDA', direction: 'bullish', thesis: 'Leader pulling back to the 21-day.',
+  style: 'swing', savedAt: '2026-10-14',
+  snapshot: { score: 71, lifecycleLabel: 'Pullback', setup: 'pullback', invalidation: 'below 50-day' },
+  outcome: null,
+};
+const line = journalSurfaceLine(jEntry, { score: 86, lifecycleLabel: 'Extended', extended: true, nearLevel: true });
+ok('reads like the brief\'s example',
+  line === 'You saved this as a Pullback leader on 2026-10-14 — score rose 71 → 86, now extended and near the relevant gamma level.',
+  line);
+ok('no "now" states only what was saved',
+  journalSurfaceLine(jEntry, null) === 'You saved this as a Pullback leader on 2026-10-14.');
+ok('a falling score says "fell"',
+  /score fell 71 → 60/.test(journalSurfaceLine(jEntry, { score: 60, lifecycleLabel: 'Pullback', extended: false })));
+ok('STYLE_LABEL covers the four styles',
+  STYLE_LABEL.intraday && STYLE_LABEL.weekly && STYLE_LABEL.monthly && STYLE_LABEL.swing);
+ok('no buy/sell language in the surface line', !/\bbuy\b|\bsell\b/i.test(line));
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);
