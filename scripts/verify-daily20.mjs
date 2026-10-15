@@ -314,5 +314,39 @@ ok('leader -> laggard reported once as a side flip',
   (() => { const cs = diffDaily20(lead, lag); const flips = cs.filter((c) => c.symbol === 'SWING');
     return flips.length === 1 && flips[0].kind === 'side-flip'; })());
 
+// --- "why this is here today" templates (step 7) ----------------------------
+
+const { whyHereToday } = await import('../src/lib/scanner/daily20Reason.ts');
+
+section('Why-here — both forms, risk line always present, no buy/sell words');
+const leadEntry = d20.bullish[0];
+const why = whyHereToday(leadEntry, {
+  rsPercentiles: { m1: 82, m3: 74, m6: 69 },
+  sectorName: 'Information Technology', sectorRank: { rank: 2, of: 11 },
+  gamma: { regime: 'positive', flip: 776, upsideMagnet: 785, downsideMagnet: 772, roomPct: 4 },
+  risk: { label: 'Earnings', daysAway: 17 },
+});
+ok('title names rank, direction and the two-axis label',
+  why.title.includes('#1') && /leader/i.test(why.title) && why.title.includes(leadEntry.display));
+ok('has an RS-across-periods line', why.lines.some((l) => l.includes('1M 82') && l.includes('6M 69')));
+ok('has a group line with sector rank', why.lines.some((l) => l.includes('Information Technology') && l.includes('2 of 11')));
+ok('has an MA-posture line', why.lines.some((l) => /50-day/.test(l)));
+ok('has a setup line', why.lines.some((l) => /today's setup/i.test(l)));
+ok('has a gamma line in SPY-page wording', why.lines.some((l) => /dealer hedging/.test(l) && /785/.test(l)));
+ok('watch line is always present and last', why.lines[why.lines.length - 1] === why.watch && why.watch.startsWith('Watch'));
+
+const banned2 = /\bbuy\b|\bsell\b|\bshort\b(?!-)|\blong\b(?!-)/i;
+ok('no buy/sell/long/short language anywhere', !why.lines.some((l) => banned2.test(l)),
+  why.lines.find((l) => banned2.test(l)));
+
+// Bearish form, minimal context — risk line still present.
+const lagEntry = d20.bearish[0];
+const whyBear = whyHereToday(lagEntry, { risk: { label: 'CPI', daysAway: 1 } });
+ok('bearish title says laggard', /laggard/i.test(whyBear.title));
+ok('bearish still has setup + watch even with no RS/sector/gamma context',
+  whyBear.lines.some((l) => /today's setup/i.test(l)) && whyBear.watch.includes('CPI'));
+ok('a line-less context still yields a watch line',
+  whyHereToday(lagEntry, {}).watch.length > 0);
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);
