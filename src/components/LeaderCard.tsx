@@ -8,6 +8,7 @@ import { SETUP_LABEL, type Daily20Entry } from '@/lib/scanner/daily20';
 import type { SectorConfirm } from '@/lib/scanner/sectorConfirmation';
 import { researchPlan } from '@/lib/scanner/researchPlan';
 import { tickerRiskRow } from '@/lib/scanner/tickerRisk';
+import { JournalSaveButton } from './JournalControls';
 
 /**
  * The per-ticker Leader Card — the detail behind a Daily 20 row.
@@ -219,7 +220,10 @@ export function LeaderCard({ entry, sector }: { entry: Daily20Entry; sector?: Se
         </dl>
       </div>
 
-      <p className="mt-2 text-2xs leading-relaxed text-term-faint">{entry.reason}</p>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <p className="text-2xs leading-relaxed text-term-faint">{entry.reason}</p>
+        <JournalSaveButton entry={entry} />
+      </div>
     </div>
   );
 }

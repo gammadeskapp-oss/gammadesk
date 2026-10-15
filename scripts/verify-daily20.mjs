@@ -527,5 +527,84 @@ ok('STYLE_LABEL covers the four styles',
   STYLE_LABEL.intraday && STYLE_LABEL.weekly && STYLE_LABEL.monthly && STYLE_LABEL.swing);
 ok('no buy/sell language in the surface line', !/\bbuy\b|\bsell\b/i.test(line));
 
+// --- Today's Playbook (step 15) ----------------------------------------------
+
+const {
+  assemblePlaybook,
+  ALIGNMENT_WEIGHTS,
+  ALIGNMENT_COMPONENT_KEYS,
+  EXCLUDED_LIFECYCLE,
+  PLAYBOOK_RESEARCH,
+  PLAYBOOK_AVOID,
+} = await import('../src/lib/scanner/playbook.ts');
+
+section('Playbook — Alignment weights are the confirmed constants');
+ok('leadership 0.30', ALIGNMENT_WEIGHTS.leadership === 0.3);
+ok('setupQuality 0.30', ALIGNMENT_WEIGHTS.setupQuality === 0.3);
+ok('liquidity 0.15', ALIGNMENT_WEIGHTS.liquidity === 0.15);
+ok('gammaRoom 0.15', ALIGNMENT_WEIGHTS.gammaRoom === 0.15);
+ok('riskHeadroom 0.10', ALIGNMENT_WEIGHTS.riskHeadroom === 0.1);
+ok('weights sum to 1',
+  approx(Object.values(ALIGNMENT_WEIGHTS).reduce((a, b) => a + b, 0), 1));
+ok('PLAYBOOK_RESEARCH / PLAYBOOK_AVOID are 5', PLAYBOOK_RESEARCH === 5 && PLAYBOOK_AVOID === 5);
+
+const goodLeader = (sym, rs) => row({ symbol: sym, metricsOver: {
+  rsScore: rs, avgDollarVolume: 400e6, pctAbove50: 5, pctAbove200: 10,
+  pctAbove20: 1, pctAboveVwap: 2, ema50: 110, ema200: 100 } });
+
+const pbUniverse = [
+  ...Array.from({ length: 6 }, (_, i) => goodLeader(`GOOD${i}`, 95 - i)),
+  // Extended leader — highest RS, so it would top a raw-rank list, but is barred.
+  row({ symbol: 'EXT', metricsOver: {
+    rsScore: 99, avgDollarVolume: 400e6, pctAbove50: 5, pctAbove200: 10,
+    pctAbove20: 12, pctAboveVwap: 5, ema50: 110, ema200: 100 } }),
+  // Earnings-soon leader — constructive, admitted only by the earnings-play flag.
+  row({ symbol: 'ERN', earnings: { state: 'known', dateIso: '2026-10-18', daysAway: 3, source: 't' },
+    metricsOver: { rsScore: 98, avgDollarVolume: 400e6, pctAbove50: 5, pctAbove200: 10,
+      pctAbove20: 1, pctAboveVwap: 2, ema50: 110, ema200: 100 } }),
+];
+const pbRs = new Map();
+for (const r of pbUniverse) pbRs.set(r.symbol, { m1: 80, m3: 70, m6: 65 });
+const pbD20 = assembleDaily20(pbUniverse, {
+  rsPercentilesBySymbol: pbRs,
+  flags: { earningsPlay: true, allowImprovingTrend: false },
+});
+const pb = assemblePlaybook(pbD20);
+
+section('Playbook — hard exclusions route to avoid, never down-weight');
+const researchSyms = pb.research.map((i) => i.entry.symbol);
+const avoidSyms = pb.avoid.map((i) => i.entry.symbol);
+ok('research holds five', pb.research.length === 5, String(pb.research.length));
+ok('extended name is barred from research', !researchSyms.includes('EXT'));
+ok('earnings-soon name is barred from research', !researchSyms.includes('ERN'));
+ok('EXT lands on the avoid list', avoidSyms.includes('EXT'));
+ok('ERN lands on the avoid list', avoidSyms.includes('ERN'));
+ok('EXT avoid reason names "extended"',
+  /extended/.test(pb.avoid.find((i) => i.entry.symbol === 'EXT')?.excluded ?? ''));
+ok('ERN avoid reason names the earnings event',
+  /earnings/.test(pb.avoid.find((i) => i.entry.symbol === 'ERN')?.excluded ?? ''));
+ok('excluded lifecycle set covers the four states',
+  EXCLUDED_LIFECYCLE.has('extended') && EXCLUDED_LIFECYCLE.has('stretched') &&
+  EXCLUDED_LIFECYCLE.has('damaged') && EXCLUDED_LIFECYCLE.has('failed'));
+ok('eligible count excludes the barred names', pb.eligible === 6, String(pb.eligible));
+
+section('Playbook — Alignment ranks and renormalises honestly');
+ok('research sorted by Alignment desc',
+  pb.research.every((it, i) => i === 0 || pb.research[i - 1].alignment.total >= it.alignment.total));
+ok('every Alignment total is 0..100',
+  pb.research.every((it) => it.alignment.total >= 0 && it.alignment.total <= 100));
+ok('all five Alignment components are returned on each item',
+  pb.research.every((it) => ALIGNMENT_COMPONENT_KEYS.every((k) => k in it.alignment.components)));
+ok('unwired gamma room drops out of the blend (missing, not zero)',
+  pb.research.every((it) => it.alignment.components.gammaRoom === null && it.alignment.missing.includes('gammaRoom')));
+ok('a researchable name still scores above zero without gamma room',
+  pb.research[0].alignment.total > 0);
+ok('every item carries a watch line', pb.research.every((it) => it.watch) && pb.avoid.every((it) => it.watch));
+
+const pbText = [...pb.research, ...pb.avoid]
+  .flatMap((it) => [it.reason, it.watch, it.excluded ?? ''])
+  .join(' ');
+ok('no buy/sell language anywhere in the Playbook', !/\bbuy\b|\bsell\b/i.test(pbText));
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);

@@ -4,7 +4,7 @@ import { PageBar } from '@/components/PageBar';
 import { RefreshStatus } from '@/components/RefreshStatus';
 import { ScannerViewSwitch } from '@/components/ScannerViewSwitch';
 import { ScannerTabs } from '@/components/ScannerTabs';
-import { WhatChangedToday } from '@/components/WhatChangedToday';
+import type { MarketCondition } from '@/components/Playbook';
 import { ScannerMacroPanel, type MacroRow } from '@/components/redesign/ScannerMacroPanel';
 import { TosTrendTab } from '@/components/TosTrendTab';
 import { InfoTip } from '@/components/InfoTip';
@@ -19,6 +19,7 @@ import { macroAlignmentFor, earningsWithin24h } from '@/lib/redesign/macroAlignm
 import { getMembership } from '@/lib/rs/membership';
 import { sectorMap } from '@/lib/rs/universe';
 import { loadDaily20 } from '@/lib/scanner/loadDaily20';
+import { assemblePlaybook, type Playbook } from '@/lib/scanner/playbook';
 import type { Daily20 } from '@/lib/scanner/daily20';
 import type { SectorConfirm } from '@/lib/scanner/sectorConfirmation';
 import type { JournalNow } from '@/lib/scanner/journal';
@@ -83,6 +84,7 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
   // build it differently. A failed load leaves the Daily 20 unpopulated rather
   // than taking the page down.
   let daily20: Daily20 | null = null;
+  let playbook: Playbook | null = null;
   let sectorConfirmations: Record<string, SectorConfirm> = {};
   const journalNow: Record<string, JournalNow> = {};
   let changes: ChangeLine[] = [];
@@ -90,6 +92,9 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
     const loaded = await loadDaily20().catch(() => null);
     if (loaded) {
       daily20 = loaded.daily20;
+      // The Playbook's shortlist is derived from the same assembled Daily 20, so
+      // the two views can never rank the same name differently.
+      playbook = assemblePlaybook(loaded.daily20);
       sectorConfirmations = Object.fromEntries(loaded.sectorConfirmations);
       // Carry each name's sector onto its listing row so the scorecard's
       // by-sector breakdown fills in rather than staying permanently empty.
@@ -146,6 +151,32 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
   const earningsDated = scan
     ? scan.rows.filter((r) => r.earnings.state === 'known').length
     : 0;
+
+  /*
+    The Playbook's market-condition panel, assembled from readings already on
+    this page — the index gamma regime, the breadth engine's own sentence, the
+    big-vs-average-stock line and a count of names reporting inside 24h. It
+    reuses each engine's wording rather than restating it, and is context only:
+    nothing here scores or ranks a name.
+  */
+  const spyRspFresh =
+    breadth?.spyRsp && !isSpyRspStale(breadth.spyRsp, { marketOpen: isRegularHours() })
+      ? breadth.spyRsp
+      : null;
+  const reportingSoon = scan
+    ? scan.rows.filter((r) => earningsWithin24h(r.earnings.dateIso)).length
+    : 0;
+  const marketCondition: MarketCondition = {
+    regime: scan?.spyRegime ?? null,
+    breadthPct: breadth?.computed?.pctAbovePriorClose ?? null,
+    breadthLine: breadth?.computed ? breadthSentence(breadth.computed) : null,
+    spyRspLine: spyRspFresh ? spyRspSummaryLine(spyRspFresh) : null,
+    eventLine:
+      reportingSoon > 0
+        ? `${reportingSoon} scored name${reportingSoon === 1 ? '' : 's'} report within 24h.`
+        : null,
+    macroLine: null,
+  };
   const notesSummary = scan
     ? `${scan.coverage?.withGamma ?? 0} of ${scan.scored} names have options data · ` +
       `earnings dates for ${earningsDated} · ` +
@@ -256,10 +287,11 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
         {/* Macro alignment column + filters, on the real top names. */}
         <ScannerMacroPanel rows={macroRows} />
 
-        {scan && daily20 && <WhatChangedToday changes={changes} />}
-
-        {scan && daily20 ? (
+        {scan && daily20 && playbook ? (
           <ScannerViewSwitch
+            playbook={playbook}
+            condition={marketCondition}
+            changes={changes}
             daily20={daily20}
             sectorConfirmations={sectorConfirmations}
             journalNow={journalNow}
