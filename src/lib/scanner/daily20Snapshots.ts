@@ -2,7 +2,9 @@ import 'server-only';
 
 import { createJsonStore } from '../jsonStore';
 import { diffDaily20, type ChangeLine } from './daily20Diff';
-import type { Daily20 } from './daily20';
+import type { Daily20, Daily20Entry } from './daily20';
+import type { Direction } from './directionScore';
+import type { SetupState } from './daily20';
 
 /**
  * Persistence for the "What Changed Today" feed.
@@ -21,7 +23,58 @@ import type { Daily20 } from './daily20';
  * rather than an error now.
  */
 
-const KEEP = 10;
+// The full snapshot store only feeds the one-session diff, so it needs just the
+// previous session plus today.
+const KEEP = 2;
+
+// The listings store is the scorecard's raw material: one compact row per name
+// per session, kept long enough to mature a 20-session forward return many
+// times over.
+const LISTINGS_CAP = 2000;
+
+/** One Daily 20 listing, flattened for the scorecard. No prices — the loader adds those. */
+export interface Daily20ListingRow {
+  date: string;
+  symbol: string;
+  direction: Direction;
+  setup: SetupState;
+  regime: 'positive' | 'negative' | null;
+  extended: boolean;
+  /** Not in the previous session's Daily 20 on this side. */
+  newEntry: boolean;
+}
+
+interface Daily20Listings {
+  rows: Daily20ListingRow[];
+}
+
+const listingsStore = createJsonStore<Daily20Listings>(
+  'gammadesk/daily20-listings.json',
+  () => ({ rows: [] }),
+  (raw) => {
+    if (!raw || typeof raw !== 'object') return { rows: [] };
+    const d = raw as Daily20Listings;
+    return Array.isArray(d.rows) ? d : { rows: [] };
+  },
+);
+
+function listingRows(today: Daily20, prior: Daily20 | null, date: string): Daily20ListingRow[] {
+  const priorBull = new Set((prior?.bullish ?? []).map((e) => e.symbol));
+  const priorBear = new Set((prior?.bearish ?? []).map((e) => e.symbol));
+  const row = (e: Daily20Entry, newEntry: boolean): Daily20ListingRow => ({
+    date,
+    symbol: e.symbol,
+    direction: e.direction,
+    setup: e.setup,
+    regime: e.row.regime,
+    extended: e.gate.observations.extended,
+    newEntry,
+  });
+  return [
+    ...today.bullish.map((e) => row(e, !priorBull.has(e.symbol))),
+    ...today.bearish.map((e) => row(e, !priorBear.has(e.symbol))),
+  ];
+}
 
 interface StoredSnapshot {
   /** `YYYY-MM-DD` New York session this Daily 20 describes. */
@@ -64,7 +117,8 @@ export async function recordAndDiffDaily20(
   date: string,
 ): Promise<ChangeLine[]> {
   const history = await store.read().catch(() => ({ snapshots: [] as StoredSnapshot[] }));
-  const changes = diffDaily20(priorBefore(history, date), today);
+  const prior = priorBefore(history, date);
+  const changes = diffDaily20(prior, today);
 
   const alreadyStored = history.snapshots.some((s) => s.date === date);
   if (!alreadyStored) {
@@ -79,9 +133,24 @@ export async function recordAndDiffDaily20(
     } catch {
       // Best-effort — see the note on this module.
     }
+
+    // Append this session's listing rows for the scorecard.
+    try {
+      const current = await listingsStore.read().catch(() => ({ rows: [] as Daily20ListingRow[] }));
+      const kept = current.rows.filter((r) => r.date !== date);
+      const rows = [...listingRows(today, prior, date), ...kept].slice(0, LISTINGS_CAP);
+      await listingsStore.write({ rows });
+    } catch {
+      // Best-effort — the scorecard simply has fewer sessions next time.
+    }
   }
 
   return changes;
+}
+
+/** All stored listing rows for the scorecard loader. */
+export function peekDaily20Listings(): Promise<Daily20Listings> {
+  return listingsStore.read().catch(() => ({ rows: [] }));
 }
 
 /** Read-only peek for diagnostics; never writes. */

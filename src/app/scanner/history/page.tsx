@@ -19,6 +19,8 @@ import {
   type OptionQualityBadge,
 } from '@/lib/scanner/types';
 import { contractSummary } from '@/lib/scanner/optionQuality';
+import { Daily20Scorecard } from '@/components/Daily20Scorecard';
+import { loadDaily20Scorecard } from '@/lib/scanner/loadDaily20Scorecard';
 
 export const metadata: Metadata = {
   title: 'Scanner History',
@@ -87,6 +89,10 @@ export default async function ScannerHistoryPage() {
   const counts = dailyCounts(days);
   const average = averagePerDay(days);
 
+  // The transparent forward-return scorecard, built from the stored Daily 20
+  // listings. Empty until sessions mature; best-effort, never fatal to the page.
+  const scorecard = await loadDaily20Scorecard().catch(() => null);
+
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
@@ -107,6 +113,8 @@ export default async function ScannerHistoryPage() {
         </p>
 
         <ScannerRunRate counts={counts} average={average} days={14} />
+
+        {scorecard && <Daily20Scorecard scorecard={scorecard} />}
 
         {days.length === 0 ? (
           <div className="panel px-4 py-10 text-center text-xs">

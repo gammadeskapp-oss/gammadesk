@@ -414,5 +414,44 @@ const lit = withSector.bullish.find((e) => e.symbol === topLeaders[0]);
 ok('SECT component is no longer "—" once the strength map is supplied',
   lit && lit.score.components.sector === 72, String(lit?.score.components.sector));
 
+// --- scorecard (step 8) ------------------------------------------------------
+
+const { computeScorecard, HORIZONS } = await import('../src/lib/scanner/daily20Scorecard.ts');
+
+section('Scorecard — direction-aware hit rate, raw median, breakdowns');
+function listing(over) {
+  return {
+    date: '2026-09-01', symbol: 'X', direction: 'bullish', setup: 'breaking-out',
+    regime: 'positive', sector: 'Technology', extended: false, newEntry: true,
+    ret: { 1: 0.01, 5: 0.03, 10: 0.05, 20: 0.08 }, mfe: 0.1, mae: -0.02, ...over,
+  };
+}
+const sc = computeScorecard([
+  listing({ symbol: 'A', direction: 'bullish', ret: { 1: 0.02, 5: 0.04, 10: 0.06, 20: 0.1 } }),
+  listing({ symbol: 'B', direction: 'bullish', ret: { 1: -0.01, 5: 0.01, 10: -0.02, 20: 0.03 } }),
+  // A laggard that fell — a "hit" for a bearish listing.
+  listing({ symbol: 'C', direction: 'bearish', regime: 'negative', setup: 'breaking-down',
+    extended: true, newEntry: false, sector: 'Energy', ret: { 1: -0.03, 5: -0.05, 10: -0.04, 20: -0.09 } }),
+]);
+ok('HORIZONS are 1/5/10/20', HORIZONS.join(',') === '1,5,10,20');
+ok('sampled counts the three listings', sc.sampled === 3);
+ok('1d hit rate: A up, B down, C down(bear hit) = 2/3',
+  Math.round(sc.overall[1].hitRate) === 67, String(sc.overall[1].hitRate));
+ok('20d median is the raw middle return (+0.03)', Math.abs(sc.overall[20].median - 0.03) < 1e-9, String(sc.overall[20].median));
+ok('median keeps sign (not flipped for the laggard)', sc.overall[20].median > 0);
+ok('MFE median computed', sc.mfeMedian === 0.1);
+ok('MAE median computed and negative', sc.maeMedian < 0);
+ok('breakdown by regime splits positive/negative', sc.byRegime.length === 2);
+ok('breakdown by direction splits leaders/laggards', sc.byDirection.length === 2);
+ok('extended breakdown present', sc.byExtended.some((b) => b.key === 'extended') && sc.byExtended.some((b) => b.key === 'not-extended'));
+ok('new vs continuing present', sc.byNewVsContinuing.length === 2);
+ok('sector breakdown names the sectors', sc.bySector.some((b) => b.label === 'Technology'));
+
+ok('an empty scorecard is all zeros, not NaN',
+  (() => { const e = computeScorecard([]); return e.sampled === 0 && e.overall[1].hitRate === null && e.mfeMedian === null; })());
+
+ok('a listing with no matured horizon is not sampled',
+  computeScorecard([listing({ ret: { 1: null, 5: null, 10: null, 20: null } })]).sampled === 0);
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);
