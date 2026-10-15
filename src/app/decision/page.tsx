@@ -48,6 +48,10 @@ import type { TooltipKey } from '@/lib/tooltips';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
 import { MacroFitCard } from '@/components/redesign/MacroFitCard';
 import { loadMacroFit } from '@/lib/redesign/data';
+import { loadDaily20, findEntry } from '@/lib/scanner/loadDaily20';
+import { whyHereToday, type WhyHere } from '@/lib/scanner/daily20Reason';
+import { WhyHereToday } from '@/components/WhyHereToday';
+import type { Daily20Entry } from '@/lib/scanner/daily20';
 
 export const metadata: Metadata = {
   title: 'Decision',
@@ -444,6 +448,41 @@ export default async function DecisionPage({ searchParams }: PageProps) {
   const macroFit = data ? await loadMacroFit(data.context.symbol).catch(() => null) : null;
 
   /*
+   * "Why this is here today" — rendered only when the ticker on screen is in
+   * today's Daily 20. The gamma context comes from this page's own decision
+   * data (regime, flip, magnets), so the wording matches the levels below it.
+   * Best-effort: a missing scan simply means no block.
+   */
+  let whyHere: WhyHere | null = null;
+  let whyDirection: Daily20Entry['direction'] = 'bullish';
+  if (data) {
+    const loaded = symbol ? await loadDaily20().catch(() => null) : null;
+    const entry = loaded && symbol ? findEntry(loaded.daily20, symbol) : null;
+    if (loaded && entry) {
+      whyDirection = entry.direction;
+      const sector = loaded.sectorConfirmations.get(entry.symbol) ?? null;
+      const ctx = data.context;
+      const magnet = entry.direction === 'bullish' ? ctx.magnetAbove : ctx.magnetBelow;
+      whyHere = whyHereToday(entry, {
+        rsPercentiles: entry.rsPercentiles,
+        sectorName: sector?.sectorName ?? null,
+        sectorRank: sector ? { rank: sector.sectorRank, of: sector.of } : null,
+        gamma: {
+          regime: ctx.regime,
+          flip: ctx.flipLevel,
+          upsideMagnet: ctx.magnetAbove?.strike ?? null,
+          downsideMagnet: ctx.magnetBelow?.strike ?? null,
+          roomPct: magnet?.distancePct ?? null,
+        },
+        risk:
+          entry.row.earnings.state === 'known'
+            ? { label: 'Earnings', daysAway: entry.row.earnings.daysAway }
+            : null,
+      });
+    }
+  }
+
+  /*
    * The cone and the exposure grid, fetched alongside the decision itself.
    *
    * Both are behind the same TTL cache as the pages they came from, so a
@@ -669,6 +708,9 @@ export default async function DecisionPage({ searchParams }: PageProps) {
         </div>
 
         <DecisionSearch initial={data?.context.symbol ?? query} />
+
+        {/* Why this ticker is in today's Daily 20, when it is. Conditions only. */}
+        {whyHere && <WhyHereToday why={whyHere} direction={whyDirection} />}
 
         {/*
           Macro Fit — compact, near the top, so a setup is read against the

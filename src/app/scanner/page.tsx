@@ -18,16 +18,9 @@ import { formatEtClock } from '@/lib/scanner/schedule';
 import { macroAlignmentFor, earningsWithin24h } from '@/lib/redesign/macroAlignment';
 import { getMembership } from '@/lib/rs/membership';
 import { sectorMap } from '@/lib/rs/universe';
-import { getRsResult } from '@/lib/rs';
-import { DEFAULT_WEIGHTS } from '@/lib/rs/types';
-import { assembleDaily20, type Daily20 } from '@/lib/scanner/daily20';
-import type { RsWindows } from '@/lib/scanner/daily20Gate';
-import { getSectorsSnapshot } from '@/lib/sectors';
-import {
-  buildSectorConfirmations,
-  sectorLookups,
-  type SectorConfirm,
-} from '@/lib/scanner/sectorConfirmation';
+import { loadDaily20 } from '@/lib/scanner/loadDaily20';
+import type { Daily20 } from '@/lib/scanner/daily20';
+import type { SectorConfirm } from '@/lib/scanner/sectorConfirmation';
 import { recordAndDiffDaily20 } from '@/lib/scanner/daily20Snapshots';
 import type { ChangeLine } from '@/lib/scanner/daily20Diff';
 import { formatAsOf } from '@/lib/time';
@@ -84,49 +77,22 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
     A failed RS read leaves the map empty and the Daily 20 simply does not
     populate, rather than taking the page down.
   */
+  // The Daily 20 is assembled once by the shared loader (scan rows + RS window
+  // percentiles + sector strength), so this page and the decision page cannot
+  // build it differently. A failed load leaves the Daily 20 unpopulated rather
+  // than taking the page down.
   let daily20: Daily20 | null = null;
   let sectorConfirmations: Record<string, SectorConfirm> = {};
   let changes: ChangeLine[] = [];
   if (scan) {
-    const [rsResult, sectorsSnap] = await Promise.all([
-      getRsResult(DEFAULT_WEIGHTS).catch(() => null),
-      getSectorsSnapshot().catch(() => null),
-    ]);
-
-    const rsPercentilesBySymbol = new Map<string, RsWindows>();
-    if (rsResult) {
-      for (const row of rsResult.rows) {
-        rsPercentilesBySymbol.set(row.symbol, row.percentiles);
-      }
+    const loaded = await loadDaily20().catch(() => null);
+    if (loaded) {
+      daily20 = loaded.daily20;
+      sectorConfirmations = Object.fromEntries(loaded.sectorConfirmations);
+      changes = scan.date
+        ? await recordAndDiffDaily20(loaded.daily20, scan.date).catch(() => [])
+        : [];
     }
-
-    // Sector strength lights up the SECT component and backs the inline
-    // confirmation. Absent snapshot leaves both unwired — SECT stays "—".
-    const { infoBySymbol, strengthBySymbol } = sectorsSnap
-      ? sectorLookups(sectorsSnap.sectors)
-      : { infoBySymbol: new Map(), strengthBySymbol: new Map() };
-
-    daily20 = assembleDaily20(scan.rows, {
-      rsPercentilesBySymbol,
-      sectorStrengthBySymbol: strengthBySymbol,
-    });
-
-    const above50BySymbol = new Map(
-      scan.rows.map((r) => [
-        r.symbol,
-        r.metrics.pctAbove50 === null ? null : r.metrics.pctAbove50 >= 0,
-      ]),
-    );
-    sectorConfirmations = Object.fromEntries(
-      buildSectorConfirmations(daily20, infoBySymbol, above50BySymbol),
-    );
-
-    // Record today's Daily 20 and diff it against the previous session for the
-    // "What changed today" feed. Best-effort; a failed store just means no prior
-    // next session. Guarded against a run with no session date.
-    changes = scan.date
-      ? await recordAndDiffDaily20(daily20, scan.date).catch(() => [])
-      : [];
   }
 
   /*
