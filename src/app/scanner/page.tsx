@@ -4,6 +4,7 @@ import { PageBar } from '@/components/PageBar';
 import { RefreshStatus } from '@/components/RefreshStatus';
 import { ScannerViewSwitch } from '@/components/ScannerViewSwitch';
 import { ScannerTabs } from '@/components/ScannerTabs';
+import { WhatChangedToday } from '@/components/WhatChangedToday';
 import { ScannerMacroPanel, type MacroRow } from '@/components/redesign/ScannerMacroPanel';
 import { TosTrendTab } from '@/components/TosTrendTab';
 import { InfoTip } from '@/components/InfoTip';
@@ -27,6 +28,8 @@ import {
   sectorLookups,
   type SectorConfirm,
 } from '@/lib/scanner/sectorConfirmation';
+import { recordAndDiffDaily20 } from '@/lib/scanner/daily20Snapshots';
+import type { ChangeLine } from '@/lib/scanner/daily20Diff';
 import { formatAsOf } from '@/lib/time';
 
 export const metadata: Metadata = {
@@ -83,6 +86,7 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
   */
   let daily20: Daily20 | null = null;
   let sectorConfirmations: Record<string, SectorConfirm> = {};
+  let changes: ChangeLine[] = [];
   if (scan) {
     const [rsResult, sectorsSnap] = await Promise.all([
       getRsResult(DEFAULT_WEIGHTS).catch(() => null),
@@ -116,6 +120,13 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
     sectorConfirmations = Object.fromEntries(
       buildSectorConfirmations(daily20, infoBySymbol, above50BySymbol),
     );
+
+    // Record today's Daily 20 and diff it against the previous session for the
+    // "What changed today" feed. Best-effort; a failed store just means no prior
+    // next session. Guarded against a run with no session date.
+    changes = scan.date
+      ? await recordAndDiffDaily20(daily20, scan.date).catch(() => [])
+      : [];
   }
 
   /*
@@ -261,6 +272,8 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
 
         {/* Macro alignment column + filters, on the real top names. */}
         <ScannerMacroPanel rows={macroRows} />
+
+        {scan && daily20 && <WhatChangedToday changes={changes} />}
 
         {scan && daily20 ? (
           <ScannerViewSwitch
