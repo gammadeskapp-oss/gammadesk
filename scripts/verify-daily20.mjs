@@ -254,5 +254,65 @@ ok('fresh breakdown -> "Actionable laggard"',
 ok('leadership and display are distinct axes',
   d20.bullish[0].leadership !== d20.bullish[0].display);
 
+// --- leadership change diff (step 6) ----------------------------------------
+
+const { diffDaily20, RANK_MOVE_THRESHOLD } = await import('../src/lib/scanner/daily20Diff.ts');
+
+section('Change diff — empty on first run, populated on the second');
+function leadUniverse(spec) {
+  // spec: array of {sym, rs} for leaders; fills 10+ so the side is full.
+  const u = [];
+  for (const { sym, rs, regime } of spec) {
+    u.push(row({ symbol: sym, regime: regime ?? 'positive', netGex: (regime === 'negative' ? -4e7 : 4e7),
+      metricsOver: { rsScore: rs, avgDollarVolume: 400e6, pctAbove50: 5, pctAbove200: 10,
+        pctAbove20: 1, pctAboveVwap: 2, ema50: 110, ema200: 100 } }));
+  }
+  return u;
+}
+const rsStrong = (syms) => { const m = new Map(); for (const s of syms) m.set(s, { m1: 80, m3: 70, m6: 65 }); return m; };
+
+const run1Names = Array.from({ length: 11 }, (_, i) => ({ sym: `A${i}`, rs: 95 - i }));
+const run1 = assembleDaily20(leadUniverse(run1Names), { rsPercentilesBySymbol: rsStrong(run1Names.map((n) => n.sym)) });
+
+ok('first run diff is empty (no prior)', diffDaily20(null, run1).length === 0);
+
+// Run 2: drop A10 region, add NEWCOMER at the top, push A9 up a lot.
+const run2Names = [
+  { sym: 'NEW', rs: 99 },
+  ...Array.from({ length: 9 }, (_, i) => ({ sym: `A${i}`, rs: 94 - i })),
+  { sym: 'A9', rs: 93 }, // A9 jumps from rank ~10 to near the top
+];
+const run2 = assembleDaily20(leadUniverse(run2Names), { rsPercentilesBySymbol: rsStrong(run2Names.map((n) => n.sym)) });
+const changes = diffDaily20(run1, run2);
+ok('second run produces change lines', changes.length > 0, String(changes.length));
+ok('NEW is reported as an entrant', changes.some((c) => c.kind === 'entrant' && c.symbol === 'NEW'));
+ok('a dropped name is reported as an exit', changes.some((c) => c.kind === 'exit'));
+// A move of <10 places inside the ten-deep list must NOT fire a rank-move line.
+ok('a sub-threshold move does not spuriously fire', !changes.some((c) => c.kind === 'rank-move'));
+ok('RANK_MOVE_THRESHOLD is 10 (brief value)', RANK_MOVE_THRESHOLD === 10);
+
+section('Change diff — regime flip and side flip');
+const base = [{ sym: 'FLIP', rs: 90, regime: 'positive' }, ...Array.from({ length: 10 }, (_, i) => ({ sym: `B${i}`, rs: 88 - i }))];
+const r1 = assembleDaily20(leadUniverse(base), { rsPercentilesBySymbol: rsStrong(base.map((n) => n.sym)) });
+const base2 = [{ sym: 'FLIP', rs: 90, regime: 'negative' }, ...Array.from({ length: 10 }, (_, i) => ({ sym: `B${i}`, rs: 88 - i }))];
+const r2 = assembleDaily20(leadUniverse(base2), { rsPercentilesBySymbol: rsStrong(base2.map((n) => n.sym)) });
+ok('a gamma-regime flip is reported',
+  diffDaily20(r1, r2).some((c) => c.kind === 'regime-flip' && c.symbol === 'FLIP'));
+
+// Side flip: a leader becomes a laggard next run.
+const lead = assembleDaily20(leadUniverse([{ sym: 'SWING', rs: 90 }, ...Array.from({ length: 10 }, (_, i) => ({ sym: `C${i}`, rs: 88 - i }))]),
+  { rsPercentilesBySymbol: rsStrong(['SWING', ...Array.from({ length: 10 }, (_, i) => `C${i}`)]) });
+const lagUniverse = [row({ symbol: 'SWING', regime: 'negative', netGex: -4e7,
+  metricsOver: { rsScore: 10, m1Percentile: 15, avgDollarVolume: 400e6, pctAbove50: -5, pctAbove200: -8,
+    pctAbove20: -2, pctAboveVwap: -3, ema50: 90, ema200: 110 } })];
+for (let i = 0; i < 10; i++) lagUniverse.push(row({ symbol: `D${i}`, regime: 'negative', netGex: -4e7,
+  metricsOver: { rsScore: 12 + i, m1Percentile: 15, avgDollarVolume: 400e6, pctAbove50: -5, pctAbove200: -8,
+    pctAbove20: -2, pctAboveVwap: -3, ema50: 90, ema200: 110 } }));
+const lagMap = new Map(); for (const r of lagUniverse) lagMap.set(r.symbol, { m1: 20, m3: 25, m6: 30 });
+const lag = assembleDaily20(lagUniverse, { rsPercentilesBySymbol: lagMap });
+ok('leader -> laggard reported once as a side flip',
+  (() => { const cs = diffDaily20(lead, lag); const flips = cs.filter((c) => c.symbol === 'SWING');
+    return flips.length === 1 && flips[0].kind === 'side-flip'; })());
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);

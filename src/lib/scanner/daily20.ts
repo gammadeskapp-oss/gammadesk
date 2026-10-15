@@ -142,7 +142,7 @@ export function shortReason(
 export interface Daily20Entry {
   symbol: string;
   direction: Direction;
-  /** 1-based position within its side. */
+  /** 1-based position within its side's displayed top-N. */
   rank: number;
   row: ScanRow;
   score: DirectionScore;
