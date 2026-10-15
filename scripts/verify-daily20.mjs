@@ -474,5 +474,35 @@ const bearPlan = researchPlan(d20.bearish[0], { spot: d20.bearish[0].row.price }
 ok('bearish invalidation is a close ABOVE the 50-day', /above the 50-day/.test(bearPlan.invalidation.text));
 ok('bearish confirmation talks about a break lower', /below|bounce/.test(bearPlan.confirmation));
 
+// --- ticker risk row (step 13) -----------------------------------------------
+
+const { tickerRiskRow, TIGHT_INVALIDATION_PCT, CORRELATION_PEERS } = await import(
+  '../src/lib/scanner/tickerRisk.ts'
+);
+
+section('Ticker risk row — mirrors SPY-level discipline, warns in red');
+const riskEntry = d20.bullish[0];
+const items = tickerRiskRow(riskEntry, {
+  spot: riskEntry.row.price,
+  gamma: { regime: 'positive', flip: 110, upsideMagnet: 130, downsideMagnet: 112, roomPct: 1 },
+  sector: { sectorName: 'Technology', sectorRank: 1, of: 11, delta5: 2, peers: 4, pctAbove50: 80, verdict: 'confirm', line: '' },
+  risk: { label: 'Earnings', daysAway: 3 },
+  ivPct: 55,
+});
+const byLabel = Object.fromEntries(items.map((i) => [i.label, i]));
+ok('has a distance-to-invalidation row', 'To invalidation' in byLabel);
+ok('support row present with a price', /\d/.test(byLabel['Support']?.value ?? ''));
+ok('gamma room 1% flags pinned', byLabel['Gamma room'].warn === true);
+ok('earnings in 3d flags the event', byLabel['Event'].warn === true && /Earnings 3d/.test(byLabel['Event'].value));
+ok('rich IV is flagged with the quoted caveat', byLabel['IV (quoted)'].warn === true && /rich/.test(byLabel['IV (quoted)'].value));
+ok('correlation warns at 4 peers', byLabel['Correlation'].warn === true && /Technology/.test(byLabel['Correlation'].value));
+ok('CORRELATION_PEERS threshold is 3', CORRELATION_PEERS === 3);
+
+const calm = tickerRiskRow(riskEntry, { spot: riskEntry.row.price, risk: { label: 'Earnings', daysAway: 40 } });
+ok('a far event does not warn', calm.find((i) => i.label === 'Event')?.warn === false);
+ok('unknown gamma room shows a dash', calm.find((i) => i.label === 'Gamma room')?.value === '—');
+ok('unknown IV shows a dash', calm.find((i) => i.label === 'IV (quoted)')?.value === '—');
+ok('TIGHT_INVALIDATION_PCT is 3', TIGHT_INVALIDATION_PCT === 3);
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);

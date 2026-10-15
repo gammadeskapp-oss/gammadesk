@@ -7,6 +7,7 @@ import {
 import { SETUP_LABEL, type Daily20Entry } from '@/lib/scanner/daily20';
 import type { SectorConfirm } from '@/lib/scanner/sectorConfirmation';
 import { researchPlan } from '@/lib/scanner/researchPlan';
+import { tickerRiskRow } from '@/lib/scanner/tickerRisk';
 
 /**
  * The per-ticker Leader Card — the detail behind a Daily 20 row.
@@ -41,6 +42,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export function LeaderCard({ entry, sector }: { entry: Daily20Entry; sector?: SectorConfirm }) {
   const m = entry.row.metrics;
   const plan = researchPlan(entry, { spot: entry.row.price, sector: sector ?? null });
+  const risk = tickerRiskRow(entry, {
+    spot: entry.row.price,
+    sector: sector ?? null,
+    ivPct: entry.row.optionQuality?.contract?.ivPct ?? null,
+  });
   const q = entry.row.optionQuality;
   const contract = q?.contract ?? null;
   const earnings = entry.row.earnings;
@@ -169,6 +175,19 @@ export function LeaderCard({ entry, sector }: { entry: Daily20Entry; sector?: Se
           )}
         </p>
       )}
+
+      {/* Ticker risk row — the SPY-level discipline, per name. Red flags a caution. */}
+      <div className="mt-3 border-t border-term-line/60 pt-2">
+        <h4 className="text-[10px] uppercase tracking-[0.1em] text-term-faint">Risk row</h4>
+        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-2xs">
+          {risk.map((r) => (
+            <span key={r.label}>
+              <span className="text-term-faint">{r.label} </span>
+              <span className={r.warn ? 'font-bold text-bear' : 'text-term-text'}>{r.value}</span>
+            </span>
+          ))}
+        </div>
+      </div>
 
       {/* Research plan — conditions -> confirmation -> invalidation. No orders. */}
       <div className="mt-3 border-t border-term-line/60 pt-2">
