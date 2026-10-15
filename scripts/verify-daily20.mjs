@@ -348,5 +348,36 @@ ok('bearish still has setup + watch even with no RS/sector/gamma context',
 ok('a line-less context still yields a watch line',
   whyHereToday(lagEntry, {}).watch.length > 0);
 
+// --- lifecycle states (step 4 / step 10) ------------------------------------
+
+const { lifecycleState } = await import('../src/lib/scanner/daily20Lifecycle.ts');
+
+section('Lifecycle — leadership + setup fold into one status with a watch line');
+const mk = (direction, setup, leadership) => lifecycleState({ direction, setup, leadership });
+ok('bullish breaking-out -> breakout', mk('bullish', 'breaking-out', 'Strong leader').state === 'breakout');
+ok('bullish pullback -> pullback', mk('bullish', 'pullback', 'Leader').state === 'pullback');
+ok('bullish extended -> extended', mk('bullish', 'extended', 'Strong leader').state === 'extended');
+ok('bullish emerging leadership -> emerging', mk('bullish', 'breaking-out', 'Emerging leader').state === 'emerging');
+ok('bullish neutral strong -> confirmed-leader', mk('bullish', 'neutral', 'Strong leader').state === 'confirmed-leader');
+ok('bearish breaking-down -> breakdown', mk('bearish', 'breaking-down', 'Heavy laggard').state === 'breakdown');
+ok('bearish stretched -> stretched', mk('bearish', 'stretched', 'Heavy laggard').state === 'stretched');
+ok('bearish softening -> new-laggard', mk('bearish', 'breaking-down', 'Softening').state === 'new-laggard');
+ok('every state carries a meaning and a watch line',
+  ['breakout', 'pullback', 'extended', 'confirmed-leader', 'breakdown', 'stretched', 'new-laggard']
+    .every((s) => { const l = mk(s.includes('down') || s.includes('laggard') || s === 'stretched' ? 'bearish' : 'bullish', 'neutral', 'Leader'); return l.meaning && l.watch; }));
+ok('no buy/sell language in any watch line',
+  !['bullish', 'bearish'].some((d) => ['breaking-out','pullback','extended','neutral','breaking-down','stretched']
+    .some((s) => /\bbuy\b|\bsell\b/i.test(mk(d, s, 'Leader').watch))));
+
+section('Lifecycle — damaged needs a prior run');
+ok('a breakout that goes neutral since last run reads as damaged',
+  lifecycleState({ direction: 'bullish', setup: 'neutral', leadership: 'Leader' }, { setup: 'breaking-out' }).state === 'damaged');
+ok('no prior -> never damaged',
+  lifecycleState({ direction: 'bullish', setup: 'neutral', leadership: 'Leader' }).state !== 'damaged');
+
+// Entries now carry a lifecycle.
+ok('assembled entries carry a lifecycle status',
+  d20.bullish.every((e) => e.lifecycle && e.lifecycle.label && e.lifecycle.watch));
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);

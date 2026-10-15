@@ -1,6 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { TickerLink } from './TickerLink';
+import { LeaderCard } from './LeaderCard';
 import {
   COMPONENT_LABEL,
   DIRECTION_COMPONENT_KEYS,
@@ -49,36 +51,54 @@ function ComponentGrid({ entry }: { entry: Daily20Entry }) {
   );
 }
 
+/** Colour for the lifecycle headline badge. */
+function lifecycleTone(entry: Daily20Entry): string {
+  const s = entry.lifecycle.state;
+  if (s === 'breakout' || s === 'confirmed-leader') return 'text-bull';
+  if (s === 'breakdown' || s === 'confirmed-laggard') return 'text-bear';
+  if (s === 'extended' || s === 'stretched' || s === 'damaged' || s === 'failed') return 'text-flip';
+  return 'text-term-dim';
+}
+
 function EntryRow({ entry }: { entry: Daily20Entry }) {
+  const [open, setOpen] = useState(false);
   return (
-    <li className="border-b border-term-line/60 px-3 py-2.5 last:border-b-0">
-      <div className="flex items-baseline gap-2.5">
-        <span className="w-6 shrink-0 text-right text-2xs tabular-nums text-term-faint">
-          {entry.rank}
-        </span>
-        <span className="w-16 shrink-0 font-bold text-term-text">
-          <TickerLink symbol={entry.symbol} />
-        </span>
-        <span className="shrink-0 text-lg font-bold tabular-nums text-term-text">
-          {Math.round(entry.score.total)}
-        </span>
-        <span className="min-w-0 flex-1 text-right">
-          <span className={`text-xs font-bold ${labelTone(entry.display)}`}>{entry.display}</span>
-        </span>
-      </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-8 text-2xs text-term-dim">
-        <span className="text-term-faint">{entry.leadership}</span>
-        <span>·</span>
-        <span>{SETUP_LABEL[entry.setup]}</span>
-        {entry.gate.observations.extended && (
-          <span className="text-flip">· {entry.direction === 'bullish' ? 'extended' : 'stretched'}</span>
-        )}
-        {entry.gate.observations.earningsSoon && <span className="text-flip">· earnings soon</span>}
-      </div>
-      <div className="pl-8">
-        <ComponentGrid entry={entry} />
-      </div>
-      <p className="mt-1.5 pl-8 text-2xs leading-relaxed text-term-faint">{entry.reason}</p>
+    <li className="border-b border-term-line/60 last:border-b-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full px-3 py-2.5 text-left transition-colors hover:bg-term-raised/40"
+      >
+        <div className="flex items-baseline gap-2.5">
+          <span className="w-6 shrink-0 text-right text-2xs tabular-nums text-term-faint">{entry.rank}</span>
+          <span className="w-16 shrink-0 font-bold text-term-text">
+            <TickerLink symbol={entry.symbol} />
+          </span>
+          <span className="shrink-0 text-lg font-bold tabular-nums text-term-text">
+            {Math.round(entry.score.total)}
+          </span>
+          <span className="min-w-0 flex-1 text-right">
+            {/* Lifecycle is the headline (step 10); the display label sits under it. */}
+            <span className={`text-xs font-bold ${lifecycleTone(entry)}`}>{entry.lifecycle.label}</span>
+          </span>
+          <span className="shrink-0 text-term-faint" aria-hidden>
+            {open ? '▾' : '▸'}
+          </span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-8 text-2xs text-term-dim">
+          <span className={labelTone(entry.display)}>{entry.display}</span>
+          <span>·</span>
+          <span className="text-term-faint">{entry.leadership}</span>
+          <span>·</span>
+          <span>{SETUP_LABEL[entry.setup]}</span>
+          {entry.gate.observations.earningsSoon && <span className="text-flip">· earnings soon</span>}
+        </div>
+        <div className="pl-8">
+          <ComponentGrid entry={entry} />
+        </div>
+      </button>
+      {open && <LeaderCard entry={entry} />}
     </li>
   );
 }

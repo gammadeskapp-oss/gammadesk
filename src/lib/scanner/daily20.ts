@@ -42,6 +42,7 @@ import {
   type GateSettings,
   type RsWindows,
 } from './daily20Gate';
+import { lifecycleState, type Lifecycle } from './daily20Lifecycle';
 import type { ScanRow } from './types';
 
 /** How many names on each side of the Daily 20. */
@@ -150,6 +151,10 @@ export interface Daily20Entry {
   setup: SetupState;
   leadership: string;
   display: string;
+  /** The single folded status (step 10), driven by leadership + setup. */
+  lifecycle: Lifecycle;
+  /** The RS window percentiles the gate used, carried for the Leader Card. */
+  rsPercentiles: RsWindows | null;
   reason: string;
 }
 
@@ -211,6 +216,8 @@ function buildSide(
       ...base,
       leadership,
       display,
+      lifecycle: lifecycleState({ direction, setup, leadership }),
+      rsPercentiles: inputs.rsPercentilesBySymbol?.get(row.symbol) ?? null,
       reason: shortReason(base),
     };
   });
