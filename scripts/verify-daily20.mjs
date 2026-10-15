@@ -197,5 +197,62 @@ ok('a name above its 50-day cannot be a laggard',
   !gateRow(row(), 'bearish', { rsPercentiles: weakPct }).passes);
 ok('DAILY20_GATES default dollar-volume floor is $20M', DAILY20_GATES.minDollarVolume === 20_000_000);
 
+// --- assembly + labels (step 3 / step 5 labels) -----------------------------
+
+const { assembleDaily20, setupState, displayLabel, DAILY20_PER_SIDE } = await import(
+  '../src/lib/scanner/daily20.ts'
+);
+
+section('Assembly — gate first, then rank, 10 + 10, sorted by score');
+// 12 leaders of descending RS, 12 laggards, plus 3 names that fail the gate.
+const universe = [];
+for (let i = 0; i < 12; i++) {
+  universe.push(row({ symbol: `LEAD${i}`, metricsOver: { rsScore: 95 - i, avgDollarVolume: 400e6,
+    pctAbove50: 5, pctAbove200: 10, pctAbove20: 1, pctAboveVwap: 2, ema50: 110, ema200: 100 } }));
+}
+for (let i = 0; i < 12; i++) {
+  universe.push(row({ symbol: `LAG${i}`, regime: 'negative', netGex: -4e7,
+    metricsOver: { rsScore: 10 + i, m1Percentile: 15, avgDollarVolume: 400e6,
+      pctAbove50: -5, pctAbove200: -8, pctAbove20: -2, pctAboveVwap: -3, ema50: 90, ema200: 110 } }));
+}
+// A thin name and a sub-50-day name that must be gated out of the leaders.
+universe.push(row({ symbol: 'THIN', metricsOver: { rsScore: 99, avgDollarVolume: 2e6,
+  pctAbove50: 5, pctAbove200: 10, ema50: 110, ema200: 100 } }));
+
+const rsMap = new Map();
+for (const r of universe) {
+  const strong = r.symbol.startsWith('LEAD') || r.symbol === 'THIN';
+  rsMap.set(r.symbol, strong ? { m1: 80, m3: 70, m6: 65 } : { m1: 20, m3: 25, m6: 30 });
+}
+
+const d20 = assembleDaily20(universe, { rsPercentilesBySymbol: rsMap });
+ok('exactly 10 bullish', d20.bullish.length === 10, String(d20.bullish.length));
+ok('exactly 10 bearish', d20.bearish.length === 10, String(d20.bearish.length));
+ok('DAILY20_PER_SIDE is 10', DAILY20_PER_SIDE === 10);
+ok('bullish sorted by score desc',
+  d20.bullish.every((e, i) => i === 0 || d20.bullish[i - 1].score.total >= e.score.total));
+ok('top bullish is the highest-RS leader', d20.bullish[0].symbol === 'LEAD0', d20.bullish[0].symbol);
+ok('ranks are 1..10', d20.bullish.every((e, i) => e.rank === i + 1));
+ok('THIN (thin turnover) is gated out of the leaders',
+  !d20.bullish.some((e) => e.symbol === 'THIN'));
+ok('12 leaders eligible, trimmed to 10', d20.eligible.bullish === 12, String(d20.eligible.bullish));
+ok('laggards are the weak names', d20.bearish.every((e) => e.symbol.startsWith('LAG')));
+ok('every entry carries both labels and a reason',
+  d20.bullish.every((e) => e.leadership && e.display && e.reason && e.setup));
+
+section('Labels — setup axis and the fixed display vocabulary');
+ok('extended name -> "Leader, extended"',
+  displayLabel('bullish', setupState(row({ metricsOver: { pctAbove20: 12 } }), 'bullish')) === 'Leader, extended');
+ok('pullback -> "Actionable leader"',
+  displayLabel('bullish', setupState(row({ metricsOver: { pctAbove20: -2, pctAbove50: 4 } }), 'bullish')) === 'Actionable leader');
+ok('breaking out -> "Actionable leader"',
+  displayLabel('bullish', setupState(row({ metricsOver: { pctAbove20: 2, pctAboveVwap: 1 } }), 'bullish')) === 'Actionable leader');
+ok('stretched laggard -> "Laggard, stretched"',
+  displayLabel('bearish', setupState(row({ metricsOver: { pctAbove20: -12 } }), 'bearish')) === 'Laggard, stretched');
+ok('fresh breakdown -> "Actionable laggard"',
+  displayLabel('bearish', setupState(row({ metricsOver: { pctAbove20: -2 } }), 'bearish')) === 'Actionable laggard');
+ok('leadership and display are distinct axes',
+  d20.bullish[0].leadership !== d20.bullish[0].display);
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);
