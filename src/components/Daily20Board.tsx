@@ -9,6 +9,7 @@ import {
   type Direction,
 } from '@/lib/scanner/directionScore';
 import { SETUP_LABEL, type Daily20, type Daily20Entry } from '@/lib/scanner/daily20';
+import type { SectorConfirm } from '@/lib/scanner/sectorConfirmation';
 
 /**
  * The Daily 20 — ten bullish leaders beside ten bearish laggards, each with its
@@ -60,7 +61,14 @@ function lifecycleTone(entry: Daily20Entry): string {
   return 'text-term-dim';
 }
 
-function EntryRow({ entry }: { entry: Daily20Entry }) {
+/** Tone for the sector confirm/conflict chip, red as readily as green. */
+function sectorTone(verdict: SectorConfirm['verdict']): string {
+  if (verdict === 'confirm') return 'text-bull';
+  if (verdict === 'conflict') return 'text-bear';
+  return 'text-term-dim';
+}
+
+function EntryRow({ entry, sector }: { entry: Daily20Entry; sector?: SectorConfirm }) {
   const [open, setOpen] = useState(false);
   return (
     <li className="border-b border-term-line/60 last:border-b-0">
@@ -97,8 +105,20 @@ function EntryRow({ entry }: { entry: Daily20Entry }) {
         <div className="pl-8">
           <ComponentGrid entry={entry} />
         </div>
+        {sector && (
+          <div className="mt-1 pl-8 text-2xs">
+            <span className={sectorTone(sector.verdict)}>
+              {sector.verdict === 'confirm' ? 'Sector confirms' : sector.verdict === 'conflict' ? 'Sector conflicts' : 'Sector mixed'}
+            </span>
+            <span className="text-term-faint">
+              {' '}· {sector.sectorName} #{sector.sectorRank}/{sector.of}
+              {sector.peers > 0 ? ` · ${sector.peers} peer${sector.peers === 1 ? '' : 's'}` : ''}
+              {sector.pctAbove50 !== null ? ` · ${sector.pctAbove50}% >50d` : ''}
+            </span>
+          </div>
+        )}
       </button>
-      {open && <LeaderCard entry={entry} />}
+      {open && <LeaderCard entry={entry} sector={sector} />}
     </li>
   );
 }
@@ -108,11 +128,13 @@ function SideColumn({
   direction,
   entries,
   eligible,
+  sectorConfirmations,
 }: {
   title: string;
   direction: Direction;
   entries: Daily20Entry[];
   eligible: number;
+  sectorConfirmations: Record<string, SectorConfirm>;
 }) {
   const accent = direction === 'bullish' ? 'text-bull' : 'text-bear';
   return (
@@ -130,7 +152,7 @@ function SideColumn({
       ) : (
         <ul>
           {entries.map((e) => (
-            <EntryRow key={e.symbol} entry={e} />
+            <EntryRow key={e.symbol} entry={e} sector={sectorConfirmations[e.symbol]} />
           ))}
         </ul>
       )}
@@ -138,7 +160,13 @@ function SideColumn({
   );
 }
 
-export function Daily20Board({ daily20 }: { daily20: Daily20 }) {
+export function Daily20Board({
+  daily20,
+  sectorConfirmations = {},
+}: {
+  daily20: Daily20;
+  sectorConfirmations?: Record<string, SectorConfirm>;
+}) {
   return (
     <div className="space-y-3">
       <div className="grid gap-3 lg:grid-cols-2">
@@ -147,12 +175,14 @@ export function Daily20Board({ daily20 }: { daily20: Daily20 }) {
           direction="bullish"
           entries={daily20.bullish}
           eligible={daily20.eligible.bullish}
+          sectorConfirmations={sectorConfirmations}
         />
         <SideColumn
           title="Bearish laggards"
           direction="bearish"
           entries={daily20.bearish}
           eligible={daily20.eligible.bearish}
+          sectorConfirmations={sectorConfirmations}
         />
       </div>
       <p className="px-1 text-2xs leading-relaxed text-term-faint">

@@ -21,6 +21,12 @@ import { getRsResult } from '@/lib/rs';
 import { DEFAULT_WEIGHTS } from '@/lib/rs/types';
 import { assembleDaily20, type Daily20 } from '@/lib/scanner/daily20';
 import type { RsWindows } from '@/lib/scanner/daily20Gate';
+import { getSectorsSnapshot } from '@/lib/sectors';
+import {
+  buildSectorConfirmations,
+  sectorLookups,
+  type SectorConfirm,
+} from '@/lib/scanner/sectorConfirmation';
 import { formatAsOf } from '@/lib/time';
 
 export const metadata: Metadata = {
@@ -76,15 +82,40 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
     populate, rather than taking the page down.
   */
   let daily20: Daily20 | null = null;
+  let sectorConfirmations: Record<string, SectorConfirm> = {};
   if (scan) {
-    const rsResult = await getRsResult(DEFAULT_WEIGHTS).catch(() => null);
+    const [rsResult, sectorsSnap] = await Promise.all([
+      getRsResult(DEFAULT_WEIGHTS).catch(() => null),
+      getSectorsSnapshot().catch(() => null),
+    ]);
+
     const rsPercentilesBySymbol = new Map<string, RsWindows>();
     if (rsResult) {
       for (const row of rsResult.rows) {
         rsPercentilesBySymbol.set(row.symbol, row.percentiles);
       }
     }
-    daily20 = assembleDaily20(scan.rows, { rsPercentilesBySymbol });
+
+    // Sector strength lights up the SECT component and backs the inline
+    // confirmation. Absent snapshot leaves both unwired — SECT stays "—".
+    const { infoBySymbol, strengthBySymbol } = sectorsSnap
+      ? sectorLookups(sectorsSnap.sectors)
+      : { infoBySymbol: new Map(), strengthBySymbol: new Map() };
+
+    daily20 = assembleDaily20(scan.rows, {
+      rsPercentilesBySymbol,
+      sectorStrengthBySymbol: strengthBySymbol,
+    });
+
+    const above50BySymbol = new Map(
+      scan.rows.map((r) => [
+        r.symbol,
+        r.metrics.pctAbove50 === null ? null : r.metrics.pctAbove50 >= 0,
+      ]),
+    );
+    sectorConfirmations = Object.fromEntries(
+      buildSectorConfirmations(daily20, infoBySymbol, above50BySymbol),
+    );
   }
 
   /*
@@ -234,6 +265,7 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
         {scan && daily20 ? (
           <ScannerViewSwitch
             daily20={daily20}
+            sectorConfirmations={sectorConfirmations}
             board={{
               scan,
               nwSettings: {

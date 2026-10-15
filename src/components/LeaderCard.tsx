@@ -5,6 +5,7 @@ import {
   DIRECTION_COMPONENT_KEYS,
 } from '@/lib/scanner/directionScore';
 import { SETUP_LABEL, type Daily20Entry } from '@/lib/scanner/daily20';
+import type { SectorConfirm } from '@/lib/scanner/sectorConfirmation';
 
 /**
  * The per-ticker Leader Card — the detail behind a Daily 20 row.
@@ -36,7 +37,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function LeaderCard({ entry }: { entry: Daily20Entry }) {
+export function LeaderCard({ entry, sector }: { entry: Daily20Entry; sector?: SectorConfirm }) {
   const m = entry.row.metrics;
   const q = entry.row.optionQuality;
   const contract = q?.contract ?? null;
@@ -73,8 +74,19 @@ export function LeaderCard({ entry }: { entry: Daily20Entry }) {
             <span className="text-flip"> · {entry.direction === 'bullish' ? 'extended' : 'stretched'}</span>
           )}
         </Field>
-        <Field label="Sector rank">
-          <span className="text-term-faint">— (wired with /sectors)</span>
+        <Field label="Sector">
+          {sector ? (
+            <>
+              {sector.sectorName} #{sector.sectorRank}/{sector.of}
+              {sector.delta5 !== null && (
+                <span className="text-term-faint">
+                  {' '}· 5d {sector.delta5 >= 0 ? '+' : ''}{sector.delta5.toFixed(1)}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-term-faint">— (not in a scored sector)</span>
+          )}
         </Field>
         <Field label="MA posture">
           {m.pctAbove50 !== null ? (m.pctAbove50 >= 0 ? '>50d' : '<50d') : '—'}
@@ -138,6 +150,23 @@ export function LeaderCard({ entry }: { entry: Daily20Entry }) {
           );
         })}
       </div>
+
+      {sector && (
+        <p
+          className={`mt-2 text-2xs leading-relaxed ${
+            sector.verdict === 'confirm'
+              ? 'text-bull'
+              : sector.verdict === 'conflict'
+                ? 'text-bear'
+                : 'text-term-dim'
+          }`}
+        >
+          {sector.line}
+          {sector.pctAbove50 !== null && (
+            <span className="text-term-faint"> {sector.pctAbove50}% of the group is above its 50-day.</span>
+          )}
+        </p>
+      )}
 
       <p className="mt-2 text-2xs leading-relaxed text-term-faint">{entry.reason}</p>
     </div>

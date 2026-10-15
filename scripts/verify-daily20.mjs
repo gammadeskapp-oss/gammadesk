@@ -379,5 +379,40 @@ ok('no prior -> never damaged',
 ok('assembled entries carry a lifecycle status',
   d20.bullish.every((e) => e.lifecycle && e.lifecycle.label && e.lifecycle.watch));
 
+// --- sector confirmation (step 5) -------------------------------------------
+
+const { buildSectorConfirmations, sectorLookups, SECTOR_STRONG, SECTOR_WEAK } = await import(
+  '../src/lib/scanner/sectorConfirmation.ts'
+);
+
+section('Sector confirmation — strength map, peers, confirm/conflict verdict');
+// Two leaders in a strong tech sector, one in a weak utilities sector.
+const topLeaders = d20.bullish.slice(0, 3).map((e) => e.symbol);
+const sectorsSnap = [
+  { id: 'tech', name: 'Technology', score: 72, delta5: 3, members: [{ symbol: topLeaders[0] }, { symbol: topLeaders[1] }] },
+  { id: 'util', name: 'Utilities', score: 38, delta5: -2, members: [{ symbol: topLeaders[2] }] },
+];
+const { infoBySymbol, strengthBySymbol } = sectorLookups(sectorsSnap);
+ok('tech ranks #1 of 2', infoBySymbol.get(topLeaders[0]).rank === 1 && infoBySymbol.get(topLeaders[0]).of === 2);
+ok('strength map carries the sector score', strengthBySymbol.get(topLeaders[0]) === 72);
+ok('SECTOR_STRONG / WEAK thresholds exist', SECTOR_STRONG === 55 && SECTOR_WEAK === 45);
+
+const above50 = new Map(d20.bullish.map((e) => [e.symbol, (e.row.metrics.pctAbove50 ?? 0) >= 0]));
+const confs = buildSectorConfirmations(d20, infoBySymbol, above50);
+ok('a leader in a strong, rising sector confirms', confs.get(topLeaders[0]).verdict === 'confirm');
+ok('its peer count sees the other tech leader', confs.get(topLeaders[0]).peers === 1);
+ok('a leader in a weak, falling sector conflicts', confs.get(topLeaders[2]).verdict === 'conflict');
+ok('conflict line says the group is going the other way',
+  /going the other way/.test(confs.get(topLeaders[2]).line));
+ok('% above 50 is computed for the tech peers', confs.get(topLeaders[0]).pctAbove50 === 100);
+ok('a symbol with no sector reading is absent from the result',
+  !confs.has('ZZZZ'));
+
+// Lighting up the SECT component: re-assemble with the strength map.
+const withSector = assembleDaily20(universe, { rsPercentilesBySymbol: rsMap, sectorStrengthBySymbol: strengthBySymbol });
+const lit = withSector.bullish.find((e) => e.symbol === topLeaders[0]);
+ok('SECT component is no longer "—" once the strength map is supplied',
+  lit && lit.score.components.sector === 72, String(lit?.score.components.sector));
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);
