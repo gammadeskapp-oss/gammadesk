@@ -26,8 +26,9 @@
  * weigh it against the watch line that sits beside every name.
  */
 
-import type { Daily20, Daily20Entry, Direction } from './daily20';
+import type { Daily20, Daily20Entry } from './daily20';
 import { SETUP_LABEL } from './daily20';
+import type { Direction } from './directionScore';
 
 export type ChangeKind =
   | 'entrant'
