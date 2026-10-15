@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Footer } from '@/components/Footer';
 import { PageBar } from '@/components/PageBar';
 import { RefreshStatus } from '@/components/RefreshStatus';
-import { ScannerBoard } from '@/components/ScannerBoard';
+import { ScannerViewSwitch } from '@/components/ScannerViewSwitch';
 import { ScannerTabs } from '@/components/ScannerTabs';
 import { ScannerMacroPanel, type MacroRow } from '@/components/redesign/ScannerMacroPanel';
 import { TosTrendTab } from '@/components/TosTrendTab';
@@ -17,6 +17,10 @@ import { formatEtClock } from '@/lib/scanner/schedule';
 import { macroAlignmentFor, earningsWithin24h } from '@/lib/redesign/macroAlignment';
 import { getMembership } from '@/lib/rs/membership';
 import { sectorMap } from '@/lib/rs/universe';
+import { getRsResult } from '@/lib/rs';
+import { DEFAULT_WEIGHTS } from '@/lib/rs/types';
+import { assembleDaily20, type Daily20 } from '@/lib/scanner/daily20';
+import type { RsWindows } from '@/lib/scanner/daily20Gate';
 import { formatAsOf } from '@/lib/time';
 
 export const metadata: Metadata = {
@@ -61,6 +65,27 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
   const sectors = membership ? sectorMap(membership.members) : new Map();
   const store = storeStatus();
   const { scan, latest, gamma, schedule } = view;
+
+  /*
+    The Daily 20 is assembled on the server from the same scan rows the full
+    board uses, plus the relative-strength window percentiles the gate needs —
+    those come from the RS result (a stored-digest read, so it costs the scan
+    nothing). Sector strength and gamma room are not wired yet; those components
+    render as "—" and drop out of the blend until a later step supplies them.
+    A failed RS read leaves the map empty and the Daily 20 simply does not
+    populate, rather than taking the page down.
+  */
+  let daily20: Daily20 | null = null;
+  if (scan) {
+    const rsResult = await getRsResult(DEFAULT_WEIGHTS).catch(() => null);
+    const rsPercentilesBySymbol = new Map<string, RsWindows>();
+    if (rsResult) {
+      for (const row of rsResult.rows) {
+        rsPercentilesBySymbol.set(row.symbol, row.percentiles);
+      }
+    }
+    daily20 = assembleDaily20(scan.rows, { rsPercentilesBySymbol });
+  }
 
   /*
     The macro-alignment panel reads the real top names now, not a hardcoded
@@ -206,18 +231,21 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
         {/* Macro alignment column + filters, on the real top names. */}
         <ScannerMacroPanel rows={macroRows} />
 
-        {scan ? (
-          <ScannerBoard
-            scan={scan}
-            nwSettings={{
-              bandwidth: view.nw.bandwidth,
-              lookback: view.nw.lookback,
-              mult: view.nw.mult,
+        {scan && daily20 ? (
+          <ScannerViewSwitch
+            daily20={daily20}
+            board={{
+              scan,
+              nwSettings: {
+                bandwidth: view.nw.bandwidth,
+                lookback: view.nw.lookback,
+                mult: view.nw.mult,
+              },
+              trendEmaPeriod: view.trendEmaPeriod,
+              gammaTimeEt: schedule.gammaEt,
+              scannedAtEt: formatEtClock(new Date(scan.scannedAt)),
+              contractTopN: view.contractTopN,
             }}
-            trendEmaPeriod={view.trendEmaPeriod}
-            gammaTimeEt={schedule.gammaEt}
-            scannedAtEt={formatEtClock(new Date(scan.scannedAt))}
-            contractTopN={view.contractTopN}
           />
         ) : (
           /*
