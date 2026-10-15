@@ -453,5 +453,26 @@ ok('an empty scorecard is all zeros, not NaN',
 ok('a listing with no matured horizon is not sampled',
   computeScorecard([listing({ ret: { 1: null, 5: null, 10: null, 20: null } })]).sampled === 0);
 
+// --- research plan (step 12) -------------------------------------------------
+
+const { researchPlan } = await import('../src/lib/scanner/researchPlan.ts');
+
+section('Research plan — conditions / confirmation / invalidation, no orders');
+const planEntry = d20.bullish[0];
+const plan = researchPlan(planEntry, { spot: planEntry.row.price });
+ok('has conditions', plan.conditions.length > 0);
+ok('has a confirmation line', plan.confirmation.length > 0);
+ok('invalidation references the 50-day', /50-day/.test(plan.invalidation.text));
+ok('invalidation carries a level when ema50 is known',
+  planEntry.row.metrics.ema50 === null || plan.invalidation.level === planEntry.row.metrics.ema50);
+ok('gamma line uses the SPY-page wording', /dealer hedging|not measured/.test(plan.gamma));
+ok('event risk is always stated', plan.eventRisk.length > 0);
+const planText = [plan.confirmation, plan.invalidation.text, plan.gamma, plan.eventRisk, ...plan.conditions].join(' ');
+ok('no buy/sell/target/stop language', !/\bbuy\b|\bsell\b|\btarget\b|\bstop\b/i.test(planText), planText);
+
+const bearPlan = researchPlan(d20.bearish[0], { spot: d20.bearish[0].row.price });
+ok('bearish invalidation is a close ABOVE the 50-day', /above the 50-day/.test(bearPlan.invalidation.text));
+ok('bearish confirmation talks about a break lower', /below|bounce/.test(bearPlan.confirmation));
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);

@@ -6,6 +6,7 @@ import {
 } from '@/lib/scanner/directionScore';
 import { SETUP_LABEL, type Daily20Entry } from '@/lib/scanner/daily20';
 import type { SectorConfirm } from '@/lib/scanner/sectorConfirmation';
+import { researchPlan } from '@/lib/scanner/researchPlan';
 
 /**
  * The per-ticker Leader Card — the detail behind a Daily 20 row.
@@ -39,6 +40,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export function LeaderCard({ entry, sector }: { entry: Daily20Entry; sector?: SectorConfirm }) {
   const m = entry.row.metrics;
+  const plan = researchPlan(entry, { spot: entry.row.price, sector: sector ?? null });
   const q = entry.row.optionQuality;
   const contract = q?.contract ?? null;
   const earnings = entry.row.earnings;
@@ -167,6 +169,36 @@ export function LeaderCard({ entry, sector }: { entry: Daily20Entry; sector?: Se
           )}
         </p>
       )}
+
+      {/* Research plan — conditions -> confirmation -> invalidation. No orders. */}
+      <div className="mt-3 border-t border-term-line/60 pt-2">
+        <h4 className="text-[10px] uppercase tracking-[0.1em] text-term-faint">Research plan</h4>
+        {plan.conditions.length > 0 && (
+          <ul className="mt-1 space-y-0.5 text-2xs text-term-dim">
+            {plan.conditions.map((c, i) => (
+              <li key={i}>• {c}</li>
+            ))}
+          </ul>
+        )}
+        <dl className="mt-1.5 space-y-1 text-2xs">
+          <div>
+            <dt className="inline font-bold text-term-text">Confirmation: </dt>
+            <dd className="inline text-term-dim">{plan.confirmation}</dd>
+          </div>
+          <div>
+            <dt className="inline font-bold text-bear">Invalidation: </dt>
+            <dd className="inline text-term-dim">{plan.invalidation.text}</dd>
+          </div>
+          <div>
+            <dt className="inline font-bold text-term-text">Gamma: </dt>
+            <dd className="inline text-term-dim">{plan.gamma}</dd>
+          </div>
+          <div>
+            <dt className="inline font-bold text-flip/90">Event risk: </dt>
+            <dd className="inline text-term-dim">{plan.eventRisk}</dd>
+          </div>
+        </dl>
+      </div>
 
       <p className="mt-2 text-2xs leading-relaxed text-term-faint">{entry.reason}</p>
     </div>
