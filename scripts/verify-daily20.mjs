@@ -143,5 +143,59 @@ ok('excellent badge lifts options vs no badge',
 ok('options equal across directions for same row',
   bothDirectionScores(row()).bullish.components.options === bothDirectionScores(row()).bearish.components.options);
 
+// --- quality gates (step 2) --------------------------------------------------
+
+const { gateRow, DAILY20_GATES } = await import('../src/lib/scanner/daily20Gate.ts');
+
+const strongPct = { m1: 80, m3: 75, m6: 70 };
+const weakPct = { m1: 20, m3: 25, m6: 30 };
+
+section('Gates — a qualified leader passes; each failure gates it out');
+const passLeader = gateRow(row(), 'bullish', { rsPercentiles: strongPct });
+ok('a clean leader passes the bullish gate', passLeader.passes, passLeader.reasons.join('; '));
+ok('its reasons list is empty', passLeader.reasons.length === 0);
+
+ok('below the 50-day gates a bullish name out',
+  !gateRow(row({ metricsOver: { pctAbove50: -2 } }), 'bullish', { rsPercentiles: strongPct }).passes);
+ok('50 below 200 gates out without the improving-trend flag',
+  !gateRow(row({ metricsOver: { ema50: 90, ema200: 110 } }), 'bullish', { rsPercentiles: strongPct }).passes);
+ok('improving-trend flag lets 50<200 through when 20>=50',
+  gateRow(row({ metricsOver: { ema50: 90, ema200: 110, ema20: 95 } }), 'bullish',
+    { rsPercentiles: strongPct, flags: { earningsPlay: false, allowImprovingTrend: true } }).passes);
+ok('thin turnover gates out',
+  !gateRow(row({ metricsOver: { avgDollarVolume: 5e6 } }), 'bullish', { rsPercentiles: strongPct }).passes);
+ok('RS positive on only 1 of 3 lookbacks gates out',
+  !gateRow(row(), 'bullish', { rsPercentiles: { m1: 80, m3: 40, m6: 30 } }).passes);
+ok('RS positive on 2 of 3 passes', gateRow(row(), 'bullish', { rsPercentiles: { m1: 80, m3: 60, m6: 30 } }).passes);
+
+section('Gates — earnings window, extended flag');
+const earns = gateRow(row({ earnings: { state: 'known', dateIso: '2026-10-18', daysAway: 3, source: 't' } }),
+  'bullish', { rsPercentiles: strongPct });
+ok('earnings inside the window gates out by default', !earns.passes);
+ok('earnings is surfaced as an observation', earns.observations.earningsSoon);
+ok('earnings-play flag lets it through',
+  gateRow(row({ earnings: { state: 'known', dateIso: '2026-10-18', daysAway: 3, source: 't' } }),
+    'bullish', { rsPercentiles: strongPct, flags: { earningsPlay: true, allowImprovingTrend: false } }).passes);
+ok('extended flag set past the band, still passes',
+  (() => { const g = gateRow(row({ metricsOver: { pctAbove20: 12 } }), 'bullish', { rsPercentiles: strongPct }); return g.passes && g.observations.extended; })());
+ok('unknown earnings does not gate out (codebase rule)',
+  gateRow(row({ earnings: { state: 'unknown', dateIso: null, daysAway: null, source: 't' } }), 'bullish', { rsPercentiles: strongPct }).passes);
+
+section('Gates — bearish mirror and breakdown phase');
+const laggardRow = row({ regime: 'negative', netGex: -5e7,
+  metricsOver: { rsScore: 15, m1Percentile: 10, pctAbove200: -12, pctAbove50: -6, pctAbove20: -3,
+    pctAboveVwap: -4, ema50: 90, ema200: 110 } });
+const passLag = gateRow(laggardRow, 'bearish', { rsPercentiles: weakPct });
+ok('a clean laggard passes the bearish gate', passLag.passes, passLag.reasons.join('; '));
+ok('fresh breakdown phase near the 20-day', passLag.observations.breakdownPhase === 'fresh',
+  String(passLag.observations.breakdownPhase));
+const stretched = gateRow(row({ regime: 'negative',
+  metricsOver: { rsScore: 15, pctAbove200: -20, pctAbove50: -12, pctAbove20: -15, pctAboveVwap: -10, ema50: 90, ema200: 110 } }),
+  'bearish', { rsPercentiles: weakPct });
+ok('far below the 20-day reads as stretched', stretched.observations.breakdownPhase === 'stretched');
+ok('a name above its 50-day cannot be a laggard',
+  !gateRow(row(), 'bearish', { rsPercentiles: weakPct }).passes);
+ok('DAILY20_GATES default dollar-volume floor is $20M', DAILY20_GATES.minDollarVolume === 20_000_000);
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);
