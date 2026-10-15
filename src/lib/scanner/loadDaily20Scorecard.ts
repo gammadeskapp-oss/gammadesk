@@ -57,16 +57,17 @@ function priceListing(
     regime: ScoredListing['regime'];
     extended: boolean;
     newEntry: boolean;
+    sector: string | null;
   },
   series: PriceSeries | undefined,
 ): ScoredListing | null {
   const ret = { 1: null, 5: null, 10: null, 20: null } as Record<Horizon, number | null>;
-  if (!series) return { ...row, sector: null, ret, mfe: null, mae: null };
+  if (!series) return { ...row, ret, mfe: null, mae: null };
 
   const i = series.index.get(row.date);
   const entry = i === undefined ? null : series.closes[i];
   if (i === undefined || entry === null || !(entry > 0)) {
-    return { ...row, sector: null, ret, mfe: null, mae: null };
+    return { ...row, ret, mfe: null, mae: null };
   }
 
   for (const h of HORIZONS) {
@@ -87,7 +88,6 @@ function priceListing(
 
   return {
     ...row,
-    sector: null,
     ret,
     mfe: matured ? (best - entry) / entry : null,
     mae: matured ? (worst - entry) / entry : null,

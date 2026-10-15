@@ -42,6 +42,8 @@ export interface Daily20ListingRow {
   extended: boolean;
   /** Not in the previous session's Daily 20 on this side. */
   newEntry: boolean;
+  /** Sector name at listing time, so the by-sector breakdown is not empty. Null when unmapped. */
+  sector: string | null;
 }
 
 interface Daily20Listings {
@@ -58,7 +60,12 @@ const listingsStore = createJsonStore<Daily20Listings>(
   },
 );
 
-function listingRows(today: Daily20, prior: Daily20 | null, date: string): Daily20ListingRow[] {
+function listingRows(
+  today: Daily20,
+  prior: Daily20 | null,
+  date: string,
+  sectorBySymbol: Map<string, string>,
+): Daily20ListingRow[] {
   const priorBull = new Set((prior?.bullish ?? []).map((e) => e.symbol));
   const priorBear = new Set((prior?.bearish ?? []).map((e) => e.symbol));
   const row = (e: Daily20Entry, newEntry: boolean): Daily20ListingRow => ({
@@ -69,6 +76,7 @@ function listingRows(today: Daily20, prior: Daily20 | null, date: string): Daily
     regime: e.row.regime,
     extended: e.gate.observations.extended,
     newEntry,
+    sector: sectorBySymbol.get(e.symbol) ?? null,
   });
   return [
     ...today.bullish.map((e) => row(e, !priorBull.has(e.symbol))),
@@ -115,6 +123,8 @@ function priorBefore(history: Daily20History, date: string): Daily20 | null {
 export async function recordAndDiffDaily20(
   today: Daily20,
   date: string,
+  /** Symbol → sector name, so each listing row carries its sector for the scorecard. */
+  sectorBySymbol: Map<string, string> = new Map(),
 ): Promise<ChangeLine[]> {
   const history = await store.read().catch(() => ({ snapshots: [] as StoredSnapshot[] }));
   const prior = priorBefore(history, date);
@@ -138,7 +148,7 @@ export async function recordAndDiffDaily20(
     try {
       const current = await listingsStore.read().catch(() => ({ rows: [] as Daily20ListingRow[] }));
       const kept = current.rows.filter((r) => r.date !== date);
-      const rows = [...listingRows(today, prior, date), ...kept].slice(0, LISTINGS_CAP);
+      const rows = [...listingRows(today, prior, date, sectorBySymbol), ...kept].slice(0, LISTINGS_CAP);
       await listingsStore.write({ rows });
     } catch {
       // Best-effort — the scorecard simply has fewer sessions next time.

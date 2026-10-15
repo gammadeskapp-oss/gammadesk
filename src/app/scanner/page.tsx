@@ -89,8 +89,13 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
     if (loaded) {
       daily20 = loaded.daily20;
       sectorConfirmations = Object.fromEntries(loaded.sectorConfirmations);
+      // Carry each name's sector onto its listing row so the scorecard's
+      // by-sector breakdown fills in rather than staying permanently empty.
+      const sectorBySymbol = new Map(
+        [...loaded.sectorConfirmations].map(([symbol, c]) => [symbol, c.sectorName]),
+      );
       changes = scan.date
-        ? await recordAndDiffDaily20(loaded.daily20, scan.date).catch(() => [])
+        ? await recordAndDiffDaily20(loaded.daily20, scan.date, sectorBySymbol).catch(() => [])
         : [];
     }
   }
