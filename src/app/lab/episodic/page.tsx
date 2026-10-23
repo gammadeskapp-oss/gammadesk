@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { requireLabSession } from '@/lib/lab/access';
 import { EpisodicBoard } from '@/components/EpisodicBoard';
 import { EpisodicCalibrationPanel } from '@/components/EpisodicCalibrationPanel';
 import { EpisodicFindingList } from '@/components/EpisodicFindingList';
@@ -30,6 +31,7 @@ export const dynamic = 'force-dynamic';
 export default async function EpisodicPage() {
   // A disabled page must not read the store or do any work.
   if (!episodicEnabled()) notFound();
+  await requireLabSession();
 
   const view = await getEpisodicView();
 

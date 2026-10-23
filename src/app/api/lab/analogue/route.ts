@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { denyUnauthorisedCron } from '@/lib/log/auth';
 import { getLabAnalogue } from '@/lib/lab';
-import { labEnabled } from '@/lib/lab/flag';
+import { labAvailable, labSessionValid } from '@/lib/lab/access';
 import { LAB_ANALOGUE_BATCH, LAB_ANALOGUE_HORIZON } from '@/lib/lab/types';
 
 /**
@@ -46,8 +46,12 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
-  if (!labEnabled()) {
+  if (!labAvailable()) {
     return new NextResponse('Not found', { status: 404 });
+  }
+  // The /lab session, on top of the cron auth below: every /lab API needs both.
+  if (!(await labSessionValid())) {
+    return new NextResponse('Unauthorized', { status: 401 });
   }
 
   const denied = denyUnauthorisedCron(request);

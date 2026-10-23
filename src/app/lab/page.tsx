@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import Link from 'next/link';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { Footer } from '@/components/Footer';
 import { LabBoard } from '@/components/LabBoard';
@@ -8,11 +8,28 @@ import { LIVE_FEED_REFRESH_MS } from '@/hooks/useAutoRefresh';
 import { SwingBoard } from '@/components/SwingBoard';
 import { getLabView } from '@/lib/lab';
 import { getSwingView } from '@/lib/lab/swing';
-import { labEnabled } from '@/lib/lab/flag';
+import { requireLabSession } from '@/lib/lab/access';
+import { DashboardView } from '@/components/views/DashboardView';
+import { TickerView } from '@/components/views/TickerView';
 import { LAB_ANALOGUE_HORIZON } from '@/lib/lab/types';
 import { formatAsOf } from '@/lib/time';
 
 /**
+ * Unlisted, password-locked, and switched off unless somebody switched it on.
+ *
+ * ## Tabs
+ *
+ * - Dashboard — the real `DashboardView`, on the Tastytrade source.
+ * - Ticker — the real `TickerView` and its search, on the Tastytrade source.
+ * - Testbed — the ranking testbed and swing engine this page always was.
+ *
+ * ## The lock
+ *
+ * `requireLabSession()` runs before anything renders or reads a store, under
+ * the same check in `proxy.ts`. It replaces the old "switch only" gate: the page
+ * exists when `GAMMADESK_LAB=1` or `LAB_PASSWORD_HASH` is set, and every view of
+ * it needs a session from `/lab/login` either way. Original notes follow.
+ *
  * Unlisted, and switched off unless somebody switched it on.
  *
  * `noindex, nofollow` overrides the site-wide `index, follow` from the root
@@ -37,15 +54,72 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function LabPage() {
-  // Before any work: a disabled page must not read stores or do arithmetic.
-  if (!labEnabled()) notFound();
+const TABS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'ticker', label: 'Ticker' },
+  { id: 'testbed', label: 'Testbed' },
+] as const;
+type TabId = (typeof TABS)[number]['id'];
 
-  const [view, swing] = await Promise.all([getLabView(), getSwingView()]);
+interface PageProps {
+  searchParams: Promise<{ tab?: string; symbol?: string }>;
+}
+
+export default async function LabPage({ searchParams }: PageProps) {
+  // Before any work: no session, no page — not a store read, not a feed read.
+  await requireLabSession();
+
+  const params = await searchParams;
+  const tab: TabId = TABS.some((t) => t.id === params.tab) ? (params.tab as TabId) : 'dashboard';
 
   return (
     <>
       <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+        <nav className="flex flex-wrap items-center gap-1 border-b border-term-line pb-2" aria-label="Lab tabs">
+          {TABS.map((t) => (
+            <Link
+              key={t.id}
+              href={`/lab?tab=${t.id}`}
+              aria-current={t.id === tab ? 'page' : undefined}
+              className={`px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] ${
+                t.id === tab
+                  ? 'border border-term-line bg-term-raised text-term-text'
+                  : 'text-term-faint hover:text-term-dim'
+              }`}
+            >
+              {t.label}
+            </Link>
+          ))}
+          <form action="/api/lab/logout" method="post" className="ml-auto">
+            <button type="submit" className="text-2xs text-term-faint underline decoration-dotted hover:text-term-dim">
+              Lock
+            </button>
+          </form>
+        </nav>
+
+        {tab === 'dashboard' && <DashboardView source="tasty-local" />}
+        {tab === 'ticker' && (
+          <TickerView
+            symbol={params.symbol ?? 'SPY'}
+            source="tasty-local"
+            searchBasePath="/lab"
+            searchParams={{ tab: 'ticker' }}
+          />
+        )}
+        {tab === 'testbed' && <Testbed />}
+      </main>
+
+      <Footer />
+    </>
+  );
+}
+
+/** The original `/lab`: the swing engine and the ranking testbed, unchanged. */
+async function Testbed() {
+  const [view, swing] = await Promise.all([getLabView(), getSwingView()]);
+
+  return (
+    <>
         {/*
           First thing on the page. Everything below it is an experiment whose
           result is not in yet, and a reader arriving at a ranked table of
@@ -316,9 +390,6 @@ export default async function LabPage() {
             do about any row on it.
           </p>
         </section>
-      </main>
-
-      <Footer />
     </>
   );
 }

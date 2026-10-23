@@ -3,6 +3,7 @@ import { denyUnauthorisedCron } from '@/lib/log/auth';
 import { runEpisodicBackfill, runEpisodicScan } from '@/lib/episodic';
 import { fetchDailyBarsDetailed } from '@/lib/episodic/bars';
 import { episodicEnabled } from '@/lib/episodic/flag';
+import { labSessionValid } from '@/lib/lab/access';
 import { scanSeries } from '@/lib/episodic/scan';
 import { EPISODIC_CAPTURE } from '@/lib/episodic/types';
 
@@ -48,6 +49,10 @@ export const maxDuration = 300;
 export async function GET(request: Request) {
   if (!episodicEnabled()) {
     return new NextResponse('Not found', { status: 404 });
+  }
+  // The /lab session, on top of the cron auth below: every /lab API needs both.
+  if (!(await labSessionValid())) {
+    return new NextResponse('Unauthorized', { status: 401 });
   }
 
   const denied = denyUnauthorisedCron(request);

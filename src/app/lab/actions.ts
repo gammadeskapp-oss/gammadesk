@@ -1,8 +1,7 @@
 'use server';
 
-import { notFound } from 'next/navigation';
 import { getLabAnalogue } from '@/lib/lab';
-import { labEnabled } from '@/lib/lab/flag';
+import { requireLabSession } from '@/lib/lab/access';
 import { LAB_ANALOGUE_BATCH, LAB_ANALOGUE_HORIZON, type LabAnalogue } from '@/lib/lab/types';
 
 /**
@@ -31,7 +30,8 @@ import { LAB_ANALOGUE_BATCH, LAB_ANALOGUE_HORIZON, type LabAnalogue } from '@/li
 export async function loadLabAnalogues(
   symbols: string[],
 ): Promise<Record<string, LabAnalogue>> {
-  if (!labEnabled()) notFound();
+  // A server action is a POST to /lab: same session check as the page.
+  await requireLabSession();
 
   const wanted = Array.from(
     new Set(

@@ -6,7 +6,17 @@ import { SymbolSearch } from './SymbolSearch';
 
 const SUGGESTIONS = ['AAPL', 'NVDA', 'TSLA', 'SPY', 'MSFT', 'AMD'];
 
-export function TickerSearch({ initial = '' }: { initial?: string }) {
+export function TickerSearch({
+  initial = '',
+  basePath = '/ticker',
+  params,
+}: {
+  initial?: string;
+  /** The page the search navigates to; `/lab` passes its own path. */
+  basePath?: string;
+  /** Query parameters kept alongside `symbol`, e.g. `{ tab: 'ticker' }`. */
+  params?: Record<string, string>;
+}) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -22,7 +32,9 @@ export function TickerSearch({ initial = '' }: { initial?: string }) {
       suggestions={SUGGESTIONS}
       onSubmit={(symbol) =>
         startTransition(() =>
-          router.push(`/ticker?symbol=${encodeURIComponent(symbol)}`),
+          router.push(
+            `${basePath}?${new URLSearchParams({ ...params, symbol }).toString()}`,
+          ),
         )
       }
     />
