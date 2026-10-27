@@ -195,19 +195,30 @@ function buildActivity(volume: PositioningData, refSpot: number): ActivityLevels
   };
 }
 
-async function build(symbol: string): Promise<DecisionResult> {
+/** A positioning reading and spot to build from instead of the production chain. */
+export interface DecisionPositioningOverride {
+  positioning: PositioningData;
+  spot: { price: number; asOfIso: string } | null;
+}
+
+async function build(symbol: string, override?: DecisionPositioningOverride): Promise<DecisionResult> {
   /*
    * Open interest and volume, built from one shared chain snapshot (see
    * `cachedSymbolSnapshot`), so the second weighting costs no upstream request.
    * The volume pass is allowed to fail on its own — the page is the
    * open-interest page, and losing the secondary view is not worth losing it.
+   *
+   * With an override (only `/lab`, on the Tastytrade feed) the open-interest
+   * book comes from the override and there is no volume-weighted pass.
    */
-  const [positioning, volumePositioning] = await Promise.all([
-    getPositioningForSymbol(symbol, EXPIRATIONS),
-    getPositioningForSymbol(symbol, EXPIRATIONS, 'volume').catch(
-      (): PositioningData | null => null,
-    ),
-  ]);
+  const [positioning, volumePositioning] = override
+    ? [override.positioning, null]
+    : await Promise.all([
+        getPositioningForSymbol(symbol, EXPIRATIONS),
+        getPositioningForSymbol(symbol, EXPIRATIONS, 'volume').catch(
+          (): PositioningData | null => null,
+        ),
+      ]);
   const { summary, spot } = positioning;
 
   /*
@@ -223,7 +234,7 @@ async function build(symbol: string): Promise<DecisionResult> {
    * whenever the overlay took; the fetch is cached, so this costs nothing extra
    * and keeps a sane fallback if the live quote is briefly unavailable.
    */
-  const live = await getSpotQuote(symbol).catch(() => null);
+  const live = override ? override.spot : await getSpotQuote(symbol).catch(() => null);
   const displaySpot = live?.price ?? spot;
 
   const walls = wallsFrom(positioning.rows, spot, displaySpot);
@@ -334,6 +345,21 @@ async function build(symbol: string): Promise<DecisionResult> {
 }
 
 export class DecisionError extends Error {}
+
+/**
+ * The full decision for `/lab`, built from an injected positioning reading.
+ * Never cached and never written anywhere: the reading is rebuilt on every
+ * view. Tradeability, intraday bars and the conviction checks still read their
+ * production sources, as on `/decision`.
+ */
+export async function buildDecisionFromPositioning(
+  rawSymbol: string,
+  override: DecisionPositioningOverride,
+): Promise<DecisionResult> {
+  const symbol = normaliseSymbol(rawSymbol);
+  if (!symbol) throw new DecisionError('That does not look like a US ticker.');
+  return build(symbol, override);
+}
 
 export async function getDecision(
   rawSymbol: string,

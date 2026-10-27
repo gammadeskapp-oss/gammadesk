@@ -1,15 +1,13 @@
 import Link from 'next/link';
-import { AutoRefresh } from '@/components/AutoRefresh';
 import { ConsensusCard } from '@/components/ConsensusCard';
-import { LIVE_STAMP_REFRESH_MS, LiveFeedHeader, LiveFeedNa } from '@/components/lab/LiveFeed';
-import { LiveGexPanel } from '@/components/lab/LiveGexPanel';
+import { LiveFeedNa } from '@/components/lab/LiveFeed';
 import { SignalTable } from '@/components/SignalTable';
 import { TickerChart } from '@/components/TickerChart';
 import { TickerSearch } from '@/components/TickerSearch';
 import { analyzeTicker, TickerError } from '@/lib/ticker/analyze';
 import type { TickerAnalysis } from '@/lib/ticker/types';
 import { PAGE_DESCRIPTIONS } from '@/lib/pageMeta';
-import { getLiveGamma } from '@/lib/tasty';
+import type { LiveGammaReading } from '@/lib/tasty';
 import type { ViewSource } from './source';
 
 function Panel({ children }: { children: React.ReactNode }) {
@@ -24,19 +22,24 @@ function Panel({ children }: { children: React.ReactNode }) {
  * The Ticker page, as one component, so `/ticker` and the `/lab` Ticker tab
  * render the same thing.
  *
- * On `tasty-local` the nine signals and the chart history still come from
- * daily bars on their existing source (a live options stream has no history);
- * what is added is the live spot and gamma for the symbol from the Tastytrade
- * feed, re-read on every render.
+ * This page has no gamma panel, so on `tasty-local` every panel reads its
+ * production source exactly as `/ticker` does: the nine signals and the chart
+ * run on daily bars, which a live options stream cannot supply. The only
+ * differences are where the search box navigates, the "live-feed: n/a"
+ * caption, and the chart's current-price line, which takes the feed's spot
+ * when the feed is live (never a mock spot).
  */
 export async function TickerView({
   symbol,
   source = 'default',
+  live,
   searchBasePath,
   searchParams,
 }: {
   symbol?: string;
   source?: ViewSource;
+  /** The feed reading for this symbol, from `/lab`. */
+  live?: LiveGammaReading | null;
   /** Where the search box navigates; defaults to `/ticker`. */
   searchBasePath?: string;
   /** Extra query parameters the search box keeps, e.g. the /lab tab. */
@@ -59,8 +62,6 @@ export async function TickerView({
     }
   }
 
-  const live = lab && query && !error ? await getLiveGamma(data?.symbol ?? query, data?.price) : null;
-
   return (
     <>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -72,15 +73,11 @@ export async function TickerView({
               {PAGE_DESCRIPTIONS['/ticker']}
             </p>
           </div>
-          <div className="flex flex-col items-end gap-1">
-            {data && (
-              <p className="text-2xs text-term-faint">
-                {data.barsUsed} daily bars · {data.source} · close {data.asOfDate}
-              </p>
-            )}
-            {live && <LiveFeedHeader reading={live} />}
-            {live && <AutoRefresh intervalMs={LIVE_STAMP_REFRESH_MS} />}
-          </div>
+          {data && (
+            <p className="text-2xs text-term-faint">
+              {data.barsUsed} daily bars · {data.source} · close {data.asOfDate}
+            </p>
+          )}
         </div>
 
         <TickerSearch
@@ -88,8 +85,6 @@ export async function TickerView({
           basePath={searchBasePath}
           params={searchParams}
         />
-
-        {live && <LiveGexPanel reading={live} />}
 
         {error && (
           <div className="panel border-l-2 border-l-bear/60 px-4 py-4">
@@ -126,7 +121,7 @@ export async function TickerView({
               symbol={data.symbol}
               data={data.chart}
               // Live spot only from the real feed; a mock spot never lands on a real chart.
-              currentPrice={live?.mode === 'live' && live.gex ? live.gex.spot : data.price}
+              currentPrice={lab && live?.mode === 'live' && live.gex ? live.gex.spot : data.price}
             />
 
             {/*

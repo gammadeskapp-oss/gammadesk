@@ -9,8 +9,14 @@ import { SwingBoard } from '@/components/SwingBoard';
 import { getLabView } from '@/lib/lab';
 import { getSwingView } from '@/lib/lab/swing';
 import { requireLabSession } from '@/lib/lab/access';
-import { DashboardView } from '@/components/views/DashboardView';
+import { HomeRedesign } from '@/components/redesign/HomeRedesign';
+import { LabSourceStrip } from '@/components/lab/LiveFeed';
+import { DecisionView } from '@/components/views/DecisionView';
 import { TickerView } from '@/components/views/TickerView';
+import { config } from '@/lib/config';
+import { loadHomeData } from '@/lib/redesign/data';
+import { getLiveGamma } from '@/lib/tasty';
+import { normaliseSymbol } from '@/lib/ticker/bars';
 import { LAB_ANALOGUE_HORIZON } from '@/lib/lab/types';
 import { formatAsOf } from '@/lib/time';
 
@@ -19,8 +25,16 @@ import { formatAsOf } from '@/lib/time';
  *
  * ## Tabs
  *
- * - Dashboard — the real `DashboardView`, on the Tastytrade source.
- * - Ticker — the real `TickerView` and its search, on the Tastytrade source.
+ * Each replica tab renders the public page's own component, so every panel is
+ * there in the same order; only the gamma/positioning panels read the
+ * Tastytrade feed, and one source strip above says so.
+ *
+ * - Dashboard — `HomeRedesign`, what the nav calls Home and `/dashboard`
+ *   highlights (`/`). Hero regime and gamma map from the feed.
+ * - Ticker — `DecisionView`, the nav's Ticker Search (`/decision`). Context,
+ *   levels and exposure tables from the feed.
+ * - Consensus — `TickerView` (`/ticker`), the nine-signal consensus. It has no
+ *   gamma panel, so nothing on it changes source.
  * - Testbed — the ranking testbed and swing engine this page always was.
  *
  * ## The lock
@@ -53,16 +67,19 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = 'force-dynamic';
+// The Ticker tab renders the full /decision view, which carries the same ceiling.
+export const maxDuration = 300;
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'ticker', label: 'Ticker' },
+  { id: 'consensus', label: 'Consensus' },
   { id: 'testbed', label: 'Testbed' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
 interface PageProps {
-  searchParams: Promise<{ tab?: string; symbol?: string }>;
+  searchParams: Promise<{ tab?: string; ticker?: string; symbol?: string }>;
 }
 
 export default async function LabPage({ searchParams }: PageProps) {
@@ -72,9 +89,27 @@ export default async function LabPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const tab: TabId = TABS.some((t) => t.id === params.tab) ? (params.tab as TabId) : 'dashboard';
 
+  const decisionSymbol = normaliseSymbol(params.ticker ?? params.symbol ?? '') || config.symbol;
+  const consensusSymbol = params.symbol ?? 'SPY';
+
+  // One feed reading per view, shared by the strip and the panels it describes.
+  const live =
+    tab === 'dashboard'
+      ? await getLiveGamma(config.symbol)
+      : tab === 'ticker'
+        ? await getLiveGamma(decisionSymbol)
+        : tab === 'consensus'
+          ? await getLiveGamma(normaliseSymbol(consensusSymbol) || consensusSymbol)
+          : null;
+
+  const home =
+    tab === 'dashboard' && live
+      ? await loadHomeData(new Date(), { book: live.positioning, spot: live.gex?.spot ?? null })
+      : null;
+
   return (
     <>
-      <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+      <div className="mx-auto w-full max-w-[1700px] space-y-3 px-4 pt-5 sm:px-6">
         <nav className="flex flex-wrap items-center gap-1 border-b border-term-line pb-2" aria-label="Lab tabs">
           {TABS.map((t) => (
             <Link
@@ -97,17 +132,47 @@ export default async function LabPage({ searchParams }: PageProps) {
           </form>
         </nav>
 
-        {tab === 'dashboard' && <DashboardView source="tasty-local" />}
-        {tab === 'ticker' && (
-          <TickerView
-            symbol={params.symbol ?? 'SPY'}
-            source="tasty-local"
-            searchBasePath="/lab"
-            searchParams={{ tab: 'ticker' }}
+        {live && (
+          <LabSourceStrip
+            reading={live}
+            gammaPanels={
+              tab === 'dashboard'
+                ? 'regime hero + gamma map'
+                : tab === 'ticker'
+                  ? 'context, levels + exposure tables'
+                  : 'spot (this page has no gamma panel)'
+            }
           />
         )}
-        {tab === 'testbed' && <Testbed />}
-      </main>
+      </div>
+
+      {/* Each replica renders its own <main>, exactly as its public route does. */}
+      {home && <HomeRedesign data={home} />}
+      {tab === 'ticker' && live && (
+        <DecisionView
+          ticker={decisionSymbol}
+          source="tasty-local"
+          live={live}
+          searchBasePath="/lab"
+          searchParams={{ tab: 'ticker' }}
+        />
+      )}
+      {tab === 'consensus' && (
+        <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+          <TickerView
+            symbol={consensusSymbol}
+            source="tasty-local"
+            live={live}
+            searchBasePath="/lab"
+            searchParams={{ tab: 'consensus' }}
+          />
+        </main>
+      )}
+      {tab === 'testbed' && (
+        <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+          <Testbed />
+        </main>
+      )}
 
       <Footer />
     </>

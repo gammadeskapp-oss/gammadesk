@@ -104,8 +104,9 @@ function normPdf(x: number): number {
  */
 export function mockSnapshot(underlying: string, now: number = Date.now(), referencePrice?: number | null): FeedSnapshot {
   const symbol = underlying.toUpperCase();
+  // A real reference price wins, so mock levels sit where the real chart is.
   const anchor =
-    ANCHORS[symbol] ?? (referencePrice && referencePrice > 0 ? referencePrice : 50 + (hash(symbol) % 400));
+    referencePrice && referencePrice > 0 ? referencePrice : (ANCHORS[symbol] ?? 50 + (hash(symbol) % 400));
   // A slow wobble on the clock: ±0.35% over ~17 minutes, so successive views differ.
   const spot = Number((anchor * (1 + 0.0035 * Math.sin(now / 160_000))).toFixed(2));
   const step = strikeStep(symbol, anchor);

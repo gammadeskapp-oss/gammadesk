@@ -453,12 +453,29 @@ export async function loadMacroFit(symbol: string, now: Date = new Date()): Prom
 
 // --- the whole bundle --------------------------------------------------------
 
-export async function loadHomeData(now: Date = new Date()): Promise<HomeData> {
+/**
+ * A positioning reading to use instead of the production chain.
+ *
+ * Only `/lab` passes one (the Tastytrade feed, see `lib/tasty`). It replaces
+ * the book and the spot that the hero and the gamma map read; every other
+ * module still loads from its own production source, exactly as on `/`.
+ */
+export interface HomePositioningOverride {
+  book: PositioningData | null;
+  spot: number | null;
+}
+
+export async function loadHomeData(
+  now: Date = new Date(),
+  positioningOverride?: HomePositioningOverride,
+): Promise<HomeData> {
   const catalyst = nextCatalyst(now);
 
   const [book, breadth, quotes, richMacro, outlook, netLiquidity, leadership, scanner, flow, trackRecord, liveSpot] =
     await Promise.all([
-      peekPositioningView(config.symbol).catch((): PositioningData | null => null),
+      positioningOverride
+        ? Promise.resolve(positioningOverride.book)
+        : peekPositioningView(config.symbol).catch((): PositioningData | null => null),
       getBreadth().catch((): BreadthReading | null => null),
       getMarketContextQuotes().catch((): MarketContextQuotes | null => null),
       getRichMacroBias().catch((): RichMacroView | null => null),
@@ -468,7 +485,9 @@ export async function loadHomeData(now: Date = new Date()): Promise<HomeData> {
       mapScanner(now),
       mapFlow(),
       mapTrackRecord(),
-      getSpotQuote(config.symbol).catch(() => null),
+      positioningOverride
+        ? Promise.resolve(positioningOverride.spot === null ? null : { price: positioningOverride.spot })
+        : getSpotQuote(config.symbol).catch(() => null),
     ]);
 
   /*

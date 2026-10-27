@@ -131,5 +131,8 @@ export async function computeDeskSnapshotForCache(
 ): Promise<{ snapshot: DeskSnapshot; source: 'cboe' | 'polygon'; builtAtIso: string }> {
   const snapshot = await loadDeskSnapshot(now);
   const positioning = await getPositioning();
-  return { snapshot, source: positioning.meta.source, builtAtIso: new Date().toISOString() };
+  const source = positioning.meta.source;
+  // The public chain is only ever Cboe or Polygon; `tastytrade` is /lab-only.
+  if (source === 'tastytrade') throw new Error('Lab-only source on the public chain.');
+  return { snapshot, source, builtAtIso: new Date().toISOString() };
 }

@@ -122,7 +122,11 @@ export interface Summary {
 }
 
 export interface DataMeta {
-  source: DataSource;
+  /**
+   * `tastytrade` only ever appears on a reading built for the password-locked
+   * `/lab` from the Tastytrade feed (`lib/tasty`); no public path produces one.
+   */
+  source: DataSource | 'tastytrade';
   /** Human-readable provider name for the UI, e.g. "Cboe (delayed)". */
   sourceLabel: string;
   /** Server-rendered "data as of" string, e.g. `Aug 06, 2026, 16:00 ET`. */

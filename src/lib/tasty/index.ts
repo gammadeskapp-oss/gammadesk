@@ -1,10 +1,11 @@
 import 'server-only';
 
-import type { Summary } from '../types';
-import { formatAsOf } from '../time';
+import type { Metrics, PositioningData, StrikeRow, Summary } from '../types';
+import { getSpotQuote } from '../spot';
+import { daysToExpiry, formatAsOf, formatExpiryLabel } from '../time';
 import { computeGex, magnets } from './gex';
 import { mockSnapshot } from './mock';
-import type { GexResult, TastySourceMode } from './types';
+import type { FeedSnapshot, GexResult, TastySourceMode } from './types';
 
 /**
  * The one entry point `/lab` reads the Tastytrade source through.
@@ -37,6 +38,13 @@ export interface LiveGammaReading {
   gex: GexResult | null;
   /** The same shape the public positioning summary has, for the Dashboard cards. */
   summary: Summary | null;
+  /**
+   * The whole reading in the public `PositioningData` shape, so the existing
+   * gamma panels (hero, gamma map, levels, exposure tables) render it as-is.
+   * GEX here is the feed formula (per $1 move); vanna and charm are not on the
+   * feed and are zero.
+   */
+  positioning: PositioningData | null;
   error: string | null;
 }
 
@@ -61,8 +69,8 @@ function toSummary(gex: GexResult): Summary {
 /**
  * Live (or mock) spot and gamma for `symbol`.
  *
- * `referencePrice` only anchors the mock's spot (e.g. the Ticker tab passes the
- * last close it already has); the live path ignores it.
+ * `referencePrice` only anchors the mock's spot; without one the mock anchors on
+ * the production spot quote. The live path ignores both.
  */
 export async function getLiveGamma(symbol: string, referencePrice?: number | null): Promise<LiveGammaReading> {
   const mode = tastySourceMode();
@@ -83,23 +91,135 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
         asOfLabel: null,
         gex: null,
         summary: null,
+        positioning: null,
         error: e instanceof Error ? e.message : String(e),
       };
     }
   } else {
-    snapshot = mockSnapshot(upper, Date.now(), referencePrice);
+    // Anchor the mock on the production spot quote (Cboe) when it answers, so
+    // mock levels land around the real price on the real chart. Still mock.
+    const reference = referencePrice ?? (await getSpotQuote(upper).catch(() => null))?.price ?? null;
+    snapshot = mockSnapshot(upper, Date.now(), reference);
   }
 
   const gex = computeGex(snapshot);
   const underlying = snapshot.states.get(upper);
   const asOfMs = underlying?.receivedAt ?? null;
+  const summary = gex ? toSummary(gex) : null;
   return {
     mode,
     symbol: upper,
     asOfMs,
     asOfLabel: asOfMs ? formatAsOf(new Date(asOfMs)) : null,
     gex,
-    summary: gex ? toSummary(gex) : null,
+    summary,
+    positioning: gex && summary && asOfMs ? toPositioning(snapshot, gex, summary, mode, asOfMs) : null,
     error: gex ? error : (error ?? 'No gamma could be built from the feed.'),
+  };
+}
+
+function emptyMetrics(): Metrics {
+  return { gex: 0, vex: 0, cex: 0, oi: 0, callGex: 0, putGex: 0, callOi: 0, putOi: 0 };
+}
+
+function addInto(target: Metrics, m: Metrics): void {
+  target.gex += m.gex;
+  target.oi += m.oi;
+  target.callGex += m.callGex;
+  target.putGex += m.putGex;
+  target.callOi += m.callOi;
+  target.putOi += m.putOi;
+}
+
+/**
+ * The feed reading in the public `PositioningData` shape: one row per strike
+ * (highest first, as the public builder emits them), one cell per expiration.
+ * Put GEX is stored negative and `gex` is call + put, the public convention, so
+ * the row totals equal `GexStrike.netGex`.
+ */
+function toPositioning(
+  snapshot: FeedSnapshot,
+  gex: GexResult,
+  summary: Summary,
+  mode: TastySourceMode,
+  asOfMs: number,
+): PositioningData {
+  const now = new Date(asOfMs);
+  const expirations = [...new Set(snapshot.options.map((o) => o.expiration))].sort();
+  const column = new Map(expirations.map((e, i) => [e, i]));
+  const rows = new Map<number, StrikeRow>();
+  let used = 0;
+
+  for (const ref of snapshot.options) {
+    const state = snapshot.states.get(ref.streamerSymbol);
+    const gamma = state?.greeks?.gamma;
+    const oi = state?.summary?.openInterest;
+    if (typeof gamma !== 'number' || !Number.isFinite(gamma) || typeof oi !== 'number' || !Number.isFinite(oi) || oi < 0) {
+      continue;
+    }
+    used += 1;
+    const value = gamma * oi * 100 * gex.spot;
+    const row = rows.get(ref.strike) ?? {
+      strike: ref.strike,
+      cells: expirations.map(() => emptyMetrics()),
+      total: emptyMetrics(),
+    };
+    const cell = row.cells[column.get(ref.expiration)!];
+    const m = emptyMetrics();
+    if (ref.type === 'call') {
+      m.callGex = value;
+      m.callOi = oi;
+      m.oi = oi;
+    } else {
+      m.putGex = -value;
+      m.putOi = oi;
+      m.oi = -oi;
+    }
+    m.gex = m.callGex + m.putGex;
+    addInto(cell, m);
+    addInto(row.total, m);
+    rows.set(ref.strike, row);
+  }
+
+  const ordered = [...rows.values()].sort((a, b) => b.strike - a.strike);
+  const columnTotals = expirations.map(() => emptyMetrics());
+  const grandTotal = emptyMetrics();
+  for (const row of ordered) {
+    row.cells.forEach((c, i) => addInto(columnTotals[i], c));
+    addInto(grandTotal, row.total);
+  }
+
+  const label = formatAsOf(now);
+  const sourceLabel = mode === 'mock' ? 'Tastytrade (MOCK — not live)' : 'Tastytrade dxLink';
+  return {
+    symbol: snapshot.underlying,
+    spot: gex.spot,
+    expirations,
+    expirationMeta: expirations.map((date) => ({
+      date,
+      label: formatExpiryLabel(date),
+      dte: daysToExpiry(date, now),
+    })),
+    rows: ordered,
+    columnTotals,
+    grandTotal,
+    summary,
+    meta: {
+      source: 'tastytrade',
+      sourceLabel,
+      asOfLabel: label,
+      asOfIso: now.toISOString(),
+      quoteDateLabel: label,
+      quoteDateIso: now.toISOString(),
+      cacheSeconds: 0,
+      upstreamRequests: 0,
+      contractsUsed: used,
+      ivSources: { quoted: used, solved: 0, model: 0 },
+      riskFreeRate: 0,
+      dividendYield: 0,
+      notes: [
+        `${sourceLabel}: gamma from the feed's Greeks events, open interest from its Summary events. GEX = gamma × OI × 100 × spot (per $1 move), not the public per-1% figure. Vanna and charm are not on the feed and read zero.`,
+      ],
+    },
   };
 }
