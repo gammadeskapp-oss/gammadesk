@@ -173,7 +173,16 @@ export function mockSnapshot(underlying: string, now: number = Date.now(), refer
           prevDayClosePrice: Number.NaN,
           openInterest: oi,
         };
-        states.set(sym, { greeks, summary, receivedAt: now });
+        // Today's volume: a share of the open interest, heavier in the front week.
+        const optionTrade: DxTrade = {
+          eventType: 'Trade',
+          eventSymbol: sym,
+          price: 0,
+          size: 1,
+          dayVolume: Math.round(oi * front * (0.1 + 0.5 * random())),
+          time: now,
+        };
+        states.set(sym, { greeks, summary, trade: optionTrade, receivedAt: now });
       }
     }
   });

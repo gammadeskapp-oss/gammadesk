@@ -1,16 +1,23 @@
 /*
- * Validation of the /lab Tastytrade path: src/lib/tasty/gex.ts (the GEX math),
- * src/lib/tasty/mock.ts (the mock feed) and src/lib/lab/auth.ts (the lock).
+ * Validation of the /lab Tastytrade path: src/lib/tasty/gex.ts (feed events →
+ * the public model's contracts), src/lib/tasty/mock.ts (the mock feed) and
+ * src/lib/lab/auth.ts (the lock).
+ *
+ * The point of the gex section: /lab has no GEX formula of its own. Its book is
+ * the public `buildPositioning` run on contracts read off the feed, so a strike
+ * on /lab must equal `contractMetrics` from lib/exposure.ts on the same inputs,
+ * and a hand-worked value of the public formula (dealer sign, × S² × 1%).
  *
  * The modules are imported and are the subject — Node 22.6+ strips the types.
- * Expected values for the hand fixture are worked on paper and written down as
- * literals, not read back from the implementation.
  */
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
+import { registerTsImports } from './ts-imports.mjs';
 
-const { computeGex, zeroGammaLevel, magnets, spotFrom } = await import('../src/lib/tasty/gex.ts');
+registerTsImports();
+const { feedContracts, spotFrom } = await import('../src/lib/tasty/gex.ts');
 const { mockSnapshot, streamerSymbol } = await import('../src/lib/tasty/mock.ts');
+const { buildPositioning, contractMetrics } = await import('../src/lib/exposure.ts');
 
 let passed = 0;
 function check(name, fn) {
@@ -19,97 +26,162 @@ function check(name, fn) {
   console.log(`  ok  ${name}`);
 }
 
+const close = (a, b, tol = 1e-9) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(b));
+
+const META = {
+  source: 'tastytrade',
+  sourceLabel: 'test',
+  asOfLabel: '',
+  asOfIso: '',
+  quoteDateLabel: '',
+  quoteDateIso: '',
+  cacheSeconds: 0,
+  upstreamRequests: 0,
+  riskFreeRate: 0,
+  dividendYield: 0,
+  notes: [],
+};
+
 /* ---------- hand fixture ----------
- * spot = 100 (bid 99.9 / ask 100.1).
- *   95 put : gamma 0.02, OI 1000 → 0.02·1000·100·100 = 200,000 (put)
- *  100 call: gamma 0.05, OI  500 → 250,000 (call)
- *  100 put : gamma 0.05, OI  300 → 150,000 (put)
- *  105 call: gamma 0.02, OI 2000 → 400,000 (call)
- * Per strike net: 95 → −200,000 ; 100 → +100,000 ; 105 → +400,000
- * Cumulative:     −200,000 → −100,000 → +300,000
- * Crossing between 100 and 105: 100 + (100,000 / 400,000)·5 = 101.25
- * Totals: call 650,000, put 350,000, net 300,000; max |net| strike 105.
+ * spot = 100 (bid 99.9 / ask 100.1), one expiry exactly 8 days out (both dates in EDT), r = q = 0.
+ *   95 put  IV 0.25, OI 1000
+ *  100 call IV 0.20, OI  500, volume 120
+ *  100 put  IV 0.20, OI  300
+ *  105 call IV 0.18, OI 2000
+ *  110 call — no Summary yet: skipped, not zeroed
+ *  115 call — no IV: skipped
+ * The Greeks event's own `gamma` is a deliberately wrong 0.05 on every leg: the
+ * public model prices gamma from IV, so that field must not reach the numbers.
  */
+const NOW = new Date('2026-10-22T20:00:00Z'); // 16:00 ET
+const EXPIRY = '2026-10-30';
 function fixture() {
   const states = new Map();
-  states.set('XYZ', { quote: { eventType: 'Quote', eventSymbol: 'XYZ', bidPrice: 99.9, askPrice: 100.1, bidSize: 1, askSize: 1, time: 1 }, receivedAt: 1 });
+  states.set('XYZ', {
+    quote: { eventType: 'Quote', eventSymbol: 'XYZ', bidPrice: 99.9, askPrice: 100.1, bidSize: 1, askSize: 1, time: 1 },
+    receivedAt: 1,
+  });
   const legs = [
-    ['.XYZP95', 'put', 95, 0.02, 1000],
-    ['.XYZC100', 'call', 100, 0.05, 500],
-    ['.XYZP100', 'put', 100, 0.05, 300],
-    ['.XYZC105', 'call', 105, 0.02, 2000],
-    // A contract with no Summary yet must be skipped, not counted as zero OI.
-    ['.XYZC110', 'call', 110, 0.01, undefined],
+    ['.XYZP95', 'put', 95, 0.25, 1000, undefined],
+    ['.XYZC100', 'call', 100, 0.2, 500, 120],
+    ['.XYZP100', 'put', 100, 0.2, 300, undefined],
+    ['.XYZC105', 'call', 105, 0.18, 2000, undefined],
+    ['.XYZC110', 'call', 110, 0.17, undefined, undefined],
+    ['.XYZC115', 'call', 115, Number.NaN, 400, undefined],
   ];
   const options = [];
-  for (const [sym, type, strike, gamma, oi] of legs) {
-    options.push({ streamerSymbol: sym, type, strike, expiration: '2026-11-20' });
-    const st = { greeks: { eventType: 'Greeks', eventSymbol: sym, gamma, volatility: 0.2, price: 0, delta: 0, theta: 0, rho: 0, vega: 0, time: 1 }, receivedAt: 1 };
+  for (const [sym, type, strike, iv, oi, vol] of legs) {
+    options.push({ streamerSymbol: sym, type, strike, expiration: EXPIRY });
+    const st = {
+      greeks: { eventType: 'Greeks', eventSymbol: sym, gamma: 0.05, volatility: iv, price: 0, delta: 0, theta: 0, rho: 0, vega: 0, time: 1 },
+      receivedAt: 1,
+    };
     if (oi !== undefined) st.summary = { eventType: 'Summary', eventSymbol: sym, openInterest: oi };
+    if (vol !== undefined) st.trade = { eventType: 'Trade', eventSymbol: sym, price: 1, size: 1, dayVolume: vol, time: 1 };
     states.set(sym, st);
   }
   return { underlying: 'XYZ', options, states };
 }
 
+/** The public GEX formula written out: sign · OI · 100 · Γ(BS) · S² · 0.01, r = q = 0. */
+function handGex(type, K, iv, oi, S, T) {
+  const d1 = (Math.log(S / K) + 0.5 * iv * iv * T) / (iv * Math.sqrt(T));
+  const gamma = Math.exp(-0.5 * d1 * d1) / Math.sqrt(2 * Math.PI) / (S * iv * Math.sqrt(T));
+  return (type === 'call' ? 1 : -1) * oi * 100 * gamma * S * S * 0.01;
+}
+
+const snap = fixture();
+const spot = spotFrom(snap.states.get('XYZ'));
+const contracts = feedContracts(snap, NOW);
+const params = { spot, riskFreeRate: 0, dividendYield: 0 };
+const book = buildPositioning(contracts, {
+  ...params,
+  symbol: 'XYZ',
+  expirationCount: 6,
+  strikesEachSide: 20,
+  meta: META,
+});
+
 console.log('gex');
-const g = computeGex(fixture(), Date.parse('2026-10-22T15:00:00Z'));
-check('spot is the quote mid', () => assert.equal(g.spot, 100));
-check('call / put / net totals', () => {
-  assert.ok(Math.abs(g.callGex - 650_000) < 1e-6);
-  assert.ok(Math.abs(g.putGex - 350_000) < 1e-6);
-  assert.ok(Math.abs(g.netGex - 300_000) < 1e-6);
+check('spot is the quote mid', () => assert.equal(spot, 100));
+check('contracts missing OI or IV are skipped, not zeroed', () => {
+  assert.equal(contracts.length, 4);
+  assert.deepEqual(
+    contracts.map((c) => c.strike).sort((a, b) => a - b),
+    [95, 100, 100, 105],
+  );
 });
-check('per-strike net = call − put', () => {
-  const by = Object.fromEntries(g.strikes.map((r) => [r.strike, r.netGex]));
-  assert.ok(Math.abs(by[95] + 200_000) < 1e-6);
-  assert.ok(Math.abs(by[100] - 100_000) < 1e-6);
-  assert.ok(Math.abs(by[105] - 400_000) < 1e-6);
+check('feed IV / OI / volume carried as-is; T on the public clock', () => {
+  const c = contracts.find((x) => x.ticker === '.XYZC100');
+  assert.equal(c.iv, 0.2);
+  assert.equal(c.openInterest, 500);
+  assert.equal(c.volume, 120);
+  assert.equal(c.ivSource, 'quoted');
+  assert.ok(close(c.T, 8 / 365, 1e-12));
+  assert.equal(contracts.find((x) => x.ticker === '.XYZP100').volume, 0);
 });
-check('zero gamma interpolates the cumulative sign flip', () => assert.ok(Math.abs(g.zeroGamma - 101.25) < 1e-9));
-check('max-GEX strike', () => {
-  assert.equal(g.maxGexStrike, 105);
-  assert.ok(Math.abs(g.maxGex - 400_000) < 1e-6);
+check('each strike = public contractMetrics on the same contracts', () => {
+  for (const row of book.rows) {
+    const expected = contracts
+      .filter((c) => c.strike === row.strike)
+      .reduce((sum, c) => sum + contractMetrics(c, params).gex, 0);
+    assert.ok(close(row.total.gex, expected), `strike ${row.strike}`);
+  }
 });
-check('contract without OI is skipped, not zeroed', () => {
-  assert.equal(g.contractsUsed, 4);
-  assert.equal(g.contractsRequested, 5);
+check('each strike = the public formula by hand (dealer sign, per 1%)', () => {
+  const T = 8 / 365;
+  const by = Object.fromEntries(book.rows.map((r) => [r.strike, r.total.gex]));
+  assert.ok(close(by[95], handGex('put', 95, 0.25, 1000, 100, T), 1e-6));
+  assert.ok(close(by[100], handGex('call', 100, 0.2, 500, 100, T) + handGex('put', 100, 0.2, 300, 100, T), 1e-6));
+  assert.ok(close(by[105], handGex('call', 105, 0.18, 2000, 100, T), 1e-6));
+  assert.ok(by[95] < 0, 'puts carry the negative dealer sign');
 });
-check('OI totals', () => {
-  assert.equal(g.totalCallOi, 2500);
-  assert.equal(g.totalPutOi, 1300);
-});
-check('magnets either side of spot', () => {
-  const m = magnets(g);
-  assert.equal(m.above.strike, 105);
-  assert.equal(m.below.strike, 95);
-});
-check('no flip when the cumulative never crosses', () => {
-  assert.equal(zeroGammaLevel([{ strike: 1, netGex: 5 }, { strike: 2, netGex: 5 }], 1.5), null);
+check('net GEX, regime and magnets come from the public summary', () => {
+  const sum = book.rows.reduce((s, r) => s + r.total.gex, 0);
+  assert.ok(close(book.summary.netGex, sum));
+  assert.equal(book.summary.regime, sum >= 0 ? 'positive' : 'negative');
+  assert.equal(book.summary.magnetAbove.strike, 105);
+  assert.equal(book.summary.magnetBelow.strike, 95);
 });
 check('spot falls back to the last trade, then null', () => {
   assert.equal(spotFrom({ trade: { price: 42 }, receivedAt: 0 }), 42);
   assert.equal(spotFrom({ quote: { bidPrice: Number.NaN, askPrice: 1 }, receivedAt: 0 }), null);
   assert.equal(spotFrom(undefined), null);
 });
-check('no underlying quote → no reading', () => {
-  const f = fixture();
-  f.states.delete('XYZ');
-  assert.equal(computeGex(f), null);
+check('expired contracts are dropped', () => {
+  assert.equal(feedContracts(fixture(), new Date('2026-10-31T12:00:00Z')).length, 0);
 });
 
 console.log('mock');
 const now = Date.parse('2026-10-22T15:00:00Z');
 const mock = mockSnapshot('SPY', now);
-const mg = computeGex(mock, now);
-check('every mock contract carries gamma and OI', () => assert.equal(mg.contractsUsed, mg.contractsRequested));
-check('mock spot sits near the anchor', () => assert.ok(Math.abs(mg.spot - 672) / 672 < 0.005));
+const mockSpot = spotFrom(mock.states.get('SPY'));
+const mockContracts = feedContracts(mock, new Date(now));
+const mockBook = (weightBy) =>
+  buildPositioning(mockContracts, {
+    spot: mockSpot,
+    riskFreeRate: 0.04,
+    dividendYield: 0.013,
+    symbol: 'SPY',
+    expirationCount: 6,
+    strikesEachSide: 20,
+    weightBy,
+    meta: META,
+  });
+check('every mock contract carries IV and OI', () => assert.equal(mockContracts.length, mock.options.length));
+check('mock spot sits near the anchor', () => assert.ok(Math.abs(mockSpot - 672) / 672 < 0.005));
 check('mock is reproducible for the same instant', () => {
-  const again = computeGex(mockSnapshot('SPY', now), now);
-  assert.equal(again.netGex, mg.netGex);
+  assert.deepEqual(feedContracts(mockSnapshot('SPY', now), new Date(now)), mockContracts);
 });
-check('mock has a zero-gamma level and a max-GEX strike', () => {
-  assert.ok(mg.zeroGamma !== null && Number.isFinite(mg.zeroGamma));
-  assert.ok(mg.maxGexStrike !== null);
+check('mock book has a flip and magnets through the public builder', () => {
+  const b = mockBook('openInterest');
+  assert.ok(b.rows.length > 0);
+  assert.ok(b.summary.flipLevel !== null && Number.isFinite(b.summary.flipLevel));
+  assert.ok(b.summary.magnetAbove || b.summary.magnetBelow);
+});
+check('mock options carry volume, so the activity pass builds', () => {
+  assert.ok(mockContracts.some((c) => c.volume > 0));
+  assert.ok(mockBook('volume').rows.length > 0);
 });
 check('mock events use dxFeed shapes and streamer symbols', () => {
   const ref = mock.options[0];
@@ -120,8 +192,8 @@ check('mock events use dxFeed shapes and streamer symbols', () => {
   assert.equal(streamerSymbol('SPY', '2026-10-23', 'call', 672.5), '.SPY261023C672.5');
 });
 check('reference price anchors an unknown symbol', () => {
-  const r = computeGex(mockSnapshot('ZZZQ', now, 37.5), now);
-  assert.ok(Math.abs(r.spot - 37.5) / 37.5 < 0.005);
+  const s = spotFrom(mockSnapshot('ZZZQ', now, 37.5).states.get('ZZZQ'));
+  assert.ok(Math.abs(s - 37.5) / 37.5 < 0.005);
 });
 
 console.log('auth');

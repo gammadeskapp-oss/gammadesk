@@ -418,12 +418,13 @@ export async function DecisionView({
 
   try {
     if (live) {
-      if (!live.positioning || !live.gex || !live.asOfMs) {
+      if (!live.positioning || live.spot === null || !live.asOfMs) {
         throw new Error(live.error ?? 'No positioning could be built from the Tastytrade feed.');
       }
       data = await buildDecisionFromPositioning(query, {
         positioning: live.positioning,
-        spot: { price: live.gex.spot, asOfIso: new Date(live.asOfMs).toISOString() },
+        activity: live.activity,
+        spot: { price: live.spot, asOfIso: new Date(live.asOfMs).toISOString() },
       });
     } else {
       data = await peekDecision(query);

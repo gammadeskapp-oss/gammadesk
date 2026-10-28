@@ -104,7 +104,7 @@ export default async function LabPage({ searchParams }: PageProps) {
 
   const home =
     tab === 'dashboard' && live
-      ? await loadHomeData(new Date(), { book: live.positioning, spot: live.gex?.spot ?? null })
+      ? await loadHomeData(new Date(), { book: live.positioning, spot: live.spot })
       : null;
 
   return (
