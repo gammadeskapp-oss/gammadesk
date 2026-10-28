@@ -7,6 +7,7 @@ import { getSpotQuote } from '../spot';
 import { formatAsOf } from '../time';
 import { feedContracts, spotFrom } from './gex';
 import { mockSnapshot } from './mock';
+import { tastySourceMode } from './mode';
 import type { FeedSnapshot, TastySourceMode } from './types';
 
 /**
@@ -25,10 +26,7 @@ import type { FeedSnapshot, TastySourceMode } from './types';
  * the socket holds.
  */
 
-export function tastySourceMode(): TastySourceMode {
-  const key = 'TASTY_SOURCE';
-  return process.env[key]?.trim().toLowerCase() === 'live' ? 'live' : 'mock';
-}
+export { tastySourceMode };
 
 export interface LiveGammaReading {
   mode: TastySourceMode;

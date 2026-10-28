@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { isExpired } from '../time';
 import { getAccessToken, getStreamerToken, invalidateStreamerToken, TASTY_API_BASE } from './tokens';
 import type { DxEvent, FeedSnapshot, OptionRef, SymbolState } from './types';
 
@@ -119,6 +120,10 @@ class DxLinkFeed {
   private connecting = false;
   lastError: string | null = null;
   lastMessageAt = 0;
+
+  get isReady(): boolean {
+    return this.ready;
+  }
 
   touch(): void {
     this.lastUsed = Date.now();
@@ -286,6 +291,39 @@ class DxLinkFeed {
     this.sendSubscription(fresh, 'add');
   }
 
+  /**
+   * Fresh events for exactly `items`: whatever the state holds for those event
+   * types is dropped, and the subscriptions are removed and re-added so dxLink
+   * sends a new snapshot of each. Anything in the state afterwards arrived
+   * after this call. Returns the items that were not subscribed before, which
+   * are the ones the caller should `release` when done — a subscription some
+   * other reader holds is refreshed but left in place.
+   */
+  refresh(items: Sub[]): Sub[] {
+    for (const s of items) {
+      const state = this.states.get(s.symbol);
+      if (!state) continue;
+      if (s.type === 'Summary') state.summary = undefined;
+      else if (s.type === 'Trade') state.trade = undefined;
+      else if (s.type === 'Greeks') state.greeks = undefined;
+      else state.quote = undefined;
+    }
+    const held = items.filter((s) => this.subs.has(`${s.type}:${s.symbol}`));
+    this.sendSubscription(held, 'remove');
+    this.sendSubscription(held, 'add');
+    const fresh = items.filter((s) => !this.subs.has(`${s.type}:${s.symbol}`));
+    this.subscribe(fresh);
+    return fresh;
+  }
+
+  /** Drop these exact subscriptions (not every type on the symbol, unlike `unsubscribe`). */
+  release(items: Sub[]): void {
+    const gone = items.filter((s) => this.subs.delete(`${s.type}:${s.symbol}`));
+    this.sendSubscription(gone, 'remove');
+    const stillHeld = new Set([...this.subs.values()].map((s) => s.symbol));
+    for (const s of gone) if (!stillHeld.has(s.symbol)) this.states.delete(s.symbol);
+  }
+
   unsubscribe(symbols: Set<string>): void {
     const gone = [...this.subs.entries()].filter(([, s]) => symbols.has(s.symbol));
     for (const [key] of gone) this.subs.delete(key);
@@ -319,36 +357,46 @@ interface NestedChain {
   };
 }
 
-/** The contract list (metadata only — symbols and strikes, no prices). Cached 30 min. */
-async function chainRefs(underlying: string): Promise<OptionRef[]> {
-  const cached = holder.chains.get(underlying);
-  if (cached && Date.now() - cached.at < CHAIN_TTL_MS) return cached.refs;
+/**
+ * Every live contract on `underlying`'s chain (metadata only — symbols and
+ * strikes, no prices), straight from Tastytrade with no cache. Contracts are
+ * dropped by the shared expiry rule, so a 0DTE contract is gone after 16:00 ET.
+ */
+export async function fetchChain(underlying: string, now: Date = new Date()): Promise<OptionRef[]> {
   const bearer = await getAccessToken();
   const res = await fetch(`${TASTY_API_BASE}/option-chains/${encodeURIComponent(underlying)}/nested`, {
     headers: { authorization: `Bearer ${bearer}`, accept: 'application/json' },
     cache: 'no-store',
   });
+  if (res.status === 404) throw new Error('No option chain on Tastytrade for this symbol.');
   if (!res.ok) throw new Error(`Tastytrade option chain answered ${res.status}.`);
   const json = (await res.json()) as NestedChain;
-  const today = new Date().toISOString().slice(0, 10);
-  const expirations = (json.data?.items?.[0]?.expirations ?? [])
-    .filter((e) => (e['expiration-date'] ?? '') >= today)
-    .sort((a, b) => (a['expiration-date']! < b['expiration-date']! ? -1 : 1))
-    .slice(0, 7);
   const refs: OptionRef[] = [];
-  for (const e of expirations) {
+  for (const e of json.data?.items?.[0]?.expirations ?? []) {
+    const expiration = e['expiration-date'];
+    if (!expiration || isExpired(expiration, now)) continue;
     for (const s of e.strikes ?? []) {
       const strike = Number(s['strike-price']);
       if (!Number.isFinite(strike)) continue;
-      if (s['call-streamer-symbol']) refs.push({ streamerSymbol: s['call-streamer-symbol'], type: 'call', strike, expiration: e['expiration-date']! });
-      if (s['put-streamer-symbol']) refs.push({ streamerSymbol: s['put-streamer-symbol'], type: 'put', strike, expiration: e['expiration-date']! });
+      if (s['call-streamer-symbol']) refs.push({ streamerSymbol: s['call-streamer-symbol'], type: 'call', strike, expiration });
+      if (s['put-streamer-symbol']) refs.push({ streamerSymbol: s['put-streamer-symbol'], type: 'put', strike, expiration });
     }
   }
+  return refs.sort((a, b) => (a.expiration < b.expiration ? -1 : a.expiration > b.expiration ? 1 : a.strike - b.strike));
+}
+
+/** The first seven expirations of the chain, for the gamma tabs. Cached 30 min. */
+async function chainRefs(underlying: string): Promise<OptionRef[]> {
+  const cached = holder.chains.get(underlying);
+  if (cached && Date.now() - cached.at < CHAIN_TTL_MS) return cached.refs;
+  const all = await fetchChain(underlying);
+  const kept = new Set([...new Set(all.map((r) => r.expiration))].slice(0, 7));
+  const refs = all.filter((r) => kept.has(r.expiration));
   holder.chains.set(underlying, { at: Date.now(), refs });
   return refs;
 }
 
-async function waitFor(check: () => boolean, timeoutMs: number): Promise<boolean> {
+export async function waitFor(check: () => boolean, timeoutMs: number): Promise<boolean> {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     if (check()) return true;
@@ -415,3 +463,10 @@ export async function liveSnapshot(underlying: string): Promise<{ snapshot: Feed
 
   return { snapshot: { underlying: symbol, options, states: f.states }, error: f.lastError };
 }
+
+/** The shared client, connecting if it is not, for readers outside this file. */
+export function dxFeed(): Pick<DxLinkFeed, 'states' | 'isReady' | 'lastError' | 'refresh' | 'release'> {
+  return feed();
+}
+
+export type { Sub as DxSub };

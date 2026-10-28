@@ -11,11 +11,14 @@ import { getSwingView } from '@/lib/lab/swing';
 import { requireLabSession } from '@/lib/lab/access';
 import { HomeRedesign } from '@/components/redesign/HomeRedesign';
 import { LabSourceStrip } from '@/components/lab/LiveFeed';
+import { StrikesTab } from '@/components/lab/StrikesTab';
 import { DecisionView } from '@/components/views/DecisionView';
 import { TickerView } from '@/components/views/TickerView';
 import { config } from '@/lib/config';
 import { loadHomeData } from '@/lib/redesign/data';
 import { getLiveGamma } from '@/lib/tasty';
+import { strikesAvailability } from '@/lib/tasty/strikesRun';
+import { strikesDefaultStore } from '@/lib/lab/strikesDefault';
 import { normaliseSymbol } from '@/lib/ticker/bars';
 import { LAB_ANALOGUE_HORIZON } from '@/lib/lab/types';
 import { formatAsOf } from '@/lib/time';
@@ -35,6 +38,9 @@ import { formatAsOf } from '@/lib/time';
  *   levels and exposure tables from the feed.
  * - Consensus — `TickerView` (`/ticker`), the nine-signal consensus. It has no
  *   gamma panel, so nothing on it changes source.
+ * - Strikes — top open-interest and top-volume strike per pasted ticker, off
+ *   the live dxFeed only. Local and preview only: absent on the production
+ *   deploy (see `lib/tasty/strikesRun`).
  * - Testbed — the ranking testbed and swing engine this page always was.
  *
  * ## The lock
@@ -74,6 +80,7 @@ const TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'ticker', label: 'Ticker' },
   { id: 'consensus', label: 'Consensus' },
+  { id: 'strikes', label: 'Strikes' },
   { id: 'testbed', label: 'Testbed' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
@@ -87,7 +94,9 @@ export default async function LabPage({ searchParams }: PageProps) {
   await requireLabSession();
 
   const params = await searchParams;
-  const tab: TabId = TABS.some((t) => t.id === params.tab) ? (params.tab as TabId) : 'dashboard';
+  const strikes = strikesAvailability();
+  const tabs = TABS.filter((t) => t.id !== 'strikes' || strikes.ok || !strikes.hidden);
+  const tab: TabId = tabs.some((t) => t.id === params.tab) ? (params.tab as TabId) : 'dashboard';
 
   const decisionSymbol = normaliseSymbol(params.ticker ?? params.symbol ?? '') || config.symbol;
   const consensusSymbol = params.symbol ?? 'SPY';
@@ -111,7 +120,7 @@ export default async function LabPage({ searchParams }: PageProps) {
     <>
       <div className="mx-auto w-full max-w-[1700px] space-y-3 px-4 pt-5 sm:px-6">
         <nav className="flex flex-wrap items-center gap-1 border-b border-term-line pb-2" aria-label="Lab tabs">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <Link
               key={t.id}
               href={`/lab?tab=${t.id}`}
@@ -168,6 +177,11 @@ export default async function LabPage({ searchParams }: PageProps) {
           />
         </main>
       )}
+      {tab === 'strikes' && (
+        <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
+          <Strikes reason={strikes.ok ? null : strikes.reason} />
+        </main>
+      )}
       {tab === 'testbed' && (
         <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
           <Testbed />
@@ -177,6 +191,12 @@ export default async function LabPage({ searchParams }: PageProps) {
       <Footer />
     </>
   );
+}
+
+/** The Strikes tab, opened on the saved default list. Reads no feed until Run. */
+async function Strikes({ reason }: { reason: string | null }) {
+  const saved = await strikesDefaultStore.read();
+  return <StrikesTab defaultText={saved.text} defaultSavedAtIso={saved.savedAtIso} unavailableReason={reason} />;
 }
 
 /** The original `/lab`: the swing engine and the ranking testbed, unchanged. */
