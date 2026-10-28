@@ -39,8 +39,7 @@ import { formatAsOf } from '@/lib/time';
  * - Consensus — `TickerView` (`/ticker`), the nine-signal consensus. It has no
  *   gamma panel, so nothing on it changes source.
  * - Strikes — top open-interest and top-volume strike per pasted ticker, off
- *   the live dxFeed only. Local and preview only: absent on the production
- *   deploy (see `lib/tasty/strikesRun`).
+ *   the live dxFeed only (see `lib/tasty/strikesRun`).
  * - Testbed — the ranking testbed and swing engine this page always was.
  *
  * ## The lock
@@ -95,8 +94,7 @@ export default async function LabPage({ searchParams }: PageProps) {
 
   const params = await searchParams;
   const strikes = strikesAvailability();
-  const tabs = TABS.filter((t) => t.id !== 'strikes' || strikes.ok || !strikes.hidden);
-  const tab: TabId = tabs.some((t) => t.id === params.tab) ? (params.tab as TabId) : 'dashboard';
+  const tab: TabId = TABS.some((t) => t.id === params.tab) ? (params.tab as TabId) : 'dashboard';
 
   const decisionSymbol = normaliseSymbol(params.ticker ?? params.symbol ?? '') || config.symbol;
   const consensusSymbol = params.symbol ?? 'SPY';
@@ -120,7 +118,7 @@ export default async function LabPage({ searchParams }: PageProps) {
     <>
       <div className="mx-auto w-full max-w-[1700px] space-y-3 px-4 pt-5 sm:px-6">
         <nav className="flex flex-wrap items-center gap-1 border-b border-term-line pb-2" aria-label="Lab tabs">
-          {tabs.map((t) => (
+          {TABS.map((t) => (
             <Link
               key={t.id}
               href={`/lab?tab=${t.id}`}

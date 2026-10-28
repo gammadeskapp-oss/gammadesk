@@ -185,14 +185,13 @@ async function run(tickers, windowDays = 60, side = 'all') {
 }
 
 console.log('live run (fake feed)');
-await check('availability: live locally, hidden on production, refused off the live feed', () => {
+await check('availability: runs on the live feed (production too), refused off it', () => {
   assert.deepEqual(strikesAvailability(), { ok: true });
   process.env.VERCEL_ENV = 'production';
-  assert.equal(strikesAvailability().hidden, true);
+  assert.deepEqual(strikesAvailability(), { ok: true });
   delete process.env.VERCEL_ENV;
   process.env.TASTY_SOURCE = 'mock';
   assert.equal(strikesAvailability().ok, false);
-  assert.equal(strikesAvailability().hidden, false);
   process.env.TASTY_SOURCE = 'live';
 });
 

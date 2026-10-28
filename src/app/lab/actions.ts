@@ -4,7 +4,6 @@ import { getLabAnalogue } from '@/lib/lab';
 import { requireLabSession } from '@/lib/lab/access';
 import { strikesDefaultStore } from '@/lib/lab/strikesDefault';
 import { parseTickerList, STRIKES_MAX_TICKERS } from '@/lib/tasty/strikes';
-import { strikesAvailability } from '@/lib/tasty/strikesRun';
 import { LAB_ANALOGUE_BATCH, LAB_ANALOGUE_HORIZON, type LabAnalogue } from '@/lib/lab/types';
 
 /**
@@ -84,10 +83,6 @@ export async function saveStrikesDefault(
   text: string,
 ): Promise<{ ok: true; count: number; savedAtIso: string } | { ok: false; error: string }> {
   await requireLabSession();
-  const availability = strikesAvailability();
-  if (!availability.ok && availability.hidden) {
-    return { ok: false, error: 'Not available on this deployment.' };
-  }
   const raw = typeof text === 'string' ? text.slice(0, 20_000) : '';
   const { tickers } = parseTickerList(raw);
   if (tickers.length > STRIKES_MAX_TICKERS) {

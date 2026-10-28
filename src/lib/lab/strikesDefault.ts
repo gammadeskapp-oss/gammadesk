@@ -5,7 +5,7 @@ import { createJsonStore } from '../jsonStore';
 /**
  * The ticker list the Strikes tab's textarea opens with, saved by its "Update
  * default" button. The same JSON store every other small piece of state here
- * uses; the tab is local-only, so in practice this is `.gammadesk/lab-strikes-default.json`.
+ * uses — Vercel Blob on a deploy, `.gammadesk/lab-strikes-default.json` locally.
  * Stored as the text the box held, so line breaks and order survive.
  */
 
