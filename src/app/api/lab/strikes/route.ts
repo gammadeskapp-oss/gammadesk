@@ -15,8 +15,7 @@ import { runStrikes, strikesAvailability } from '@/lib/tasty/strikesRun';
  *
  * ## Gates
  *
- * 404 when `/lab` is off or this is the production deploy (see
- * `strikesAvailability`); 401 without a `/lab` session — the page's own
+ * 404 when `/lab` is off; 401 without a `/lab` session — the page's own
  * `fetch` carries the cookie, which is SameSite=Strict. 409 off the live feed.
  * Unlike `/api/lab/analogue` there is no cron token: this is called from the
  * browser, and the only thing it spends is the owner's own feed.
@@ -37,13 +36,13 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
-  const availability = strikesAvailability();
-  if (!labAvailable() || (!availability.ok && availability.hidden)) {
+  if (!labAvailable()) {
     return new NextResponse('Not found', { status: 404 });
   }
   if (!(await labSessionValid())) {
     return new NextResponse('Unauthorized', { status: 401 });
   }
+  const availability = strikesAvailability();
   if (!availability.ok) {
     return NextResponse.json({ error: availability.reason }, { status: 409 });
   }

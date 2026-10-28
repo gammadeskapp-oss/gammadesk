@@ -241,7 +241,6 @@ export function StrikesTab({
           Each Run fetches every chain and re-subscribes every contract — nothing is reused from an earlier run. A
           strike&rsquo;s open interest and volume are summed across every expiration in the window (and both sides
           under All); ties go to the lower strike. Volume is today&rsquo;s, so before the open it is mostly empty.
-          Personal use only: this tab never runs on the production deploy.
         </p>
       </section>
 

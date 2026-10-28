@@ -17,11 +17,10 @@ import {
  *
  * ## Where it may run
  *
- * Local or preview only, on the live feed only. A production deploy has no
- * Strikes tab and its route answers 404: the dxFeed data comes under a
- * personal-use licence, and a page on the public host — password or not — is
- * a URL that serves it. Off the live feed (`TASTY_SOURCE` unset or `mock`) the
- * tab says so and refuses to run; there is no mock version of this table.
+ * Anywhere `/lab` exists — production included, behind the same password as
+ * every other tab — on the live feed only. Off it (`TASTY_SOURCE` unset or
+ * `mock`) the tab says so and refuses to run; there is no mock version of this
+ * table.
  *
  * ## Fresh on every run
  *
@@ -52,19 +51,14 @@ const VOLUME_GRACE_MS = 1_500;
 /** Share of contracts that counts as "everything arrived". */
 const FILL = 0.98;
 
-export type StrikesAvailability = { ok: true } | { ok: false; reason: string; hidden: boolean };
+export type StrikesAvailability = { ok: true } | { ok: false; reason: string };
 
-/** Whether the Strikes tab exists here, and whether it can run. */
+/** Whether the Strikes tab can run here. */
 export function strikesAvailability(): StrikesAvailability {
-  const key = 'VERCEL_ENV';
-  if (process.env[key] === 'production') {
-    return { ok: false, hidden: true, reason: 'The Strikes tab is local-only and never runs on the production deploy.' };
-  }
   if (tastySourceMode() !== 'live') {
     return {
       ok: false,
-      hidden: false,
-      reason: 'The Strikes tab reads the live dxFeed only. Set TASTY_SOURCE=live (with the Tastytrade credentials) in .env.local and restart the dev server.',
+      reason: 'The Strikes tab reads the live dxFeed only. Set TASTY_SOURCE=live (with the Tastytrade credentials) in this environment — .env.local locally, the Vercel project settings on a deploy — and restart or redeploy.',
     };
   }
   return { ok: true };
