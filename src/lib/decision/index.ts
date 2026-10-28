@@ -383,7 +383,7 @@ export async function getDecision(
 
   if (options.force && isConfigured) {
     invalidate(key);
-    return cached(key, CACHE_SECONDS, buildAndCache);
+    return cached(key, CACHE_SECONDS, buildAndCache, { untilClose: true });
   }
 
   return cached(key, CACHE_SECONDS, async () => {
@@ -404,7 +404,7 @@ export async function getDecision(
       }
     }
     return buildAndCache();
-  });
+  }, { untilClose: true });
 }
 
 /**

@@ -1,5 +1,5 @@
 import { MIN_T } from '../blackScholes';
-import { yearsToExpiry } from '../time';
+import { isExpired, yearsToExpiry } from '../time';
 import type { NormalisedContract } from '../types';
 import type { FeedSnapshot, SymbolState } from './types';
 
@@ -59,8 +59,8 @@ export function feedContracts(snapshot: FeedSnapshot, now: Date = new Date()): N
     const iv = state?.greeks?.volatility;
     const oi = state?.summary?.openInterest;
     if (!finite(iv) || iv <= 0 || !finite(oi) || oi < 0) continue;
+    if (isExpired(ref.expiration, now)) continue;
     const T = yearsToExpiry(ref.expiration, now);
-    if (!(T > 0)) continue;
     const volume = state?.trade?.dayVolume;
     out.push({
       ticker: ref.streamerSymbol,

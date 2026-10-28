@@ -3,7 +3,7 @@ import {
   gamma as bsGamma,
   vanna as bsVanna,
 } from './blackScholes';
-import { daysToExpiry, formatExpiryLabel } from './time';
+import { daysToExpiry, dropExpired, formatExpiryLabel } from './time';
 import type {
   DataMeta,
   IvSource,
@@ -209,6 +209,8 @@ export interface BuildOptions extends GreekParams {
    * the "today's activity" view from the same snapshot.
    */
   weightBy?: WeightBasis;
+  /** The clock expired contracts are judged against; defaults to now. */
+  now?: Date;
   meta: Omit<DataMeta, 'contractsUsed' | 'ivSources'>;
 }
 
@@ -277,8 +279,13 @@ export function buildPositioning(
    * contracts (zero OI, traded today), and filtering here drops them straight
    * back out for the OI basis so they can never shift a displayed strike or the
    * flip search — while the volume basis keeps exactly them.
+   *
+   * Expired contracts go first, here, because every table, flip, wall and
+   * level on every page is built by this function: a snapshot fetched before a
+   * close (or a last-good copy from yesterday) still lists contracts that have
+   * since stopped trading, and none of them may reach a level.
    */
-  const contracts = allContracts.filter((c) => weightOf(c, basis) > 0);
+  const contracts = dropExpired(allContracts, options.now).filter((c) => weightOf(c, basis) > 0);
 
   // --- choose the expiration columns -------------------------------------
   const expirations = Array.from(new Set(contracts.map((c) => c.expiration)))

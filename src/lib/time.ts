@@ -100,6 +100,61 @@ export function yearsToExpiry(expiration: string, now: Date = new Date()): numbe
   return (expiryMs - now.getTime()) / (365 * 24 * 60 * 60 * 1000);
 }
 
+/*
+ * ## Expired contracts — the one rule
+ *
+ * A contract is live until 16:00 New York on its expiration date and expired
+ * from that instant on. So anything expiring before today's New York date is
+ * gone, a same-day (0DTE) contract stays through the session, and it drops at
+ * the close — after which the next expiration leads. Every options read in the
+ * app filters through `isExpired` / `dropExpired`; nothing compares expiration
+ * strings against a date of its own.
+ *
+ * Stored payloads (positioning, decision, forecast) were built from whatever
+ * was live when they were built. `closedSince` says whether a close has passed
+ * since then — i.e. whether one of their expirations may have expired under
+ * them — so a reader rebuilds instead of serving a level computed from a dead
+ * contract. Half-day sessions are treated as a 16:00 close, which keeps a
+ * 0DTE contract on screen until 16:00 rather than its 13:00 early close.
+ */
+
+/** Epoch ms of 16:00 New York on `expiration` — the instant it stops trading. */
+export function expiryCloseMs(expiration: string): number {
+  const [y, m, d] = expiration.split('-').map(Number);
+  if (!y || !m || !d) return Number.NEGATIVE_INFINITY;
+  return marketTimeToUtcMs(y, m, d, 16, 0);
+}
+
+/** True once `expiration`'s 16:00 ET close has passed. A malformed date counts as expired. */
+export function isExpired(expiration: string, now: Date = new Date()): boolean {
+  return now.getTime() >= expiryCloseMs(expiration);
+}
+
+/** `items` without any whose `expiration` has passed. */
+export function dropExpired<T extends { expiration: string }>(items: readonly T[], now: Date = new Date()): T[] {
+  return items.filter((item) => !isExpired(item.expiration, now));
+}
+
+/** Epoch ms of the first weekday 16:00 ET close strictly after `now`. */
+export function nextCloseMs(now: Date = new Date()): number {
+  let date = marketToday(now);
+  for (let i = 0; i < 8; i += 1) {
+    const [y, m, d] = date.split('-').map(Number);
+    const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    const close = marketTimeToUtcMs(y, m, d, 16, 0);
+    if (weekday !== 0 && weekday !== 6 && close > now.getTime()) return close;
+    date = addDays(date, 1);
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+/** True when a weekday 16:00 ET close fell after `builtAt` and at or before `now`. */
+export function closedSince(builtAt: Date | string, now: Date = new Date()): boolean {
+  const built = typeof builtAt === 'string' ? new Date(builtAt) : builtAt;
+  if (!Number.isFinite(built.getTime())) return true;
+  return nextCloseMs(built) <= now.getTime();
+}
+
 /** Whole days to expiry, for column labels like "3d". */
 export function daysToExpiry(expiration: string, now: Date = new Date()): number {
   return Math.max(0, Math.round(yearsToExpiry(expiration, now) * 365));

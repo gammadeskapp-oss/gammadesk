@@ -92,6 +92,9 @@ function options(weightBy) {
     expirationCount: 5,
     strikesEachSide: 30,
     weightBy,
+    // The fixture's own clock, so its September expiries are live when judged
+    // by the expired-contract rule rather than by whenever this runs.
+    now: new Date(META.asOfIso),
     meta: META,
   };
 }

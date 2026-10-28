@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { nextCloseMs } from './time';
+
 /**
  * Tiny TTL cache with single-flight semantics.
  *
@@ -30,10 +32,20 @@ function store(): Store {
   return g[globalKey];
 }
 
+export interface CacheOptions {
+  /**
+   * End the entry at the next 16:00 ET close if that comes before the TTL. For
+   * anything built from an option chain: a 0DTE contract expires at the close,
+   * so nothing computed before it may be served after it.
+   */
+  untilClose?: boolean;
+}
+
 export async function cached<T>(
   key: string,
   ttlSeconds: number,
   producer: () => Promise<T>,
+  options: CacheOptions = {},
 ): Promise<T> {
   const { entries, inFlight } = store();
 
@@ -46,7 +58,11 @@ export async function cached<T>(
   const promise = (async () => {
     try {
       const value = await producer();
-      entries.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+      const ttlEnd = Date.now() + ttlSeconds * 1000;
+      entries.set(key, {
+        value,
+        expiresAt: options.untilClose ? Math.min(ttlEnd, nextCloseMs()) : ttlEnd,
+      });
       return value;
     } finally {
       inFlight.delete(key);
