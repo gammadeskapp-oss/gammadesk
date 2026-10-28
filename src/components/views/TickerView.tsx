@@ -121,7 +121,7 @@ export async function TickerView({
               symbol={data.symbol}
               data={data.chart}
               // Live spot only from the real feed; a mock spot never lands on a real chart.
-              currentPrice={lab && live?.mode === 'live' && live.gex ? live.gex.spot : data.price}
+              currentPrice={lab && live?.mode === 'live' && live.spot !== null ? live.spot : data.price}
             />
 
             {/*

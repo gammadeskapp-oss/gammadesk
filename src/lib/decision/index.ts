@@ -198,6 +198,8 @@ function buildActivity(volume: PositioningData, refSpot: number): ActivityLevels
 /** A positioning reading and spot to build from instead of the production chain. */
 export interface DecisionPositioningOverride {
   positioning: PositioningData;
+  /** The same book weighted by volume, for "Today's activity"; null when unavailable. */
+  activity: PositioningData | null;
   spot: { price: number; asOfIso: string } | null;
 }
 
@@ -208,11 +210,11 @@ async function build(symbol: string, override?: DecisionPositioningOverride): Pr
    * The volume pass is allowed to fail on its own — the page is the
    * open-interest page, and losing the secondary view is not worth losing it.
    *
-   * With an override (only `/lab`, on the Tastytrade feed) the open-interest
-   * book comes from the override and there is no volume-weighted pass.
+   * With an override (only `/lab`, on the Tastytrade feed) both books come
+   * from the override, built by the same `buildPositioning` off the feed.
    */
   const [positioning, volumePositioning] = override
-    ? [override.positioning, null]
+    ? [override.positioning, override.activity]
     : await Promise.all([
         getPositioningForSymbol(symbol, EXPIRATIONS),
         getPositioningForSymbol(symbol, EXPIRATIONS, 'volume').catch(

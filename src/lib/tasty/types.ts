@@ -80,35 +80,3 @@ export interface FeedSnapshot {
   options: OptionRef[];
   states: Map<string, SymbolState>;
 }
-
-/** One strike of the finished gamma profile. */
-export interface GexStrike {
-  strike: number;
-  callGex: number;
-  putGex: number;
-  /** callGex − putGex. */
-  netGex: number;
-  callOi: number;
-  putOi: number;
-}
-
-/** The finished numbers — all that ever leaves the server. */
-export interface GexResult {
-  spot: number;
-  strikes: GexStrike[];
-  callGex: number;
-  putGex: number;
-  netGex: number;
-  /** Interpolated level where the cumulative net-GEX profile changes sign. */
-  zeroGamma: number | null;
-  /** Strike with the largest absolute net GEX. */
-  maxGexStrike: number | null;
-  maxGex: number | null;
-  totalCallOi: number;
-  totalPutOi: number;
-  /** Contracts that had both a gamma and an open interest to use. */
-  contractsUsed: number;
-  contractsRequested: number;
-  /** ATM implied vol from the Greeks events nearest a month out, or null. */
-  atmIv: number | null;
-}

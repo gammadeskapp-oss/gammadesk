@@ -42,7 +42,12 @@ export function LabSourceStrip({
   /** Which panels on this tab read the feed, e.g. `regime hero and gamma map`. */
   gammaPanels: string;
 }) {
-  const g = reading.gex;
+  const s = reading.summary;
+  // Heaviest |net GEX| strike in the displayed book, as the public level map ranks it.
+  const max = reading.positioning?.rows.reduce<{ strike: number; gex: number } | null>(
+    (best, r) => (!best || Math.abs(r.total.gex) > Math.abs(best.gex) ? { strike: r.strike, gex: r.total.gex } : best),
+    null,
+  );
   return (
     <section
       className={`panel border-l-2 px-3.5 py-2 text-2xs leading-relaxed ${
@@ -55,9 +60,9 @@ export function LabSourceStrip({
         <span className="text-term-dim">
           {reading.symbol} {gammaPanels}:{' '}
           {reading.mode === 'mock' ? 'mock Tastytrade feed' : 'Tastytrade dxLink'}
-          {g && ` · spot ${formatPrice(g.spot)}`}
-          {g && ` · zero gamma ${g.zeroGamma === null ? 'none in range' : formatPrice(g.zeroGamma)}`}
-          {g && g.maxGexStrike !== null && ` · max-GEX strike ${g.maxGexStrike}`}
+          {reading.spot !== null && ` · spot ${formatPrice(reading.spot)}`}
+          {s && ` · zero gamma ${s.flipLevel === null ? 'none in range' : formatPrice(s.flipLevel)}`}
+          {max && ` · max-GEX strike ${max.strike}`}
           {' · '}
         </span>
         <LiveAsOf asOfMs={reading.asOfMs} label={reading.asOfLabel} />
@@ -67,10 +72,12 @@ export function LabSourceStrip({
       </div>
       {reading.error && <p className="mt-1 text-bear">Feed: {reading.error}</p>}
       <p className="mt-1 text-term-faint">
-        Simplified GEX proxy: gamma × OI × 100 × spot per contract, gamma from the
-        feed&rsquo;s Greeks events and OI from its Summary events; net = call −
-        put, no dealer-sign model beyond that, and the unit (per $1 move) is not
-        the public per-1% figure. Every other panel reads the same production
+        Same GEX model as the public pages — dealer long calls / short puts,
+        dollars of delta per 1% move, the same flip search and strike scope —
+        run on the feed&rsquo;s IV (Greeks events), open interest (Summary
+        events) and spot (quote mid). A strike here differs from the same strike
+        on /decision only because the inputs are live rather than delayed;
+        vanna and charm come from the same model. Every other panel reads the same production
         source as the public page (live-feed: n/a). Educational only — never a
         recommendation to buy or sell.
       </p>
