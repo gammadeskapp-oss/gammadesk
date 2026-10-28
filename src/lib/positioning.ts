@@ -330,7 +330,7 @@ export async function getPositioning(
     invalidate(viewCacheKey(config.expirationCount));
     // A forced refresh always recomputes fresh and rewrites the Blob — this is
     // the refresher cron's path (see /api/x/snapshot).
-    return cached(viewCacheKey(config.expirationCount), config.cacheSeconds, compute);
+    return cached(viewCacheKey(config.expirationCount), config.cacheSeconds, compute, { untilClose: true });
   }
 
   return cached(viewCacheKey(config.expirationCount), config.cacheSeconds, async () => {
@@ -355,7 +355,7 @@ export async function getPositioning(
       }
     }
     return compute();
-  });
+  }, { untilClose: true });
 }
 
 /**
@@ -366,6 +366,7 @@ export async function getForecastPositioning(): Promise<PositioningData> {
   const count = config.forecastExpirations;
   return cached(viewCacheKey(count), config.cacheSeconds, async () =>
     toPositioning(await cachedSnapshot(), count),
+    { untilClose: true },
   );
 }
 
@@ -468,6 +469,7 @@ export async function getPositioningForSymbol(
         live?.price ?? null,
       );
     },
+    { untilClose: true },
   );
 }
 

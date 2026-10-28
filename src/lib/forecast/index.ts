@@ -195,7 +195,7 @@ export function getForecast(
 
   if (options.force && isConfigured) {
     invalidate(key);
-    return cached(key, config.forecastCacheSeconds, buildAndCache);
+    return cached(key, config.forecastCacheSeconds, buildAndCache, { untilClose: true });
   }
 
   return cached(key, config.forecastCacheSeconds, async () => {
@@ -217,7 +217,7 @@ export function getForecast(
       }
     }
     return buildAndCache();
-  });
+  }, { untilClose: true });
 }
 
 /**

@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createJsonStore } from '../jsonStore';
 import type { ForecastResult } from './types';
+import { closedSince } from '../time';
 
 /**
  * Cross-instance cache of the configured symbol's forecast — the other heavy
@@ -40,5 +41,9 @@ export async function writeCachedForecast(data: ForecastResult): Promise<void> {
 
 /** The raw cached forecast with the time it was built, or null when never written. */
 export async function readCachedForecast(): Promise<{ data: ForecastResult; builtAtIso: string } | null> {
-  return store.read().catch(() => null);
+  const payload = await store.read().catch(() => null);
+  // Built before a close that has since passed: a contract it was built from
+  // may have expired, so it is a miss and the caller rebuilds.
+  if (payload && closedSince(payload.builtAtIso)) return null;
+  return payload;
 }

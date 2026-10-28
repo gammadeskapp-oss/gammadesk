@@ -2,7 +2,7 @@ import 'server-only';
 
 import { parseOccSymbol } from '../cboe';
 import { runScan, scanSymbols } from '../scanUniverse';
-import { formatExpiryLabel, formatAsOf, marketToday } from '../time';
+import { formatExpiryLabel, formatAsOf, isExpired, marketToday } from '../time';
 import { FLOW_SCHEMA } from './types';
 import {
   LARGE_PREMIUM_USD,
@@ -136,7 +136,6 @@ async function scanSymbol(
   // the first ten characters. No conversion, nothing to get wrong.
   const session = data?.last_trade_time?.slice(0, 10) ?? null;
 
-  const today = marketToday();
   const candidates: FlowRow[] = [];
 
   let totalVolume = 0;
@@ -157,8 +156,9 @@ async function scanSymbol(
     if (parsed.type === 'call') callVolume += volume;
     else putVolume += volume;
 
-    // Expired contracts still appear in the feed; they cannot be today's flow.
-    if (parsed.expiration < today) continue;
+    // Expired contracts still appear in the feed — including today's 0DTE once
+    // the close has passed, which is when this scan runs.
+    if (isExpired(parsed.expiration)) continue;
     if (volume < MIN_VOLUME || openInterest < MIN_OI) continue;
 
     const ratio = volume / openInterest;

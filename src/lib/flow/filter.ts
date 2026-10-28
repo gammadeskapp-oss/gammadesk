@@ -1,4 +1,4 @@
-import { marketToday } from '../time';
+import { isExpired, marketToday } from '../time';
 import type { FlowRow, FlowSnapshot, FlowSymbolSummary } from './types';
 
 /**
@@ -63,15 +63,16 @@ export function filterFlow(
   const usingDefault = from === null && to === null;
 
   const keep = (row: FlowRow): boolean => {
-    // An explicit range wins outright, including one that reaches backwards —
-    // asking to see last week's expiries is a legitimate thing to ask for.
+    // Expired contracts are never shown, whatever the range: the snapshot is
+    // already filtered on read (see `getFlowSnapshot`) and this repeats the
+    // shared rule so a caller holding an unfiltered snapshot cannot leak one.
+    if (isExpired(row.expiration)) return false;
     if (!usingDefault) {
       if (from !== null && row.expiration < from) return false;
       if (to !== null && row.expiration > to) return false;
       return true;
     }
-    // Contracts expiring today are still trading, so the test is strict.
-    return row.expiration >= today;
+    return true;
   };
 
   const rows = snapshot.rows.filter(keep);
@@ -93,9 +94,7 @@ export function filterFlow(
       flagged: flaggedBySymbol.get(s.symbol) ?? 0,
     })),
     hidden: hiddenRows,
-    expiredHidden: snapshot.rows.filter(
-      (r) => !keep(r) && r.expiration < today,
-    ).length,
+    expiredHidden: snapshot.rows.filter((r) => isExpired(r.expiration)).length,
     from,
     to,
     usingDefault,

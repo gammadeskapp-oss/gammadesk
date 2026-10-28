@@ -1,6 +1,6 @@
 import { impliedVol, MIN_T } from './blackScholes';
 import { publicChainMessage } from './errorText';
-import { yearsToExpiry } from './time';
+import { isExpired, yearsToExpiry } from './time';
 import { modelIv } from './volSurface';
 import type { IvSource, NormalisedContract, OptionType } from './types';
 
@@ -133,8 +133,8 @@ export function resolveIvSurface(
 
   for (const group of groups.values()) {
     const { strike, expiration } = group[0];
+    if (isExpired(expiration, now)) continue;
     const T = yearsToExpiry(expiration, now);
-    if (T <= 0) continue; // already expired
 
     const otmType: OptionType = strike > spot ? 'call' : 'put';
     const otm = group.find((c) => c.type === otmType);
@@ -208,7 +208,7 @@ export function trimToWindow(
   const now = options.now ?? new Date();
 
   const expirations = [...new Set(quotes.map((c) => c.expiration))]
-    .filter((e) => yearsToExpiry(e, now) > 0)
+    .filter((e) => !isExpired(e, now))
     .sort()
     .slice(0, options.expirationCount);
   const wanted = new Set(expirations);

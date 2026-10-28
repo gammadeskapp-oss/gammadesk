@@ -3,6 +3,7 @@ import 'server-only';
 import { cached } from '../cache';
 import { currentMarketStatus } from '../events';
 import { createJsonStore } from '../jsonStore';
+import { dropExpired } from '../time';
 import { computeFlowSnapshot } from './compute';
 import { FLOW_SCHEMA, type FlowSnapshot } from './types';
 
@@ -31,6 +32,18 @@ const store = createJsonStore<FlowSnapshot | null>(
 );
 
 const MAX_AGE_MS = 20 * 60 * 60 * 1000;
+
+/**
+ * The snapshot with every expired contract removed, applied on every read.
+ *
+ * The scan runs after the close and is served for most of the next day, so a
+ * row that was live when it was written can be dead when it is read. Filtering
+ * here rather than in each page is what keeps Home, /dashboard, /flow and /lab
+ * from ever disagreeing about it.
+ */
+function withoutExpired(snapshot: FlowSnapshot): FlowSnapshot {
+  return { ...snapshot, rows: dropExpired(snapshot.rows) };
+}
 const MEMO_SECONDS = 900;
 
 function ageMs(snapshot: FlowSnapshot): number {
@@ -42,8 +55,9 @@ function ageMs(snapshot: FlowSnapshot): number {
  * The stored snapshot exactly as written, with no age filter and no rescan.
  * Used by the health check to answer "did the job actually run?".
  */
-export function peekStoredFlow(): Promise<FlowSnapshot | null> {
-  return store.read().catch(() => null);
+export async function peekStoredFlow(): Promise<FlowSnapshot | null> {
+  const stored = await store.read().catch(() => null);
+  return stored && withoutExpired(stored);
 }
 
 export async function refreshFlowSnapshot(): Promise<FlowSnapshot> {
@@ -56,8 +70,8 @@ export async function refreshFlowSnapshot(): Promise<FlowSnapshot> {
   return snapshot;
 }
 
-export function getFlowSnapshot(): Promise<FlowSnapshot | null> {
-  return cached('flow:snapshot', MEMO_SECONDS, async () => {
+export async function getFlowSnapshot(): Promise<FlowSnapshot | null> {
+  const snapshot = await cached('flow:snapshot', MEMO_SECONDS, async () => {
     const stored = await store.read().catch(() => null);
     // While the market is closed the last snapshot is the whole answer — flow is
     // computed once a day and nothing new prints overnight or at the weekend — so
@@ -75,4 +89,5 @@ export function getFlowSnapshot(): Promise<FlowSnapshot | null> {
       return stored;
     }
   });
+  return snapshot && withoutExpired(snapshot);
 }

@@ -3,7 +3,7 @@ import 'server-only';
 import { cached } from '@/lib/cache';
 import { parseOccSymbol } from '@/lib/cboe';
 import { config } from '@/lib/config';
-import { formatAsOf, marketToday } from '@/lib/time';
+import { formatAsOf, isExpired } from '@/lib/time';
 import { fetchBars, normaliseSymbol } from './bars';
 import type {
   Bar,
@@ -126,17 +126,11 @@ function nearMoneyContracts(
     return p ? [{ c, strike: p.strike, expiration: p.expiration }] : [];
   });
 
-  /*
-   * The New York date, not the UTC one. Options expire on a New York calendar
-   * and `toISOString()` rolls over at 19:00 or 20:00 ET depending on the time
-   * of year — so for the last four or five hours of every evening a contract
-   * expiring today was filtered out as already past, and the near-money set
-   * quietly rebuilt itself around the following expiry.
-   */
-  const today = marketToday();
+  // Live by the shared rule (16:00 New York on the expiry date), not a UTC
+  // date, which rolls over at 19:00 or 20:00 ET and dropped same-day expiries early.
   const expiries = new Set(
     [...new Set(parsed.map((p) => p.expiration))]
-      .filter((e) => e >= today && isMonthlyExpiry(e))
+      .filter((e) => !isExpired(e) && isMonthlyExpiry(e))
       .sort()
       .slice(0, tuning.nearMoneyExpiries),
   );
