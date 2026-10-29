@@ -96,6 +96,14 @@ const ENTRIES = {
     detail: 'Shown net: call open interest minus put open interest at that strike.',
   },
 
+  signal: {
+    label: 'Signal',
+    plain:
+      'Checks whether GEX, VEX and CEX point the same way at that strike. Confirmed = all three agree, Aligned = two do, Conflict = one each way, Mixed = mostly too small to say. The tag shows how much open interest backs it: strong, or thin. A description of the book, not a buy or sell signal.',
+    detail:
+      "Each metric's all-expiration total votes by its sign; one under 2% of that metric's largest strike in the table abstains. Open interest never votes. strong = gross open interest (calls + puts) in the top quarter of the strikes shown, thin = bottom quarter.",
+  },
+
   // --- forecast -------------------------------------------------------------
 
   odds: {
@@ -656,6 +664,7 @@ export const TOOLTIP_ORDER: TooltipKey[] = [
   'vex',
   'cex',
   'oi',
+  'signal',
   'odds',
   'crash',
   'realisedVol',
