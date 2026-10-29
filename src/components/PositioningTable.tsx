@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
+import { InfoTip } from './InfoTip';
 import { formatContracts, formatPrice, formatStrike } from '@/lib/format';
 import { METRICS } from '@/lib/metrics';
+import { signalDetail, signalText, strikeSignals, type SignalLabel } from '@/lib/strikeSignal';
 import type { MetricKey, PositioningData } from '@/lib/types';
 
 /*
@@ -35,6 +37,14 @@ function heat(value: number, max: number): CSSProperties {
   };
 }
 
+/** Signal colours: agreement in green, partial in amber, nothing in grey, opposition in red. */
+const SIGNAL_CLASS: Record<SignalLabel, string> = {
+  Confirmed: 'text-bull',
+  Aligned: 'text-flip',
+  Mixed: 'text-term-faint',
+  Conflict: 'text-bear',
+};
+
 interface PositioningTableProps {
   data: PositioningData;
   metric: MetricKey;
@@ -57,6 +67,9 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
     }
     return { cellMax: cell, totalMax: total };
   }, [rows, def]);
+
+  /** Same on every metric tab: it reads GEX, VEX, CEX and OI together. */
+  const signals = useMemo(() => strikeSignals(rows), [rows]);
 
   /** Strike closest to spot, and closest to the gamma flip level. */
   const { spotStrike, flipStrike } = useMemo(() => {
@@ -137,6 +150,15 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
                 <div>Total</div>
                 <div className="font-normal normal-case tracking-normal text-term-faint">
                   all exp
+                </div>
+              </th>
+              <th scope="col" className={`${headCell} border-l border-term-edge text-left`}>
+                <span className="inline-flex items-center gap-1">
+                  Signal
+                  <InfoTip for="signal" />
+                </span>
+                <div className="font-normal normal-case tracking-normal text-term-faint">
+                  GEX·VEX·CEX
                 </div>
               </th>
             </tr>
@@ -221,6 +243,23 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
                   >
                     {def.format(def.read(row.total))}
                   </td>
+
+                  {(() => {
+                    const signal = signals.get(row.strike);
+                    if (!signal) return <td className={`border-l border-term-edge px-2 ${edge}`} />;
+                    return (
+                      <td
+                        className={`whitespace-nowrap border-l border-term-edge px-2 py-[0.3rem] text-left ${edge}`}
+                        title={`${formatStrike(row.strike)} · ${signalText(signal)}
+${signalDetail(signal, formatContracts)}`}
+                      >
+                        <span className={`font-bold ${SIGNAL_CLASS[signal.label]}`}>{signal.label}</span>
+                        {signal.oiTag && (
+                          <span className="text-2xs text-term-faint"> · {signal.oiTag}</span>
+                        )}
+                      </td>
+                    );
+                  })()}
                 </tr>
               );
             })}
@@ -254,6 +293,7 @@ export function PositioningTable({ data, metric }: PositioningTableProps) {
               >
                 {def.format(def.read(grandTotal))}
               </td>
+              <td className="sticky bottom-0 z-20 border-l border-t border-term-edge bg-term-raised px-2 py-2" />
             </tr>
           </tfoot>
         </table>

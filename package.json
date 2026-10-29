@@ -46,6 +46,7 @@
     "verify:tasty-gex": "node scripts/verify-tasty-gex.mjs",
     "verify:expiry": "node scripts/verify-expiry.mjs",
     "verify:strikes": "node --conditions=react-server --no-warnings scripts/verify-strikes.mjs",
+    "verify:signal": "node scripts/verify-signal.mjs",
     "verify:episodic": "node scripts/verify-episodic.mjs",
     "verify:context-band": "node scripts/verify-context-band.mjs",
     "verify:spy-rsp": "node scripts/verify-spy-rsp.mjs",
@@ -61,7 +62,7 @@
     "verify:news": "node scripts/verify-news.mjs",
     "verify:flow": "node scripts/verify-flow.mjs",
     "verify:daily20": "node scripts/verify-daily20.mjs",
-    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:macro-bias && npm run verify:macro-bias-rich && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:activity && npm run verify:regime && npm run verify:retests && npm run verify:staleness && npm run verify:shared-spot && npm run verify:market-phase && npm run verify:context && npm run verify:context-band && npm run verify:spy-rsp && npm run verify:macro-alignment && npm run verify:tos-scanner && npm run verify:tos-lock && npm run verify:x-poster && npm run verify:daily && npm run verify:coverage && npm run verify:email && npm run verify:tradingview && npm run verify:health && npm run verify:news && npm run verify:flow && npm run verify:daily20 && npm run verify:events && npm run verify:research && npm run verify:scanner && npm run verify:scanner-record && npm run verify:movers && npm run verify:errors && npm run verify:history && npm run verify:track-record && npm run verify:positioning-record && npm run verify:what-changed && npm run verify:session-history && npm run verify:analogues && npm run verify:macro && npm run verify:episodic && npm run verify:tasty-gex && npm run verify:expiry && npm run verify:strikes"
+    "verify": "npm run verify:greeks && npm run verify:indicators && npm run verify:simulation && npm run verify:rs && npm run verify:netliq && npm run verify:macro-bias && npm run verify:macro-bias-rich && npm run verify:nw && npm run verify:profile && npm run verify:levelmap && npm run verify:activity && npm run verify:regime && npm run verify:retests && npm run verify:staleness && npm run verify:shared-spot && npm run verify:market-phase && npm run verify:context && npm run verify:context-band && npm run verify:spy-rsp && npm run verify:macro-alignment && npm run verify:tos-scanner && npm run verify:tos-lock && npm run verify:x-poster && npm run verify:daily && npm run verify:coverage && npm run verify:email && npm run verify:tradingview && npm run verify:health && npm run verify:news && npm run verify:flow && npm run verify:daily20 && npm run verify:events && npm run verify:research && npm run verify:scanner && npm run verify:scanner-record && npm run verify:movers && npm run verify:errors && npm run verify:history && npm run verify:track-record && npm run verify:positioning-record && npm run verify:what-changed && npm run verify:session-history && npm run verify:analogues && npm run verify:macro && npm run verify:episodic && npm run verify:tasty-gex && npm run verify:expiry && npm run verify:strikes && npm run verify:signal"
   },
   "dependencies": {
     "@vercel/blob": "^2.7.0",
