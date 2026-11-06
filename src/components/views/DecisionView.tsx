@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { ChartForecastSwitch } from '@/components/ChartForecastSwitch';
-import type { ChartLevel } from '@/components/InteractiveChart';
+import type { ChartLevel, ChartLiveFeed } from '@/components/InteractiveChart';
 import { ContextBand } from '@/components/ContextBand';
 import { DecisionSearch } from '@/components/DecisionSearch';
 import { ExposureTables } from '@/components/ExposureTables';
@@ -617,6 +617,19 @@ export async function DecisionView({
    * phrased as a place to buy or sell.
    */
   const hvl = data?.levelMap.rungs.find((r) => r.labels.includes('heaviest')) ?? null;
+  // On /lab the chart's overlays come from the feed and its footer must say so.
+  const chartLiveFeed: ChartLiveFeed | null = live
+    ? {
+        sourceLabel: live.mode === 'mock' ? 'mock Tastytrade feed' : live.sourceLabel,
+        mock: live.mode === 'mock',
+        asOfMs: live.asOfMs,
+        asOfLabel: live.asOfLabel,
+        spot: live.positioning ? live.spot : null,
+        error: live.positioning ? null : (live.error ?? 'no positioning from the feed'),
+        delayMs: live.delayed ? live.delayMs : null,
+      }
+    : null;
+
   const chartLevels: ChartLevel[] = data
     ? [
         data.context.flipLevel !== null && {
@@ -665,6 +678,7 @@ export async function DecisionView({
         spot: data.context.spot,
         quoteDateLabel: data.context.quoteDateLabel,
         stale: Boolean(staleness?.stale),
+        feedLabel: chartLiveFeed?.sourceLabel ?? null,
         regime: data.context.regime,
         observedRegime: retests?.regime ? regimeOfMood(retests.regime) : null,
         flipLevel: data.context.flipLevel,
@@ -829,6 +843,7 @@ export async function DecisionView({
               forecast={forecastPanel}
               levels={chartLevels}
               spot={data?.context.spot ?? null}
+              liveFeed={chartLiveFeed}
             />
 
             {/*

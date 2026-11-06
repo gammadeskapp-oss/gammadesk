@@ -369,7 +369,8 @@ export function ContextBand({ band }: { band: ContextBandData }) {
           </span>
           <span className="normal-case tracking-normal">
             {band.symbol} spot
-            {!band.stale && ' · delayed 15 min'} · as of {band.quoteDateLabel}
+            {band.feedLabel ? ` · ${band.feedLabel}` : !band.stale && ' · delayed 15 min'} · as of{' '}
+            {band.quoteDateLabel}
           </span>
         </span>
 

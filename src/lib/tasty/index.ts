@@ -5,6 +5,7 @@ import { buildPositioning } from '../exposure';
 import type { PositioningData, Summary } from '../types';
 import { getSpotQuote } from '../spot';
 import { formatAsOf } from '../time';
+import { feedDelay, formatDelay } from './candleBook';
 import { feedContracts, spotFrom } from './gex';
 import { mockSnapshot } from './mock';
 import { tastySourceMode } from './mode';
@@ -31,8 +32,20 @@ export { tastySourceMode };
 export interface LiveGammaReading {
   mode: TastySourceMode;
   symbol: string;
-  /** Epoch ms of the newest underlying event the reading is built on. */
+  /**
+   * Epoch ms of the market time the reading reflects: the underlying's last
+   * trade time when the feed sends one (on a delayed feed that is ~15 min ago),
+   * else when the newest event arrived.
+   */
   asOfMs: number | null;
+  /** Tastytrade's data level for the stream, e.g. `demo`; `mock` on the mock. */
+  feedLevel: string | null;
+  /** How far the feed's trades trail the clock, or null when unknown. */
+  delayMs: number | null;
+  /** True when the feed is not live: a demo level or trades > 2 min old. */
+  delayed: boolean;
+  /** `Tastytrade dxLink`, `Tastytrade dxLink · DELAYED 15 min`, or the mock label. */
+  sourceLabel: string;
   /** `Oct 22, 2026, 14:05 ET` for server-rendered stamps. */
   asOfLabel: string | null;
   /** Underlying quote mid off the feed. */
@@ -76,6 +89,10 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
         mode,
         symbol: upper,
         asOfMs: null,
+        feedLevel: null,
+        delayMs: null,
+        delayed: false,
+        sourceLabel: 'Tastytrade dxLink',
         asOfLabel: null,
         spot: null,
         summary: null,
@@ -93,13 +110,34 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
 
   const underlying = snapshot.states.get(upper);
   const spot = spotFrom(underlying);
-  const asOfMs = underlying?.receivedAt ?? null;
-  const positioning = spot !== null && asOfMs ? toPositioning(snapshot, spot, mode, asOfMs, 'openInterest') : null;
-  const activity = positioning && spot !== null && asOfMs ? toPositioning(snapshot, spot, mode, asOfMs, 'volume') : null;
+  const now = Date.now();
+  const tradeMs = underlying?.trade?.time;
+  let feedLevel: string | null = 'mock';
+  if (mode === 'live') {
+    const { getStreamerLevel } = await import('./tokens');
+    feedLevel = getStreamerLevel();
+  }
+  const { delayMs, delayed } = mode === 'live' ? feedDelay(feedLevel, tradeMs, now) : { delayMs: null, delayed: false };
+  // The market time the numbers reflect — on a delayed feed, the trade time, so
+  // the stamp reads 11:53 at 12:08 instead of passing old prices off as now.
+  const asOfMs =
+    typeof tradeMs === 'number' && Number.isFinite(tradeMs) && tradeMs > 0 ? tradeMs : (underlying?.receivedAt ?? null);
+  const sourceLabel =
+    mode === 'mock'
+      ? 'Tastytrade (MOCK — not live)'
+      : delayed
+        ? `Tastytrade dxLink · DELAYED ${delayMs !== null ? formatDelay(delayMs) : ''}`.trim()
+        : 'Tastytrade dxLink';
+  const positioning = spot !== null && asOfMs ? toPositioning(snapshot, spot, sourceLabel, asOfMs, 'openInterest') : null;
+  const activity = positioning && spot !== null && asOfMs ? toPositioning(snapshot, spot, sourceLabel, asOfMs, 'volume') : null;
   return {
     mode,
     symbol: upper,
     asOfMs,
+    feedLevel,
+    delayMs,
+    delayed,
+    sourceLabel,
     asOfLabel: asOfMs ? formatAsOf(new Date(asOfMs)) : null,
     spot,
     summary: positioning?.summary ?? null,
@@ -120,7 +158,7 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
 function toPositioning(
   snapshot: FeedSnapshot,
   spot: number,
-  mode: TastySourceMode,
+  sourceLabel: string,
   asOfMs: number,
   weightBy: 'openInterest' | 'volume',
 ): PositioningData | null {
@@ -130,7 +168,6 @@ function toPositioning(
   if (weightBy === 'volume' && !contracts.some((c) => c.volume > 0)) return null;
 
   const label = formatAsOf(now);
-  const sourceLabel = mode === 'mock' ? 'Tastytrade (MOCK — not live)' : 'Tastytrade dxLink';
   return buildPositioning(contracts, {
     symbol: snapshot.underlying,
     spot,

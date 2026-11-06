@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { isTimeframe, TIMEFRAMES, type Timeframe } from '@/lib/bars/types';
 import { ema, rsi } from '@/lib/ticker/indicators';
 import { InfoTip } from './InfoTip';
+import { LiveAsOf } from './lab/LiveAsOf';
 import {
   VolumeProfilePrimitive,
   type VolumeProfileColours,
@@ -343,7 +344,20 @@ interface SeriesResponse {
   bars: Bar[];
   intraday: boolean;
   asOfLabel: string;
+  /** `tastytrade` on /lab's live candles; absent on the public delayed bars. */
+  source?: 'tastytrade';
+  /** Live candles only: epoch ms the feed last sent a candle for the series. */
+  lastEventMs?: number | null;
 }
+
+/** How often /lab's live candles are re-read. Matches the page's feed refresh. */
+const LIVE_CANDLE_POLL_MS = 15_000;
+
+/**
+ * Where the candles on screen came from. `fallback` is the one that must never
+ * pass for normal: live candles were asked for and the delayed bars are shown.
+ */
+type CandleSource = { kind: 'delayed' } | { kind: 'live' } | { kind: 'fallback'; reason: string };
 
 /**
  * A gamma level to draw as a flat horizontal line across the chart.
@@ -363,11 +377,35 @@ export interface ChartLevel {
   plain: string;
 }
 
+/**
+ * The /lab live feed the chart's overlays come from, when there is one.
+ *
+ * The candles never come from it — they are `/api/bars` (15-minute delayed)
+ * on every page — but on /lab the levels drawn over them and the live price
+ * line do, so the footer must say which is which rather than calling the
+ * whole chart "15-min delayed · levels from today's snapshot".
+ */
+export interface ChartLiveFeed {
+  /** e.g. `Tastytrade dxLink`, or the mock label. */
+  sourceLabel: string;
+  mock: boolean;
+  /** Epoch ms of the newest feed event; null when the feed gave nothing. */
+  asOfMs: number | null;
+  asOfLabel: string | null;
+  /** Live spot off the feed, drawn as its own price line. */
+  spot: number | null;
+  /** Set when the feed is down — the overlays then are absent, not delayed. */
+  error: string | null;
+  /** The feed streams but trails the market (Tastytrade `demo` level); its measured delay. */
+  delayMs: number | null;
+}
+
 export function InteractiveChart({
   symbol,
   initialTimeframe = '15m',
   levels = [],
   spot = null,
+  liveFeed = null,
   profileBuckets = DEFAULT_BUCKET_COUNT,
   profileLookback = null,
 }: {
@@ -377,6 +415,8 @@ export function InteractiveChart({
   levels?: ChartLevel[];
   /** Spot the levels are measured against, so far-off ones can be hidden. */
   spot?: number | null;
+  /** /lab only: the live feed the overlays (not the candles) come from. */
+  liveFeed?: ChartLiveFeed | null;
   /** Price levels the volume profile is divided into. */
   profileBuckets?: number;
   /** Bars to profile, counting back from the newest in view. Null = the view. */
@@ -408,6 +448,7 @@ export function InteractiveChart({
 
   const [data, setData] = useState<SeriesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [candleSource, setCandleSource] = useState<CandleSource>({ kind: 'delayed' });
   /** EMAs the fetched history was too short to warm up, by label. */
   const [unavailableEmas, setUnavailableEmas] = useState<string[]>([]);
 
@@ -455,25 +496,61 @@ export function InteractiveChart({
       Math.abs((l.price - spot) / spot) * 100 <= LEVEL_RANGE_PCT,
   );
 
+  /*
+   * Live candles are asked for on /lab when the feed is the real one. The mock
+   * has none, so it keeps the delayed bars (and its own MOCK labelling).
+   */
+  const wantLiveCandles = Boolean(liveFeed && !liveFeed.mock);
+
   // --- fetch ---
   useEffect(() => {
     const controller = new AbortController();
+    const q = `symbol=${encodeURIComponent(symbol)}&tf=${timeframe}`;
 
-    fetch(`/api/bars?symbol=${encodeURIComponent(symbol)}&tf=${timeframe}`, {
-      signal: controller.signal,
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((body: SeriesResponse) => {
+    const getJson = (url: string): Promise<SeriesResponse> =>
+      fetch(url, { signal: controller.signal, cache: 'no-store' }).then(async (r) => {
+        if (r.ok) return r.json();
+        const body = (await r.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `HTTP ${r.status}`);
+      });
+
+    const delayed = (source: CandleSource) =>
+      getJson(`/api/bars?${q}`).then((body) => {
         setData(body);
         setError(null);
-      })
-      .catch((e: unknown) => {
+        setCandleSource(source);
+      });
+
+    const load = (): Promise<void> =>
+      wantLiveCandles
+        ? getJson(`/api/lab/bars?${q}`)
+            .then((body) => {
+              setData(body);
+              setError(null);
+              setCandleSource({ kind: 'live' });
+            })
+            .catch((e: unknown) => {
+              if (e instanceof DOMException && e.name === 'AbortError') throw e;
+              // Never silent: the footer turns red and names the reason.
+              return delayed({ kind: 'fallback', reason: e instanceof Error ? e.message : String(e) });
+            })
+        : delayed({ kind: 'delayed' });
+
+    const run = () =>
+      load().catch((e: unknown) => {
         if (e instanceof DOMException && e.name === 'AbortError') return;
         setError('Could not load bars for this timeframe.');
       });
 
-    return () => controller.abort();
-  }, [symbol, timeframe]);
+    void run();
+    // Live candles keep moving; re-read them on the feed's cadence.
+    const id = wantLiveCandles ? setInterval(run, LIVE_CANDLE_POLL_MS) : null;
+
+    return () => {
+      controller.abort();
+      if (id) clearInterval(id);
+    };
+  }, [symbol, timeframe, wantLiveCandles]);
 
   // --- build ---
   useEffect(() => {
@@ -705,6 +782,21 @@ export function InteractiveChart({
           }
         }
 
+        // --- the live feed's price, on /lab ---
+        // The candles are delayed; this line is the feed's own quote, so the
+        // gap between the last candle and "now" is visible rather than hidden.
+        const liveSpot = liveFeed?.spot ?? null;
+        if (liveSpot !== null && liveSpot > 0) {
+          candles.createPriceLine({
+            price: liveSpot,
+            color: liveFeed?.mock || liveFeed?.delayMs ? COLOR.ema13 : COLOR.up,
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: liveFeed?.mock ? 'Mock spot' : liveFeed?.delayMs ? 'Feed (delayed)' : 'Live',
+          });
+        }
+
         // --- the visible window ---
         // A symbol change opens on the last few sessions of the new ticker; a
         // timeframe change keeps whatever window was on screen. See the ref.
@@ -756,7 +848,7 @@ export function InteractiveChart({
     // pane, or a set of price lines — so they rebuild. The EMA/VWAP toggles do
     // not: they only flip a line's visibility, handled by the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, overlays.rsi, levelsOn, levelsKey, spot]);
+  }, [data, overlays.rsi, levelsOn, levelsKey, spot, liveFeed?.spot, liveFeed?.mock, liveFeed?.delayMs]);
 
   // --- toggle the moving averages without rebuilding ---
   useEffect(() => {
@@ -977,12 +1069,51 @@ export function InteractiveChart({
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-term-line px-3 py-2 text-2xs text-term-faint">
-        <span>
-          <span className="text-flip">15-min delayed</span> · not live · RSI(14)
-          with 30/70 marked
-          {levelsOn && visibleLevels.length > 0 && ' · levels are from today’s snapshot'}
-        </span>
-        {data && <span className="tabular-nums">last bar {data.asOfLabel}</span>}
+        {liveFeed ? (
+          <span>
+            {candleSource.kind === 'live' ? (
+              liveFeed.delayMs ? (
+                <span className="font-bold text-flip">Candles from {liveFeed.sourceLabel}</span>
+              ) : (
+                <span className="text-pos">Candles live from Tastytrade dxLink</span>
+              )
+            ) : candleSource.kind === 'fallback' ? (
+              <span className="font-bold text-bear">
+                LIVE CANDLES DOWN — showing 15-min delayed bars ({candleSource.reason})
+              </span>
+            ) : (
+              <>
+                Candles <span className="text-flip">15-min delayed</span> (bar feed)
+              </>
+            )}{' '}
+            ·{' '}
+            {liveFeed.error ? (
+              <span className="font-bold text-bear">
+                {liveFeed.mock ? 'mock feed' : 'LIVE FEED DOWN'} — no live levels or price line
+              </span>
+            ) : (
+              <>
+                <span className={liveFeed.mock ? 'font-bold text-flip' : 'text-pos'}>
+                  {levelsOn && visibleLevels.length > 0 ? 'levels + ' : ''}
+                  {liveFeed.mock ? 'mock' : liveFeed.delayMs ? 'feed' : 'live'} price line from {liveFeed.sourceLabel}
+                </span>{' '}
+                · <LiveAsOf asOfMs={liveFeed.asOfMs} label={liveFeed.asOfLabel} delayMs={liveFeed.delayMs} />
+              </>
+            )}{' '}
+            · RSI(14) with 30/70 marked
+          </span>
+        ) : (
+          <span>
+            <span className="text-flip">15-min delayed</span> · not live · RSI(14)
+            with 30/70 marked
+            {levelsOn && visibleLevels.length > 0 && ' · levels are from today’s snapshot'}
+          </span>
+        )}
+        {data && (
+          <span className="tabular-nums">
+            {data.source === 'tastytrade' ? 'live bar' : 'last bar'} {data.asOfLabel}
+          </span>
+        )}
       </div>
 
       {/*
