@@ -99,10 +99,22 @@ const book = buildPositioning(contracts, {
   symbol: 'XYZ',
   expirationCount: 6,
   strikesEachSide: 20,
+  // Pinned to the fixture's clock. Without it the builder drops expired
+  // contracts against the real clock, and once 2026-10-30 16:00 ET passed every
+  // fixture leg was "expired" and the book came back empty.
+  now: NOW,
   meta: META,
 });
 
 console.log('gex');
+// First, so a book emptied by the clock (or anything else) fails loudly here
+// instead of letting the per-row checks below pass over zero rows.
+check('the fixture book has its three strikes', () => {
+  assert.deepEqual(
+    book.rows.map((r) => r.strike).sort((a, b) => a - b),
+    [95, 100, 105],
+  );
+});
 check('spot is the quote mid', () => assert.equal(spot, 100));
 check('contracts missing OI or IV are skipped, not zeroed', () => {
   assert.equal(contracts.length, 4);
@@ -166,6 +178,8 @@ const mockBook = (weightBy) =>
     expirationCount: 6,
     strikesEachSide: 20,
     weightBy,
+    // The mock's expiries are generated from `now`; judge them on the same clock.
+    now: new Date(now),
     meta: META,
   });
 check('every mock contract carries IV and OI', () => assert.equal(mockContracts.length, mock.options.length));
