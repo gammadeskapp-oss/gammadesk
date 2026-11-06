@@ -2,7 +2,8 @@ import 'server-only';
 
 import { isExpired } from '../time';
 import { getAccessToken, getStreamerToken, invalidateStreamerToken, TASTY_API_BASE } from './tokens';
-import type { DxEvent, FeedSnapshot, OptionRef, SymbolState } from './types';
+import { applyCandle, candleBars, emptyCandleBook, type CandleBook } from './candleBook';
+import type { DxCandle, DxEvent, FeedSnapshot, OptionRef, SymbolState } from './types';
 
 /**
  * The dxLink websocket client behind `TASTY_SOURCE=live`. Server-only.
@@ -37,15 +38,19 @@ const KEEPALIVE_EVERY_MS = 30_000;
 const IDLE_CLOSE_MS = 10 * 60_000;
 const MAX_UNDERLYINGS = 4;
 const CHAIN_TTL_MS = 30 * 60_000;
+/** Candle series (symbol × period) held at once; least recently read is dropped. */
+const MAX_CANDLE_SERIES = 6;
 
 const EVENT_FIELDS: Record<string, string[]> = {
   Quote: ['eventType', 'eventSymbol', 'bidPrice', 'askPrice', 'bidSize', 'askSize', 'bidTime', 'askTime'],
   Trade: ['eventType', 'eventSymbol', 'price', 'size', 'dayVolume', 'time'],
   Greeks: ['eventType', 'eventSymbol', 'price', 'volatility', 'delta', 'gamma', 'theta', 'rho', 'vega', 'time'],
   Summary: ['eventType', 'eventSymbol', 'dayOpenPrice', 'dayHighPrice', 'dayLowPrice', 'prevDayClosePrice', 'openInterest'],
+  Candle: ['eventType', 'eventSymbol', 'eventFlags', 'time', 'open', 'high', 'low', 'close', 'volume'],
 };
 
-type Sub = { type: keyof typeof EVENT_FIELDS; symbol: string };
+/** `fromTime` (epoch ms) only on a Candle subscription: how far back the history starts. */
+type Sub = { type: keyof typeof EVENT_FIELDS; symbol: string; fromTime?: number };
 
 function num(v: unknown): number {
   if (typeof v === 'number') return v;
@@ -109,6 +114,7 @@ function toEvent(raw: Record<string, unknown>): DxEvent | null {
 
 class DxLinkFeed {
   readonly states = new Map<string, SymbolState>();
+  readonly candles = new Map<string, CandleBook>();
   private readonly subs = new Map<string, Sub>();
   private ws: WebSocket | null = null;
   private ready = false;
@@ -266,6 +272,17 @@ class DxLinkFeed {
 
     const now = Date.now();
     for (const raw of records) {
+      if (raw.eventType === 'Candle') {
+        const symbol = typeof raw.eventSymbol === 'string' ? raw.eventSymbol : null;
+        if (!symbol) continue;
+        let book = this.candles.get(symbol);
+        if (!book) {
+          book = emptyCandleBook();
+          this.candles.set(symbol, book);
+        }
+        applyCandle(book, raw, now);
+        continue;
+      }
       const event = toEvent(raw);
       if (!event) continue;
       const state = this.states.get(event.eventSymbol) ?? { receivedAt: now };
@@ -306,7 +323,7 @@ class DxLinkFeed {
       if (s.type === 'Summary') state.summary = undefined;
       else if (s.type === 'Trade') state.trade = undefined;
       else if (s.type === 'Greeks') state.greeks = undefined;
-      else state.quote = undefined;
+      else if (s.type === 'Quote') state.quote = undefined;
     }
     const held = items.filter((s) => this.subs.has(`${s.type}:${s.symbol}`));
     this.sendSubscription(held, 'remove');
@@ -321,7 +338,11 @@ class DxLinkFeed {
     const gone = items.filter((s) => this.subs.delete(`${s.type}:${s.symbol}`));
     this.sendSubscription(gone, 'remove');
     const stillHeld = new Set([...this.subs.values()].map((s) => s.symbol));
-    for (const s of gone) if (!stillHeld.has(s.symbol)) this.states.delete(s.symbol);
+    for (const s of gone) {
+      if (stillHeld.has(s.symbol)) continue;
+      this.states.delete(s.symbol);
+      this.candles.delete(s.symbol);
+    }
   }
 
   unsubscribe(symbols: Set<string>): void {
@@ -333,7 +354,13 @@ class DxLinkFeed {
 }
 
 const globalKey = Symbol.for('gammadesk.tasty.dxlink');
-type Holder = { feed?: DxLinkFeed; chains: Map<string, { at: number; refs: OptionRef[] }>; order: string[] };
+type Holder = {
+  feed?: DxLinkFeed;
+  chains: Map<string, { at: number; refs: OptionRef[] }>;
+  order: string[];
+  /** Candle symbols, most recently read first. */
+  candleOrder?: string[];
+};
 const holder: Holder = ((globalThis as Record<symbol, unknown>)[globalKey] as Holder | undefined) ?? {
   chains: new Map(),
   order: [],
@@ -462,6 +489,44 @@ export async function liveSnapshot(underlying: string): Promise<{ snapshot: Feed
   await waitFor(() => filled() >= options.length * 0.9, 6_000);
 
   return { snapshot: { underlying: symbol, options, states: f.states }, error: f.lastError };
+}
+
+/**
+ * The candle history for one dxFeed candle symbol (`SPY{=5m,tho=true}`),
+ * oldest first, from `fromTime` on.
+ *
+ * The first read subscribes and waits (bounded) for the history snapshot; the
+ * subscription then stays open, so later reads return at once with the live
+ * bar updated in place. At most `MAX_CANDLE_SERIES` series are held.
+ */
+export async function liveCandles(
+  candleSymbol: string,
+  fromTime: number,
+): Promise<{ bars: DxCandle[]; lastEventMs: number | null; error: string | null }> {
+  const f = feed();
+
+  const order = [candleSymbol, ...(holder.candleOrder ?? []).filter((s) => s !== candleSymbol)];
+  const dropped = order.splice(MAX_CANDLE_SERIES);
+  holder.candleOrder = order;
+  if (dropped.length > 0) f.release(dropped.map((symbol) => ({ type: 'Candle' as const, symbol })));
+
+  f.subscribe([{ type: 'Candle', symbol: candleSymbol, fromTime }]);
+
+  const settled = () => {
+    const book = f.candles.get(candleSymbol);
+    if (!book) return false;
+    // A complete snapshot, or bars that have stopped arriving for a moment —
+    // some feeds never flag the end, and the read must not hang on that.
+    return book.complete || (book.bars.size > 0 && Date.now() - book.lastAt > 800);
+  };
+  await waitFor(settled, 8_000);
+
+  const book = f.candles.get(candleSymbol);
+  const bars = candleBars(book, fromTime);
+  if (bars.length === 0) {
+    return { bars, lastEventMs: null, error: f.lastError ?? 'No candles arrived from dxLink in time.' };
+  }
+  return { bars, lastEventMs: book?.lastAt ?? null, error: null };
 }
 
 /** The shared client, connecting if it is not, for readers outside this file. */

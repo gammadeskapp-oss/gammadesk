@@ -98,6 +98,11 @@ export interface ContextBand {
   spot: number;
   quoteDateLabel: string;
   stale: boolean;
+  /**
+   * The live feed the spot and levels come from (/lab only), e.g. `Tastytrade
+   * dxLink`. Null on the public page, where they are the delayed snapshot.
+   */
+  feedLabel: string | null;
   /** Call wall above spot, put wall below — either may be absent. */
   levels: BandLevel[];
   regime: RegimeBand;
@@ -117,6 +122,8 @@ export interface BuildContextBandInput {
   spot: number;
   quoteDateLabel: string;
   stale: boolean;
+  /** See `ContextBand.feedLabel`; omitted = the public delayed snapshot. */
+  feedLabel?: string | null;
   regime: Regime;
   /**
    * The regime the intraday level feed last confirmed, or null when there is
@@ -309,6 +316,7 @@ export function buildContextBand(input: BuildContextBandInput): ContextBand {
     spot: input.spot,
     quoteDateLabel: input.quoteDateLabel,
     stale: input.stale,
+    feedLabel: input.feedLabel ?? null,
     levels,
     regime,
     market,

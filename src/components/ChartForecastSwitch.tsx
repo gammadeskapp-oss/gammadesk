@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { InteractiveChart, type ChartLevel } from './InteractiveChart';
+import { InteractiveChart, type ChartLevel, type ChartLiveFeed } from './InteractiveChart';
 
 /**
  * One area, two views of the same ticker: the interactive chart and the
@@ -22,6 +22,7 @@ export function ChartForecastSwitch({
   forecast,
   levels = [],
   spot = null,
+  liveFeed = null,
 }: {
   symbol: string;
   /** The forecast cone, or a panel explaining why there isn't one. */
@@ -30,6 +31,8 @@ export function ChartForecastSwitch({
   levels?: ChartLevel[];
   /** Spot the levels are measured against. */
   spot?: number | null;
+  /** /lab only: the live feed the overlays come from (the candles never do). */
+  liveFeed?: ChartLiveFeed | null;
 }) {
   const [view, setView] = useState<'chart' | 'forecast'>('chart');
 
@@ -71,7 +74,11 @@ export function ChartForecastSwitch({
         </button>
         <span className="text-2xs text-term-faint">
           {view === 'chart'
-            ? 'delayed price bars, with overlays'
+            ? liveFeed
+              ? liveFeed.mock
+                ? 'delayed price bars, mock-feed overlays'
+                : 'live dxLink candles and overlays'
+              : 'delayed price bars, with overlays'
             : 'simulated range — not a prediction'}
         </span>
       </div>
@@ -88,7 +95,7 @@ export function ChartForecastSwitch({
           had set up and refetch the bars.
         */}
         <div hidden={view !== 'chart'}>
-          <InteractiveChart symbol={symbol} levels={levels} spot={spot} />
+          <InteractiveChart symbol={symbol} levels={levels} spot={spot} liveFeed={liveFeed} />
         </div>
         <div hidden={view !== 'forecast'}>{forecast}</div>
       </div>

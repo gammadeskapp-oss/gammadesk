@@ -55,6 +55,20 @@ export interface DxSummary {
 
 export type DxEvent = DxQuote | DxTrade | DxGreeks | DxSummary;
 
+/**
+ * One OHLCV bar off dxFeed's `Candle` event, e.g. on `SPY{=5m,tho=true}`.
+ * `time` is the bar's start, epoch ms. Kept out of `DxEvent` because candles
+ * are a history (many per symbol), not a latest-value state.
+ */
+export interface DxCandle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 /** One option contract the feed was asked for, with its dxFeed streamer symbol. */
 export interface OptionRef {
   streamerSymbol: string;
