@@ -52,11 +52,37 @@ function Unavailable({ title }: { title: string }) {
   );
 }
 
+/**
+ * The levels snapshot exists but is too old to show in session. Stated loudly,
+ * with the snapshot's own time, and never with its flip or magnets — an old
+ * level beside a live spot is exactly the reading this exists to prevent.
+ */
+function StaleLevels({ title, data }: { title: string; data: NonNullable<HomeData['staleLevels']> }) {
+  return (
+    <section className="panel border-l-4 border-l-neg/70 p-4" role="status">
+      <h2 className="label-xs">{title}</h2>
+      <p className="mt-2 text-sm font-bold text-neg">
+        Levels data unavailable — last snapshot {data.lastSnapshotLabel} is stale
+      </p>
+      <p className="mt-1.5 text-2xs leading-relaxed text-term-faint">
+        {data.reason} The flip and magnets are hidden until a fresh snapshot lands; the rest of
+        the page is unaffected.
+      </p>
+    </section>
+  );
+}
+
 export function HomeRedesign({ data }: { data: HomeData }) {
   return (
     <main className="mx-auto w-full max-w-[1700px] flex-1 space-y-4 px-4 py-5 sm:px-6">
       {/* 2 — hero */}
-      {data.levels ? <HeroRegime levels={data.levels} /> : <Unavailable title="SPY regime" />}
+      {data.levels ? (
+        <HeroRegime levels={data.levels} />
+      ) : data.staleLevels ? (
+        <StaleLevels title="SPY regime" data={data.staleLevels} />
+      ) : (
+        <Unavailable title="SPY regime" />
+      )}
 
       {/* 3 — macro bias, first-class, directly under the hero */}
       {data.macro ? <MacroBiasCard macro={data.macro} /> : <Unavailable title="Macro bias" />}
@@ -73,6 +99,8 @@ export function HomeRedesign({ data }: { data: HomeData }) {
         {/* 4 — gamma map (the real strike-by-strike profile; collapsed on mobile) */}
         {data.levels && data.profile ? (
           <HomeLevels levels={data.levels} profile={data.profile} />
+        ) : data.staleLevels ? (
+          <StaleLevels title="SPY level / gamma map" data={data.staleLevels} />
         ) : (
           <Unavailable title="SPY level / gamma map" />
         )}

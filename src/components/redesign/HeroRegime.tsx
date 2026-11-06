@@ -34,6 +34,16 @@ export function HeroRegime({ levels }: { levels: GammaLevelsMock }) {
 
       <div className="mt-5 border-t border-term-line pt-4">
         <GammaLevelSummary levels={levels} />
+        {(levels.levelsAsOfLabel || levels.spotAsOfLabel) && (
+          <p className="mt-3 tabular-nums text-2xs text-term-faint">
+            {[
+              levels.levelsAsOfLabel ? `Levels as of ${levels.levelsAsOfLabel}` : null,
+              levels.spotAsOfLabel ? `Spot as of ${levels.spotAsOfLabel}` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        )}
       </div>
     </section>
   );
