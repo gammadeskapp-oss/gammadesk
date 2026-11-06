@@ -40,6 +40,8 @@ export class TastyAuthError extends Error {}
 let access: { token: string; expiresAt: number } | null = null;
 let accessInFlight: Promise<string> | null = null;
 let streamer: { token: string; url: string; expiresAt: number } | null = null;
+/** The quote token's `level` (e.g. `demo`), kept for labelling; null until one is issued. */
+let streamerLevel: string | null = null;
 let streamerInFlight: Promise<{ token: string; url: string }> | null = null;
 
 async function fetchAccessToken(): Promise<string> {
@@ -82,7 +84,7 @@ async function fetchStreamerToken(): Promise<{ token: string; url: string }> {
   });
   if (!res.ok) throw new TastyAuthError(`Tastytrade quote-token endpoint answered ${res.status}.`);
   const json = (await res.json()) as {
-    data?: { token?: string; 'dxlink-url'?: string; 'expires-at'?: string };
+    data?: { token?: string; 'dxlink-url'?: string; 'expires-at'?: string; level?: string };
   };
   const token = json.data?.token;
   const url = json.data?.['dxlink-url'];
@@ -90,6 +92,7 @@ async function fetchStreamerToken(): Promise<{ token: string; url: string }> {
   const parsed = json.data?.['expires-at'] ? Date.parse(json.data['expires-at']) : Number.NaN;
   const expiresAt = Number.isFinite(parsed) ? parsed : Date.now() + DEFAULT_STREAMER_TTL_MS;
   streamer = { token, url, expiresAt };
+  streamerLevel = typeof json.data?.level === 'string' ? json.data.level : null;
   return { token, url };
 }
 
@@ -104,6 +107,11 @@ export async function getStreamerToken(): Promise<{ token: string; url: string }
 }
 
 /** Drop the streamer token so the next connect fetches a fresh one (e.g. after an auth failure). */
+/** The data level of the current streamer token, e.g. `demo`; null before one is issued. */
+export function getStreamerLevel(): string | null {
+  return streamerLevel;
+}
+
 export function invalidateStreamerToken(): void {
   streamer = null;
 }

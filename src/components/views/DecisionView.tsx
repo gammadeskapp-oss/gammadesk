@@ -620,12 +620,13 @@ export async function DecisionView({
   // On /lab the chart's overlays come from the feed and its footer must say so.
   const chartLiveFeed: ChartLiveFeed | null = live
     ? {
-        sourceLabel: live.mode === 'mock' ? 'mock Tastytrade feed' : 'Tastytrade dxLink',
+        sourceLabel: live.mode === 'mock' ? 'mock Tastytrade feed' : live.sourceLabel,
         mock: live.mode === 'mock',
         asOfMs: live.asOfMs,
         asOfLabel: live.asOfLabel,
         spot: live.positioning ? live.spot : null,
         error: live.positioning ? null : (live.error ?? 'no positioning from the feed'),
+        delayMs: live.delayed ? live.delayMs : null,
       }
     : null;
 

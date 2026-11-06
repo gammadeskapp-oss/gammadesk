@@ -12,6 +12,8 @@ const {
   candleBars,
   candleSymbolFor,
   emptyCandleBook,
+  feedDelay,
+  formatDelay,
   FLAG_REMOVE_EVENT,
   FLAG_SNAPSHOT_BEGIN,
   FLAG_SNAPSHOT_END,
@@ -104,10 +106,28 @@ check('fromTime trims older bars', () => {
   assert.deepEqual(candleBars(book, T0 + 10 * MIN).map((b) => b.close), [102, 103]);
 });
 
-check('candle symbols: intraday is RTH-only, daily has no hours attribute', () => {
+check('candle symbols are dxFeed-canonical (dxLink answers {=1m} as {=m})', () => {
+  assert.equal(candleSymbolFor('SPY', '1m'), 'SPY{=m,tho=true}');
   assert.equal(candleSymbolFor('SPY', '5m'), 'SPY{=5m,tho=true}');
-  assert.equal(candleSymbolFor('QQQ', '1h'), 'QQQ{=1h,tho=true}');
-  assert.equal(candleSymbolFor('SPY', '1D'), 'SPY{=1d}');
+  assert.equal(candleSymbolFor('SPY', '15m'), 'SPY{=15m,tho=true}');
+  assert.equal(candleSymbolFor('QQQ', '1h'), 'QQQ{=h,tho=true}');
+  assert.equal(candleSymbolFor('QQQ', '4h'), 'QQQ{=4h,tho=true}');
+  assert.equal(candleSymbolFor('SPY', '1D'), 'SPY{=d}');
+  for (const tf of ['1m', '5m', '15m', '1h', '4h', '1D']) {
+    assert.ok(!/{=1[mhd]/.test(candleSymbolFor('SPY', tf)), `${tf} has a non-canonical period`);
+  }
+});
+
+check('feed delay: demo level or trades over 2 min old is delayed', () => {
+  const now = Date.UTC(2026, 10, 6, 17, 8);
+  // As measured on 2026-11-06: level demo, every trade 900 s old.
+  assert.deepEqual(feedDelay('demo', now - 900_000, now), { delayMs: 900_000, delayed: true });
+  assert.equal(feedDelay('real-time', now - 900_000, now).delayed, true);
+  assert.equal(feedDelay('real-time', now - 1_500, now).delayed, false);
+  assert.equal(feedDelay('demo', null, now).delayed, true);
+  assert.deepEqual(feedDelay(null, undefined, now), { delayMs: null, delayed: false });
+  assert.equal(formatDelay(900_000), '15 min');
+  assert.equal(formatDelay(45_000), '45 s');
 });
 
 console.log(`\n${passed} checks passed`);

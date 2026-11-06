@@ -66,6 +66,35 @@ export function applyCandle(book: CandleBook, raw: Record<string, unknown>, now:
   book.lastAt = now;
 }
 
+/**
+ * How far behind the clock a feed is, from its own trade timestamps.
+ *
+ * Tastytrade issues streamer tokens at a data `level`; on `demo` dxLink
+ * replays the market 15 minutes late (measured: every SPY trade 900 s old)
+ * while still streaming every second, so "events are arriving" says nothing
+ * about whether they are current. Anything over two minutes, or a `demo`
+ * level, is called delayed.
+ */
+export const DELAYED_AFTER_MS = 120_000;
+
+export function feedDelay(
+  level: string | null,
+  lastTradeMs: number | null | undefined,
+  now: number,
+): { delayMs: number | null; delayed: boolean } {
+  const delayMs =
+    typeof lastTradeMs === 'number' && Number.isFinite(lastTradeMs) && lastTradeMs > 0
+      ? Math.max(0, now - lastTradeMs)
+      : null;
+  const demo = typeof level === 'string' && /demo|delay/i.test(level);
+  return { delayMs, delayed: demo || (delayMs !== null && delayMs > DELAYED_AFTER_MS) };
+}
+
+/** `15 min` / `45 s` for a delay label. */
+export function formatDelay(ms: number): string {
+  return ms >= 90_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`;
+}
+
 /** Bars from `fromTime` on, oldest first. */
 export function candleBars(book: CandleBook | undefined, fromTime: number): DxCandle[] {
   if (!book) return [];
@@ -73,7 +102,13 @@ export function candleBars(book: CandleBook | undefined, fromTime: number): DxCa
 }
 
 interface CandleSpec {
-  /** dxFeed aggregation period, the `=` attribute of the candle symbol. */
+  /**
+   * dxFeed aggregation period, the `=` attribute of the candle symbol, in
+   * dxFeed's canonical spelling. A period of one drops its count: `m`, `h`,
+   * `d` — never `1m`. dxLink answers `SPY{=1m}` as `SPY{=m}`, and events
+   * are keyed by the symbol they arrive under, so a non-canonical request never
+   * matches its own data (measured 2026-11-06: 274 candles arrived, none read).
+   */
   period: string;
   /** History requested, in days back from now. */
   lookbackDays: number;
@@ -81,12 +116,12 @@ interface CandleSpec {
 }
 
 export const CANDLE_SPEC: Record<Timeframe, CandleSpec> = {
-  '1m': { period: '1m', lookbackDays: 3, intraday: true },
+  '1m': { period: 'm', lookbackDays: 3, intraday: true },
   '5m': { period: '5m', lookbackDays: 14, intraday: true },
   '15m': { period: '15m', lookbackDays: 30, intraday: true },
-  '1h': { period: '1h', lookbackDays: 90, intraday: true },
+  '1h': { period: 'h', lookbackDays: 90, intraday: true },
   '4h': { period: '4h', lookbackDays: 180, intraday: true },
-  '1D': { period: '1d', lookbackDays: 730, intraday: false },
+  '1D': { period: 'd', lookbackDays: 730, intraday: false },
 };
 
 /**
@@ -94,6 +129,7 @@ export const CANDLE_SPEC: Record<Timeframe, CandleSpec> = {
  * the session VWAP resets on the same bars. Daily bars carry no hours attribute.
  */
 export function candleSymbolFor(symbol: string, timeframe: Timeframe): string {
+  // Already canonical per CANDLE_SPEC; see the note on `period`.
   const spec = CANDLE_SPEC[timeframe];
   return spec.intraday ? `${symbol}{=${spec.period},tho=true}` : `${symbol}{=${spec.period}}`;
 }

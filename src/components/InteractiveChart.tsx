@@ -396,6 +396,8 @@ export interface ChartLiveFeed {
   spot: number | null;
   /** Set when the feed is down — the overlays then are absent, not delayed. */
   error: string | null;
+  /** The feed streams but trails the market (Tastytrade `demo` level); its measured delay. */
+  delayMs: number | null;
 }
 
 export function InteractiveChart({
@@ -787,11 +789,11 @@ export function InteractiveChart({
         if (liveSpot !== null && liveSpot > 0) {
           candles.createPriceLine({
             price: liveSpot,
-            color: liveFeed?.mock ? COLOR.ema13 : COLOR.up,
+            color: liveFeed?.mock || liveFeed?.delayMs ? COLOR.ema13 : COLOR.up,
             lineWidth: 2,
             lineStyle: LineStyle.Solid,
             axisLabelVisible: true,
-            title: liveFeed?.mock ? 'Mock spot' : 'Live',
+            title: liveFeed?.mock ? 'Mock spot' : liveFeed?.delayMs ? 'Feed (delayed)' : 'Live',
           });
         }
 
@@ -846,7 +848,7 @@ export function InteractiveChart({
     // pane, or a set of price lines — so they rebuild. The EMA/VWAP toggles do
     // not: they only flip a line's visibility, handled by the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, overlays.rsi, levelsOn, levelsKey, spot, liveFeed?.spot, liveFeed?.mock]);
+  }, [data, overlays.rsi, levelsOn, levelsKey, spot, liveFeed?.spot, liveFeed?.mock, liveFeed?.delayMs]);
 
   // --- toggle the moving averages without rebuilding ---
   useEffect(() => {
@@ -1070,7 +1072,11 @@ export function InteractiveChart({
         {liveFeed ? (
           <span>
             {candleSource.kind === 'live' ? (
-              <span className="text-pos">Candles live from Tastytrade dxLink</span>
+              liveFeed.delayMs ? (
+                <span className="font-bold text-flip">Candles from {liveFeed.sourceLabel}</span>
+              ) : (
+                <span className="text-pos">Candles live from Tastytrade dxLink</span>
+              )
             ) : candleSource.kind === 'fallback' ? (
               <span className="font-bold text-bear">
                 LIVE CANDLES DOWN — showing 15-min delayed bars ({candleSource.reason})
@@ -1089,9 +1095,9 @@ export function InteractiveChart({
               <>
                 <span className={liveFeed.mock ? 'font-bold text-flip' : 'text-pos'}>
                   {levelsOn && visibleLevels.length > 0 ? 'levels + ' : ''}
-                  {liveFeed.mock ? 'mock' : 'live'} price line from {liveFeed.sourceLabel}
+                  {liveFeed.mock ? 'mock' : liveFeed.delayMs ? 'feed' : 'live'} price line from {liveFeed.sourceLabel}
                 </span>{' '}
-                · <LiveAsOf asOfMs={liveFeed.asOfMs} label={liveFeed.asOfLabel} />
+                · <LiveAsOf asOfMs={liveFeed.asOfMs} label={liveFeed.asOfLabel} delayMs={liveFeed.delayMs} />
               </>
             )}{' '}
             · RSI(14) with 30/70 marked

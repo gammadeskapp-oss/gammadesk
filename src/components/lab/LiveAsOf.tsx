@@ -14,7 +14,20 @@ const STALE_AFTER_MS = 20_000;
  * re-checked every second so a stream that stops is called stale without
  * waiting for the next refresh.
  */
-export function LiveAsOf({ asOfMs, label }: { asOfMs: number | null; label: string | null }) {
+export function LiveAsOf({
+  asOfMs,
+  label,
+  delayMs = null,
+}: {
+  asOfMs: number | null;
+  label: string | null;
+  /**
+   * The feed's own measured delay when it is a delayed feed. `asOfMs` is then
+   * the market time (~15 min ago), so staleness is judged on top of the delay
+   * and the stamp says "delayed" rather than calling every reading stale.
+   */
+  delayMs?: number | null;
+}) {
   const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
@@ -31,8 +44,10 @@ export function LiveAsOf({ asOfMs, label }: { asOfMs: number | null; label: stri
     return <span className="text-term-faint">no reading from the stream</span>;
   }
 
+  const expected = delayMs ?? 0;
   const age = now === null ? 0 : now - asOfMs;
-  const stale = age > STALE_AFTER_MS;
+  const stale = age - expected > STALE_AFTER_MS;
+  const delayed = expected > 60_000;
   const clock = new Date(asOfMs).toLocaleTimeString('en-US', {
     timeZone: 'America/New_York',
     hour: '2-digit',
@@ -48,6 +63,9 @@ export function LiveAsOf({ asOfMs, label }: { asOfMs: number | null; label: stri
       data-stale={stale ? 'true' : 'false'}
     >
       as of <span className="tabular-nums">{now === null ? label : `${clock} ET`}</span>
+      {delayed && (
+        <span className="ml-1 font-bold text-flip">· delayed {Math.round(expected / 60_000)} min — not live</span>
+      )}
       {stale && (
         <span className="ml-1 font-bold">
           · stale — no update from the stream for {Math.round(age / 1000)}s
