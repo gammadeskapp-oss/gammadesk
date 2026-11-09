@@ -398,6 +398,11 @@ export interface ChartLiveFeed {
   error: string | null;
   /** The feed streams but trails the market (Tastytrade `demo` level); its measured delay. */
   delayMs: number | null;
+  /**
+   * The Tastytrade stream is delayed. Its candles are then as old as its quotes,
+   * so the chart reads the Yahoo bar feed (about a minute behind) instead.
+   */
+  feedDelayed: boolean;
 }
 
 export function InteractiveChart({
@@ -500,7 +505,7 @@ export function InteractiveChart({
    * Live candles are asked for on /lab when the feed is the real one. The mock
    * has none, so it keeps the delayed bars (and its own MOCK labelling).
    */
-  const wantLiveCandles = Boolean(liveFeed && !liveFeed.mock);
+  const wantLiveCandles = Boolean(liveFeed && !liveFeed.mock && !liveFeed.feedDelayed);
 
   // --- fetch ---
   useEffect(() => {
@@ -1081,6 +1086,8 @@ export function InteractiveChart({
               <span className="font-bold text-bear">
                 LIVE CANDLES DOWN — showing 15-min delayed bars ({candleSource.reason})
               </span>
+            ) : liveFeed.feedDelayed && !liveFeed.mock ? (
+              <span className="text-term-dim">Candles: Yahoo bar feed (Tastytrade candles are delayed on this account)</span>
             ) : (
               <>
                 Candles <span className="text-flip">15-min delayed</span> (bar feed)

@@ -626,7 +626,9 @@ export async function DecisionView({
         asOfLabel: live.asOfLabel,
         spot: live.positioning ? live.spot : null,
         error: live.positioning ? null : (live.error ?? 'no positioning from the feed'),
-        delayMs: live.delayed ? live.delayMs : null,
+        // Spot from Yahoo is live; only an all-Tastytrade delayed reading is "delayed" here.
+        delayMs: live.delayed && live.spotSource !== 'yahoo' ? live.delayMs : null,
+        feedDelayed: live.mode === 'live' && live.delayed,
       }
     : null;
 

@@ -11,6 +11,7 @@ const {
   applyCandle,
   candleBars,
   candleSymbolFor,
+  chooseSpot,
   emptyCandleBook,
   feedDelay,
   formatDelay,
@@ -128,6 +129,26 @@ check('feed delay: demo level or trades over 2 min old is delayed', () => {
   assert.deepEqual(feedDelay(null, undefined, now), { delayMs: null, delayed: false });
   assert.equal(formatDelay(900_000), '15 min');
   assert.equal(formatDelay(45_000), '45 s');
+});
+
+check('spot: Yahoo replaces a delayed feed spot only when fresh and plausible', () => {
+  const now = Date.UTC(2026, 10, 9, 14, 55, 7);
+  const yahoo = { price: 747.76, timeMs: now - 1_000 };
+  // As measured 2026-11-09 09:55 ET: feed 744.27 (15 min old), Yahoo 747.76 (1 s old).
+  assert.deepEqual(chooseSpot(744.27, true, yahoo, now), { spot: 747.76, source: 'yahoo', timeMs: now - 1_000 });
+  // A live feed is never overridden.
+  assert.equal(chooseSpot(744.27, false, yahoo, now).source, 'tastytrade');
+  // Yahoo stale (after the close, an outage) -> keep the feed's spot.
+  assert.deepEqual(chooseSpot(744.27, true, { price: 747.76, timeMs: now - 10 * 60_000 }, now), {
+    spot: 744.27,
+    source: 'tastytrade',
+    timeMs: null,
+  });
+  // Implausibly far from the feed (bad print / wrong symbol) -> refused.
+  assert.equal(chooseSpot(744.27, true, { price: 700, timeMs: now }, now).source, 'tastytrade');
+  // No Yahoo, or no feed spot to sanity-check against -> feed stands.
+  assert.equal(chooseSpot(744.27, true, null, now).source, 'tastytrade');
+  assert.deepEqual(chooseSpot(null, true, yahoo, now), { spot: null, source: 'tastytrade', timeMs: null });
 });
 
 console.log(`\n${passed} checks passed`);

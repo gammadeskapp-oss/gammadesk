@@ -90,6 +90,36 @@ export function feedDelay(
   return { delayMs, delayed: demo || (delayMs !== null && delayMs > DELAYED_AFTER_MS) };
 }
 
+/** Yahoo's spot is only used when it is itself this fresh. */
+export const YAHOO_SPOT_MAX_AGE_MS = 120_000;
+/** ...and within this fraction of the feed's own (delayed) spot — a sanity band. */
+export const YAHOO_SPOT_MAX_DRIFT = 0.05;
+
+/**
+ * Which underlying price a /lab reading is built on.
+ *
+ * The Tastytrade spot is used whenever the feed is live. When the feed is
+ * delayed, a fresh Yahoo price replaces it — the levels, strike window, flip
+ * search and exposure marker are then measured against where the market is
+ * now, while IV and OI still come from the feed. Yahoo is refused when it is
+ * stale itself (outside the session, an outage) or implausibly far from the
+ * feed's price, and the feed's spot stands, still labelled delayed.
+ */
+export function chooseSpot(
+  feedSpot: number | null,
+  feedDelayed: boolean,
+  yahoo: { price: number; timeMs: number } | null,
+  now: number,
+): { spot: number | null; source: 'tastytrade' | 'yahoo'; timeMs: number | null } {
+  if (!feedDelayed || !yahoo || feedSpot === null || !(feedSpot > 0)) {
+    return { spot: feedSpot, source: 'tastytrade', timeMs: null };
+  }
+  const fresh = now - yahoo.timeMs <= YAHOO_SPOT_MAX_AGE_MS && yahoo.timeMs <= now + 5_000;
+  const near = Math.abs(yahoo.price - feedSpot) / feedSpot <= YAHOO_SPOT_MAX_DRIFT;
+  if (!fresh || !near || !(yahoo.price > 0)) return { spot: feedSpot, source: 'tastytrade', timeMs: null };
+  return { spot: yahoo.price, source: 'yahoo', timeMs: yahoo.timeMs };
+}
+
 /** `15 min` / `45 s` for a delay label. */
 export function formatDelay(ms: number): string {
   return ms >= 90_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`;
