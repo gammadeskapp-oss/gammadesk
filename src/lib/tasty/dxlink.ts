@@ -131,6 +131,29 @@ class DxLinkFeed {
     return this.ready;
   }
 
+  /**
+   * Drop the streamer token and the socket, and reconnect with a fresh token.
+   *
+   * The token's data level is fixed when Tastytrade issues it: a token issued
+   * while the account had delayed quotes keeps pointing at the demo (15-min)
+   * server for its whole ~24 h life, even after real-time is switched on. Held
+   * subscriptions are re-sent on CHANNEL_OPENED, so readers see the new
+   * stream's events on their next read. Old events are cleared so no delayed
+   * price is mixed into the first live reading.
+   */
+  restart(): void {
+    invalidateStreamerToken();
+    this.lastUsed = Date.now();
+    this.backoffMs = BACKOFF_START_MS;
+    this.states.clear();
+    this.candles.clear();
+    if (this.ws) {
+      this.ws.close(); // onclose reconnects (BACKOFF_START_MS) with a fresh token
+    } else if (!this.reconnectTimer && !this.connecting) {
+      void this.connect();
+    }
+  }
+
   touch(): void {
     this.lastUsed = Date.now();
     if (!this.ws && !this.reconnectTimer && !this.connecting) void this.connect();
@@ -360,6 +383,8 @@ type Holder = {
   order: string[];
   /** Candle symbols, most recently read first. */
   candleOrder?: string[];
+  /** Epoch ms of the last restart for a fresh (non-delayed) token. */
+  lastTokenRestart?: number;
 };
 const holder: Holder = ((globalThis as Record<symbol, unknown>)[globalKey] as Holder | undefined) ?? {
   chains: new Map(),
@@ -527,6 +552,25 @@ export async function liveCandles(
     return { bars, lastEventMs: null, error: f.lastError ?? 'No candles arrived from dxLink in time.' };
   }
   return { bars, lastEventMs: book?.lastAt ?? null, error: null };
+}
+
+/** Never re-issue the token more often than this while it stays on a delayed level. */
+const DELAYED_TOKEN_RECHECK_MS = 5 * 60_000;
+
+/**
+ * Re-issue the streamer token when it is on a delayed data level and at least
+ * five minutes old, so switching the account to real-time quotes reaches this
+ * server within minutes instead of when the ~24 h token expires. Returns true
+ * when a restart was started.
+ */
+export function refreshDelayedToken(level: string | null, tokenAgeMs: number): boolean {
+  if (!level || !/demo|delay/i.test(level)) return false;
+  if (tokenAgeMs < DELAYED_TOKEN_RECHECK_MS) return false;
+  const last = holder.lastTokenRestart ?? 0;
+  if (Date.now() - last < DELAYED_TOKEN_RECHECK_MS) return false;
+  holder.lastTokenRestart = Date.now();
+  holder.feed?.restart();
+  return true;
 }
 
 /** The shared client, connecting if it is not, for readers outside this file. */
