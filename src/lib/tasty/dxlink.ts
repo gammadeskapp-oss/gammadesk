@@ -112,6 +112,28 @@ function toEvent(raw: Record<string, unknown>): DxEvent | null {
   }
 }
 
+/**
+ * dxLink's real-time server refuses subscriptions sent too fast ("BAD_ACTION:
+ * Your subscription rate is too high"); the delayed demo server never did.
+ * Measured 2026-11-09, it behaves as a leaky bucket of ~10,000 items that
+ * drains at ~170/s (~10,000 a minute): a 6,000 burst passes, 12,000 at once
+ * fails, a steady 800/s first fails at 12,800 items and 400/s at 17,400.
+ * Sends go through a token bucket kept under that. One ticker on /lab is
+ * ~4,200 items (SPY), so two fresh tickers load at once and a third waits.
+ */
+const SUB_FRAME_ITEMS = 200;
+const SUB_BURST_ITEMS = 8_000;
+const SUB_ITEMS_PER_SEC = 150;
+/** After a rate rejection: wait this long, and re-send frames sent within RESEND_WINDOW_MS. */
+const SUB_RATE_PAUSE_MS = 10_000;
+const SUB_RESEND_WINDOW_MS = 5_000;
+
+type SubFrame = { op: 'add' | 'remove'; items: Sub[]; priority?: boolean };
+/** Frames this small (an underlying, a candle series) skip the option backlog. */
+const SUB_PRIORITY_MAX_ITEMS = 4;
+/** How far below zero priority frames may take the bucket. */
+const SUB_PRIORITY_DEBT = 100;
+
 class DxLinkFeed {
   readonly states = new Map<string, SymbolState>();
   readonly candles = new Map<string, CandleBook>();
@@ -126,6 +148,13 @@ class DxLinkFeed {
   private connecting = false;
   lastError: string | null = null;
   lastMessageAt = 0;
+  /** Epoch ms of the last "subscription rate too high" rejection (recovered from, not an error). */
+  lastRateLimitAt = 0;
+  private subQueue: SubFrame[] = [];
+  private recentFrames: Array<{ at: number; frame: SubFrame }> = [];
+  private bucket = SUB_BURST_ITEMS;
+  private bucketAt = Date.now();
+  private pumpTimer: ReturnType<typeof setTimeout> | null = null;
 
   get isReady(): boolean {
     return this.ready;
@@ -212,6 +241,7 @@ class DxLinkFeed {
       this.keepaliveTimer = null;
       this.ws = null;
       this.ready = false;
+      this.resetSubQueue();
       if (Date.now() - this.lastUsed < IDLE_CLOSE_MS) this.scheduleReconnect();
     };
   }
@@ -250,6 +280,7 @@ class DxLinkFeed {
         this.ready = true;
         this.backoffMs = BACKOFF_START_MS;
         this.lastError = null;
+        this.resetSubQueue();
         this.sendSubscription([...this.subs.values()], 'add');
         return;
       case 'FEED_CONFIG':
@@ -261,7 +292,12 @@ class DxLinkFeed {
         this.ingest(msg.data);
         return;
       case 'ERROR':
-        this.lastError = `dxLink error: ${String(msg.error ?? 'unknown')}`;
+        if (msg.error === 'BAD_ACTION' && /rate/i.test(String(msg.message ?? ''))) {
+          // Not fatal: back off and re-send what may have been dropped.
+          this.onRateLimited();
+          return;
+        }
+        this.lastError = `dxLink error: ${String(msg.error ?? 'unknown')}${msg.message ? ` (${String(msg.message)})` : ''}`;
         if (msg.error === 'UNAUTHORIZED') {
           invalidateStreamerToken();
           this.ws?.close();
@@ -320,9 +356,88 @@ class DxLinkFeed {
 
   private sendSubscription(items: Sub[], op: 'add' | 'remove'): void {
     if (!this.ready || items.length === 0) return;
-    for (let i = 0; i < items.length; i += 400) {
-      this.send({ type: 'FEED_SUBSCRIPTION', channel: FEED_CHANNEL, [op]: items.slice(i, i + 400) });
+    if (items.length <= SUB_PRIORITY_MAX_ITEMS) {
+      // An underlying's quote or a candle series: ahead of any option backlog,
+      // and allowed slightly into debt so it never waits behind one.
+      this.subQueue.unshift({ op, items, priority: true });
+    } else {
+      for (let i = 0; i < items.length; i += SUB_FRAME_ITEMS) {
+        this.subQueue.push({ op, items: items.slice(i, i + SUB_FRAME_ITEMS) });
+      }
     }
+    this.pump();
+  }
+
+  /** Subscription items still waiting for rate budget. */
+  get queuedSubscriptions(): number {
+    return this.subQueue.reduce((n, f) => n + f.items.length, 0);
+  }
+
+  private resetSubQueue(): void {
+    this.subQueue = [];
+    this.recentFrames = [];
+    this.bucket = SUB_BURST_ITEMS;
+    this.bucketAt = Date.now();
+    if (this.pumpTimer) clearTimeout(this.pumpTimer);
+    this.pumpTimer = null;
+  }
+
+  /** Send queued frames as the token bucket allows; schedule itself for the rest. */
+  private pump(): void {
+    if (this.pumpTimer) return;
+    const now = Date.now();
+    this.bucket = Math.min(SUB_BURST_ITEMS, this.bucket + ((now - this.bucketAt) / 1000) * SUB_ITEMS_PER_SEC);
+    this.bucketAt = now;
+    while (this.subQueue.length > 0 && this.ready) {
+      const queued = this.subQueue[0];
+      // Skip what changed while queued: adds since released, removes since re-held.
+      const frame: SubFrame = {
+        op: queued.op,
+        priority: queued.priority,
+        items: queued.items.filter((s) => this.subs.has(`${s.type}:${s.symbol}`) === (queued.op === 'add')),
+      };
+      if (frame.items.length === 0) {
+        this.subQueue.shift();
+        continue;
+      }
+      if (this.bucket - frame.items.length < (frame.priority ? -SUB_PRIORITY_DEBT : 0)) break;
+      this.subQueue.shift();
+      this.bucket -= frame.items.length;
+      this.send({ type: 'FEED_SUBSCRIPTION', channel: FEED_CHANNEL, [frame.op]: frame.items });
+      this.recentFrames.push({ at: now, frame });
+    }
+    this.recentFrames = this.recentFrames.filter((r) => now - r.at < SUB_RESEND_WINDOW_MS);
+    if (this.subQueue.length === 0 || !this.ready) return;
+    const need = Math.max(1, this.subQueue[0].items.length - this.bucket);
+    this.pumpTimer = setTimeout(() => {
+      this.pumpTimer = null;
+      this.pump();
+    }, Math.max(50, Math.ceil((need / SUB_ITEMS_PER_SEC) * 1000)));
+    (this.pumpTimer as { unref?: () => void }).unref?.();
+  }
+
+  private onRateLimited(): void {
+    const now = Date.now();
+    this.lastRateLimitAt = now;
+    // Re-send recent frames still wanted (adds of held subs; removes of released ones).
+    const resend = this.recentFrames
+      .filter((r) => now - r.at < SUB_RESEND_WINDOW_MS)
+      .map((r) => r.frame)
+      .map((f) => ({
+        op: f.op,
+        items: f.items.filter((s) => this.subs.has(`${s.type}:${s.symbol}`) === (f.op === 'add')),
+      }))
+      .filter((f) => f.items.length > 0);
+    this.recentFrames = [];
+    this.subQueue = [...resend, ...this.subQueue];
+    this.bucket = 0;
+    this.bucketAt = now + SUB_RATE_PAUSE_MS; // refill starts after the pause
+    if (this.pumpTimer) clearTimeout(this.pumpTimer);
+    this.pumpTimer = setTimeout(() => {
+      this.pumpTimer = null;
+      this.pump();
+    }, SUB_RATE_PAUSE_MS);
+    (this.pumpTimer as { unref?: () => void }).unref?.();
   }
 
   subscribe(items: Sub[]): void {
@@ -501,7 +616,8 @@ export async function liveSnapshot(underlying: string): Promise<{ snapshot: Feed
     options.flatMap((r) => [
       { type: 'Greeks' as const, symbol: r.streamerSymbol },
       { type: 'Summary' as const, symbol: r.streamerSymbol },
-      { type: 'Quote' as const, symbol: r.streamerSymbol },
+      // Trade for the volume view. No option Quote: nothing reads it, and the
+      // real-time server rate-limits subscriptions (see SUB_ITEMS_PER_SEC).
       { type: 'Trade' as const, symbol: r.streamerSymbol },
     ]),
   );
@@ -512,6 +628,19 @@ export async function liveSnapshot(underlying: string): Promise<{ snapshot: Feed
       return s?.greeks && s.summary;
     }).length;
   await waitFor(() => filled() >= options.length * 0.9, 6_000);
+  const have = filled();
+  if (have < options.length * 0.9 && f.queuedSubscriptions > 0) {
+    // Rate-limited, not broken. A partial book draws wrong levels (measured: a
+    // 410-of-1,436 SPY book put the flip at 742.49 against 747.16 complete), so
+    // no options go out until it fills; the spot still does.
+    const waitS = Math.ceil(f.queuedSubscriptions / SUB_ITEMS_PER_SEC);
+    return {
+      snapshot: { underlying: symbol, options: [], states: f.states },
+      error:
+        f.lastError ??
+        `Still loading option data: ${have} of ${options.length} contracts so far. dxLink limits how fast symbols can be added; complete in about ${waitS} s.`,
+    };
+  }
 
   return { snapshot: { underlying: symbol, options, states: f.states }, error: f.lastError };
 }
