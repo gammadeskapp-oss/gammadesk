@@ -5,7 +5,7 @@ import { buildPositioning } from '../exposure';
 import type { PositioningData, Summary } from '../types';
 import { getSpotQuote } from '../spot';
 import { formatAsOf } from '../time';
-import { feedDelay, formatDelay } from './candleBook';
+import { chooseSpot, feedDelay, formatDelay } from './candleBook';
 import { feedContracts, spotFrom } from './gex';
 import { mockSnapshot } from './mock';
 import { tastySourceMode } from './mode';
@@ -46,6 +46,11 @@ export interface LiveGammaReading {
   delayed: boolean;
   /** `Tastytrade dxLink`, `Tastytrade dxLink · DELAYED 15 min`, or the mock label. */
   sourceLabel: string;
+  /**
+   * Where `spot` came from. `yahoo` only while the feed is delayed and a
+   * fresh Yahoo price was available — see `chooseSpot`.
+   */
+  spotSource: 'tastytrade' | 'yahoo';
   /** `Oct 22, 2026, 14:05 ET` for server-rendered stamps. */
   asOfLabel: string | null;
   /** Underlying quote mid off the feed. */
@@ -93,6 +98,7 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
         delayMs: null,
         delayed: false,
         sourceLabel: 'Tastytrade dxLink',
+        spotSource: 'tastytrade',
         asOfLabel: null,
         spot: null,
         summary: null,
@@ -109,7 +115,7 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
   }
 
   const underlying = snapshot.states.get(upper);
-  const spot = spotFrom(underlying);
+  const feedSpot = spotFrom(underlying);
   const now = Date.now();
   const tradeMs = underlying?.trade?.time;
   let feedLevel: string | null = 'mock';
@@ -118,16 +124,33 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
     feedLevel = getStreamerLevel();
   }
   const { delayMs, delayed } = mode === 'live' ? feedDelay(feedLevel, tradeMs, now) : { delayMs: null, delayed: false };
-  // The market time the numbers reflect — on a delayed feed, the trade time, so
-  // the stamp reads 11:53 at 12:08 instead of passing old prices off as now.
-  const asOfMs =
+
+  // A delayed feed's spot is replaced by Yahoo's near-real-time price when one
+  // is fresh, so the levels are measured against the market now.
+  let yahoo = null;
+  if (mode === 'live' && delayed) {
+    const { fetchYahooSpot } = await import('./yahooSpot');
+    yahoo = await fetchYahooSpot(upper);
+  }
+  const chosen = chooseSpot(feedSpot, delayed, yahoo, now);
+  const spot = chosen.spot;
+  const spotSource = chosen.source;
+
+  // The market time the numbers reflect: Yahoo's quote time when spot is from
+  // Yahoo; otherwise the feed's trade time (on a delayed feed ~15 min ago, so the
+  // stamp never passes old prices off as now).
+  const feedTimeMs =
     typeof tradeMs === 'number' && Number.isFinite(tradeMs) && tradeMs > 0 ? tradeMs : (underlying?.receivedAt ?? null);
+  const asOfMs = spotSource === 'yahoo' ? chosen.timeMs : feedTimeMs;
+  const delayText = delayMs !== null ? formatDelay(delayMs) : '';
   const sourceLabel =
     mode === 'mock'
       ? 'Tastytrade (MOCK — not live)'
-      : delayed
-        ? `Tastytrade dxLink · DELAYED ${delayMs !== null ? formatDelay(delayMs) : ''}`.trim()
-        : 'Tastytrade dxLink';
+      : !delayed
+        ? 'Tastytrade dxLink'
+        : spotSource === 'yahoo'
+          ? `spot Yahoo (live) · IV Tastytrade dxLink (delayed ${delayText})`.replace(' ()', '')
+          : `Tastytrade dxLink · DELAYED ${delayText}`.trim();
   const positioning = spot !== null && asOfMs ? toPositioning(snapshot, spot, sourceLabel, asOfMs, 'openInterest') : null;
   const activity = positioning && spot !== null && asOfMs ? toPositioning(snapshot, spot, sourceLabel, asOfMs, 'volume') : null;
   return {
@@ -138,6 +161,7 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
     delayMs,
     delayed,
     sourceLabel,
+    spotSource,
     asOfLabel: asOfMs ? formatAsOf(new Date(asOfMs)) : null,
     spot,
     summary: positioning?.summary ?? null,

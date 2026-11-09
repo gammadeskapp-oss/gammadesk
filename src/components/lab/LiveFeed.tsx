@@ -70,6 +70,27 @@ export function FeedStatusBanner({ reading }: { reading: LiveGammaReading }) {
  */
 function DelayedFeedBanner({ reading }: { reading: LiveGammaReading }) {
   const minutes = reading.delayMs !== null ? Math.round(reading.delayMs / 60_000) : null;
+  if (reading.spotSource === 'yahoo') {
+    return (
+      <div
+        role="status"
+        data-testid="lab-feed-status"
+        data-state="yahoo-spot"
+        className="border border-flip/60 bg-flip/5 px-3.5 py-2 text-xs leading-relaxed text-flip"
+      >
+        <p className="font-bold uppercase tracking-[0.14em]">
+          Spot live from Yahoo · option IV delayed{minutes !== null ? ` ~${minutes} min` : ''} (Tastytrade)
+        </p>
+        <p className="mt-1 text-term-dim">
+          Your Tastytrade stream is delayed (data level <code>{reading.feedLevel ?? 'unknown'}</code>), so the
+          underlying price comes from Yahoo&rsquo;s real-time quote instead. Levels, the flip, magnets and the exposure
+          tables are recomputed at that live price; each option&rsquo;s IV is still the delayed Tastytrade value and open
+          interest is the daily figure. Chart candles are Yahoo bars. Fully live needs real-time quotes enabled on the
+          Tastytrade account.
+        </p>
+      </div>
+    );
+  }
   return (
     <div
       role="alert"
@@ -114,7 +135,7 @@ export function LabSourceStrip({
     <FeedStatusBanner reading={reading} />
     <section
       className={`panel border-l-2 px-3.5 py-2 text-2xs leading-relaxed ${
-        reading.mode === 'mock' || reading.delayed ? 'border-l-flip' : 'border-l-pos/60'
+        reading.mode === 'mock' || (reading.delayed && reading.spotSource !== 'yahoo') ? 'border-l-flip' : 'border-l-pos/60'
       }`}
       data-testid="lab-source-strip"
     >
@@ -128,7 +149,11 @@ export function LabSourceStrip({
           {max && ` · max-GEX strike ${max.strike}`}
           {' · '}
         </span>
-        <LiveAsOf asOfMs={reading.asOfMs} label={reading.asOfLabel} delayMs={reading.delayed ? reading.delayMs : null} />
+        <LiveAsOf
+          asOfMs={reading.asOfMs}
+          label={reading.asOfLabel}
+          delayMs={reading.delayed && reading.spotSource !== 'yahoo' ? reading.delayMs : null}
+        />
         <span className="ml-auto">
           <AutoRefresh intervalMs={LIVE_STAMP_REFRESH_MS} />
         </span>
