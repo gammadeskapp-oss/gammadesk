@@ -533,6 +533,19 @@ export async function peekPositioningView(symbol: string): Promise<PositioningDa
   return null;
 }
 
+/**
+ * `peekPositioningView` for the configured symbol, plus when the payload was
+ * built — so a caller can refuse a snapshot the refresher cron stopped
+ * rewriting (see `lib/redesign/levelsFreshness`). Same read, same
+ * populate-on-miss behaviour.
+ */
+export async function peekPositioningSnapshot(): Promise<{ data: PositioningData; builtAtIso: string } | null> {
+  const cachedPayload = await readCachedPositioning();
+  if (cachedPayload) return cachedPayload;
+  schedulePopulate(() => getPositioning());
+  return null;
+}
+
 /** Seconds until the cached snapshot goes stale — shown next to "data as of". */
 export function secondsUntilRefresh(): number {
   return Math.ceil(ttlRemaining(viewCacheKey(config.expirationCount)) / 1000);

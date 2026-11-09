@@ -11,6 +11,9 @@ import { postingEnabledFromValue } from '@/lib/x/flags';
 import { config } from '@/lib/config';
 import { emailConfig, MAILING_ADDRESS_PLACEHOLDER } from '@/lib/email/config';
 import { marketToday } from '@/lib/time';
+import { readCachedPositioning } from '@/lib/positioningCache';
+import { currentMarketStatus } from '@/lib/events';
+import { assessLevelsFreshness, BUILT_MAX_AGE_MIN } from '@/lib/redesign/levelsFreshness';
 
 export const dynamic = 'force-dynamic';
 
@@ -158,12 +161,40 @@ export async function GET(request: Request) {
    * state (whose reason reveals an auth/billing auto-pause), whether the four
    * X credentials are present, and each slot's outcome for today.
    */
-  const [xLog, xPause, xCachedSnap, xTick] = await Promise.all([
+  const [xLog, xPause, xCachedSnap, xTick, levelsPayload] = await Promise.all([
     readXLog().catch(() => []),
     readXPause().catch(() => ({ paused: false as boolean })),
     readCachedDeskSnapshot().catch(() => null),
     readTickHeartbeat().catch(() => null),
+    readCachedPositioning().catch(() => null),
   ]);
+
+  /*
+   * The levels Blob the public Home reads its flip/magnets from
+   * (`gammadesk/positioning-spy.json`, rewritten by /api/x/snapshot every five
+   * minutes in session). The cron table above judges in hours; this one stalls
+   * in minutes, so it gets its own in-session check — the same rule Home uses to
+   * hide stale levels (`lib/redesign/levelsFreshness`).
+   */
+  const marketOpen = currentMarketStatus().phase === 'open';
+  const levelsFreshness = assessLevelsFreshness({
+    builtAtIso: levelsPayload?.builtAtIso,
+    quoteDateIso: levelsPayload?.data.meta.quoteDateIso,
+    marketOpen,
+  });
+  const levelsSnapshot = {
+    path: '/api/x/snapshot',
+    label: 'Home levels snapshot (flip, magnets, gamma map)',
+    schedule: '4-59/5 13-22 * * 1-5',
+    builtAtIso: levelsPayload?.builtAtIso ?? null,
+    quoteDateIso: levelsPayload?.data.meta.quoteDateIso ?? null,
+    builtAgeMin: levelsFreshness.builtAgeMin,
+    quoteAgeMin: levelsFreshness.quoteAgeMin,
+    marketOpen,
+    // Only judged in session; outside it the last snapshot is the answer.
+    state: !marketOpen ? 'ok' : levelsPayload === null ? 'missing' : levelsFreshness.stale ? 'late' : 'ok',
+    reason: levelsPayload === null && marketOpen ? 'No snapshot for this session yet.' : levelsFreshness.reason,
+  };
   const snapAgeMin = xCachedSnap
     ? Math.round((Date.now() - Date.parse(xCachedSnap.snapshot.dataIso)) / 60_000)
     : null;
@@ -276,6 +307,12 @@ export async function GET(request: Request) {
     );
   }
 
+  if (levelsSnapshot.state !== 'ok') {
+    problems.push(
+      `${levelsSnapshot.path} levels snapshot is ${levelsSnapshot.state} in session (${levelsSnapshot.reason ?? `limit ${BUILT_MAX_AGE_MIN} min`}) — Home is showing "levels data unavailable".`,
+    );
+  }
+
   return NextResponse.json(
     {
       // True only when storage will actually survive a deploy and the jobs
@@ -305,6 +342,7 @@ export async function GET(request: Request) {
           }))
         : null,
       cronProblemCount: cron?.problemCount ?? null,
+      levelsSnapshot,
       xPosting,
       jobs,
       /*

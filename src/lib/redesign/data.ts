@@ -24,7 +24,9 @@ import 'server-only';
 import { config } from '@/lib/config';
 import { formatUsd } from '@/lib/format';
 import { buildGammaProfile, type GammaProfileData } from '@/lib/gammaProfile';
-import { peekPositioningView } from '@/lib/positioning';
+import { peekPositioningSnapshot } from '@/lib/positioning';
+import { formatClockEt } from '@/lib/time';
+import { assessLevelsFreshness } from './levelsFreshness';
 import { getSpotQuote } from '@/lib/spot';
 import { getBreadth, isRegularHours } from '@/lib/breadth';
 import { isSpyRspStale } from '@/lib/breadth/spyRsp';
@@ -58,6 +60,7 @@ import type {
   NetLiquidityMock,
   OptionsFlowMock,
   ScannerShortlistMock,
+  StaleLevelsMock,
   TrackRecordMock,
   DriverState,
 } from './mock';
@@ -66,6 +69,11 @@ export interface HomeData {
   status: MarketStatusMock;
   levels: GammaLevelsMock | null;
   profile: GammaProfileData | null;
+  /**
+   * Set (and `levels`/`profile` null) when a snapshot exists but is too old to
+   * show in session — the page says so instead of printing the old flip.
+   */
+  staleLevels: StaleLevelsMock | null;
   macro: MacroBiasMock | null;
   health: MarketHealthMock | null;
   outlook: ForwardOutlookMock | null;
@@ -471,11 +479,15 @@ export async function loadHomeData(
 ): Promise<HomeData> {
   const catalyst = nextCatalyst(now);
 
-  const [book, breadth, quotes, richMacro, outlook, netLiquidity, leadership, scanner, flow, trackRecord, liveSpot] =
+  const [snapshot, breadth, quotes, richMacro, outlook, netLiquidity, leadership, scanner, flow, trackRecord, liveSpot] =
     await Promise.all([
       positioningOverride
-        ? Promise.resolve(positioningOverride.book)
-        : peekPositioningView(config.symbol).catch((): PositioningData | null => null),
+        ? // `/lab` supplies its own live book; it has no Blob build time, so it
+          // never goes through the public staleness guard below.
+          Promise.resolve(positioningOverride.book ? { data: positioningOverride.book, builtAtIso: null } : null)
+        : peekPositioningSnapshot().catch(
+            (): { data: PositioningData; builtAtIso: string | null } | null => null,
+          ),
       getBreadth().catch((): BreadthReading | null => null),
       getMarketContextQuotes().catch((): MarketContextQuotes | null => null),
       getRichMacroBias().catch((): RichMacroView | null => null),
@@ -486,9 +498,41 @@ export async function loadHomeData(
       mapFlow(),
       mapTrackRecord(),
       positioningOverride
-        ? Promise.resolve(positioningOverride.spot === null ? null : { price: positioningOverride.spot })
+        ? Promise.resolve(
+            positioningOverride.spot === null
+              ? null
+              : { price: positioningOverride.spot, asOfIso: null as string | null },
+          )
         : getSpotQuote(config.symbol).catch(() => null),
     ]);
+
+  /*
+   * Refuse a levels snapshot the refresher cron stopped rewriting.
+   *
+   * The spot below is a fresh read on every request, but the flip, magnets and
+   * gamma map come from the Blob copy `/api/x/snapshot` rewrites every five
+   * minutes in session. If that job stalls, showing its last copy beside a live
+   * spot would present hours-old levels as current. In session, past either
+   * bound in `levelsFreshness`, the page shows "data unavailable" with the
+   * snapshot's own time instead. Public path only — `/lab` passes its own book.
+   */
+  let book: PositioningData | null = snapshot?.data ?? null;
+  let staleLevels: StaleLevelsMock | null = null;
+  if (snapshot && !positioningOverride) {
+    const freshness = assessLevelsFreshness({
+      builtAtIso: snapshot.builtAtIso,
+      quoteDateIso: snapshot.data.meta.quoteDateIso,
+      marketOpen: currentMarketStatus(now).phase === 'open',
+      now,
+    });
+    if (freshness.stale) {
+      staleLevels = {
+        lastSnapshotLabel: snapshot.data.meta.quoteDateLabel,
+        reason: freshness.reason ?? 'The levels snapshot is out of date.',
+      };
+      book = null;
+    }
+  }
 
   /*
    * One spot and one VIX for the whole page.
@@ -512,12 +556,19 @@ export async function loadHomeData(
   if (book) {
     profile = buildGammaProfile(book);
     levels = mapLevels(book, profile, spot ?? book.spot);
+    levels.levelsAsOfLabel = book.meta.quoteDateLabel || null;
+    // The spot's own clock when it came from the live quote; when it fell back
+    // to the book's echoed spot, the book's time is the honest stamp.
+    const spotIso = liveSpot ? liveSpot.asOfIso : book.meta.quoteDateIso;
+    const spotAt = spotIso ? new Date(spotIso) : null;
+    levels.spotAsOfLabel = spotAt && Number.isFinite(spotAt.getTime()) ? formatClockEt(spotAt) : null;
   }
 
   return {
     status: loadMarketStatus(now),
     levels,
     profile,
+    staleLevels,
     macro: richMacro ? mapMacro(richMacro, catalyst, liveVix) : null,
     health: mapHealth(breadth, quotes, spot),
     outlook,

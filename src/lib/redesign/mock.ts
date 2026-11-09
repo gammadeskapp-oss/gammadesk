@@ -56,6 +56,21 @@ export interface GammaLevelsMock {
   magnetBelow: number | null;
   /** Small ordered strip of nearby strikes and their gamma weight (0..1). */
   strip: { strike: number; weight: number; side: 'call' | 'put' }[];
+  /** When the market data behind the flip/magnets was recorded, e.g. `Nov 05, 2026, 15:42 ET`. */
+  levelsAsOfLabel?: string | null;
+  /** When the spot beside them was recorded, e.g. `15:45 ET`. */
+  spotAsOfLabel?: string | null;
+}
+
+/**
+ * The levels snapshot exists but is too old to present as current (in session
+ * only — see `lib/redesign/levelsFreshness`). Home shows this instead of the
+ * old flip and magnets.
+ */
+export interface StaleLevelsMock {
+  /** The snapshot's own market-data stamp, e.g. `Nov 05, 2026, 13:10 ET`. */
+  lastSnapshotLabel: string;
+  reason: string;
 }
 
 export const mockLevels: GammaLevelsMock = {
