@@ -93,6 +93,7 @@ async function fetchStreamerToken(): Promise<{ token: string; url: string }> {
   const expiresAt = Number.isFinite(parsed) ? parsed : Date.now() + DEFAULT_STREAMER_TTL_MS;
   streamer = { token, url, expiresAt };
   streamerLevel = typeof json.data?.level === 'string' ? json.data.level : null;
+  streamerIssuedAt = Date.now();
   return { token, url };
 }
 
@@ -108,6 +109,14 @@ export async function getStreamerToken(): Promise<{ token: string; url: string }
 
 /** Drop the streamer token so the next connect fetches a fresh one (e.g. after an auth failure). */
 /** The data level of the current streamer token, e.g. `demo`; null before one is issued. */
+/** Epoch ms the current streamer token was fetched; 0 before the first. */
+let streamerIssuedAt = 0;
+
+/** How long ago the current streamer token was fetched; Infinity before the first. */
+export function streamerTokenAgeMs(): number {
+  return streamerIssuedAt > 0 ? Date.now() - streamerIssuedAt : Number.POSITIVE_INFINITY;
+}
+
 export function getStreamerLevel(): string | null {
   return streamerLevel;
 }

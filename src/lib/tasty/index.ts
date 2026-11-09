@@ -120,8 +120,14 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
   const tradeMs = underlying?.trade?.time;
   let feedLevel: string | null = 'mock';
   if (mode === 'live') {
-    const { getStreamerLevel } = await import('./tokens');
+    const { getStreamerLevel, streamerTokenAgeMs } = await import('./tokens');
     feedLevel = getStreamerLevel();
+    // A token issued while the account was on delayed quotes stays delayed for
+    // its whole life; re-issue it (at most every 5 min) so a switch to real-time
+    // shows up here within minutes. This reading stays as it is; the next one
+    // reads the fresh stream.
+    const { refreshDelayedToken } = await import('./dxlink');
+    refreshDelayedToken(feedLevel, streamerTokenAgeMs());
   }
   const { delayMs, delayed } = mode === 'live' ? feedDelay(feedLevel, tradeMs, now) : { delayMs: null, delayed: false };
 
