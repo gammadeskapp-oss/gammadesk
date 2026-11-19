@@ -1,3 +1,4 @@
+import { normCdf } from '../blackScholes';
 import type { DxGreeks, DxQuote, DxSummary, DxTrade, FeedSnapshot, OptionRef, SymbolState } from './types';
 
 /**
@@ -157,7 +158,8 @@ export function mockSnapshot(underlying: string, now: number = Date.now(), refer
           eventSymbol: sym,
           price: 0,
           volatility: Number(iv.toFixed(4)),
-          delta: 0,
+          // Black-Scholes delta at the mock IV (no rate or dividend), for the flow panel.
+          delta: Number((type === 'call' ? normCdf(d1) : normCdf(d1) - 1).toFixed(4)),
           gamma: Number(gamma.toPrecision(6)),
           theta: 0,
           rho: 0,
