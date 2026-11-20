@@ -1,8 +1,9 @@
 import 'server-only';
 
-import { isExpired } from '../time';
+import { daysToExpiry, isExpired } from '../time';
 import { getAccessToken, getStreamerToken, invalidateStreamerToken, TASTY_API_BASE } from './tokens';
 import { applyCandle, candleBars, emptyCandleBook, type CandleBook } from './candleBook';
+import { HEADLINE_MAX_DTE, NEAR_MONEY_PCT, recordTrade, WIDE_MAX_DTE, WIDE_STRIKE_PCT, type FlowTally } from './flow';
 import type { DxCandle, DxEvent, FeedSnapshot, OptionRef, SymbolState } from './types';
 
 /**
@@ -128,16 +129,38 @@ const SUB_ITEMS_PER_SEC = 150;
 const SUB_RATE_PAUSE_MS = 10_000;
 const SUB_RESEND_WINDOW_MS = 5_000;
 
-type SubFrame = { op: 'add' | 'remove'; items: Sub[]; priority?: boolean };
+/**
+ * `background` frames (the put/call flow's full chain, ~37k items for SPY) are
+ * sent only when nothing else is waiting, so they never hold up a gamma book.
+ */
+type SubFrame = { op: 'add' | 'remove'; items: Sub[]; priority?: boolean; background?: boolean };
 /** Frames this small (an underlying, a candle series) skip the option backlog. */
 const SUB_PRIORITY_MAX_ITEMS = 4;
 /** How far below zero priority frames may take the bucket. */
 const SUB_PRIORITY_DEBT = 100;
+/**
+ * Background frames leave this much of the bucket untouched, so a gamma book
+ * asked for while the flow's chain is still loading (SPY's is ~4,200 items)
+ * goes out at once instead of waiting for the bucket to refill. Throughput of
+ * the background lane is unchanged — it just runs at a higher floor.
+ */
+const SUB_BACKGROUND_RESERVE = 4_500;
+/**
+ * dxLink refuses a connection's subscriptions past ~25,000 items ("BAD_ACTION:
+ * Your subscription size is too big", measured 2026-11-19 at ~24.9k). The
+ * background lane never takes the total past this; the foreground (gamma books,
+ * candles) is not capped here.
+ */
+const SUB_MAX_ITEMS = 23_000;
 
 class DxLinkFeed {
   readonly states = new Map<string, SymbolState>();
   readonly candles = new Map<string, CandleBook>();
+  /** Per-option running delta-weighted volume, folded in on every Trade (see `./flow`). */
+  readonly flow = new Map<string, FlowTally>();
   private readonly subs = new Map<string, Sub>();
+  /** Keys (`type:symbol`) held on the background lane; re-sent there on reconnect. */
+  private readonly backgroundKeys = new Set<string>();
   private ws: WebSocket | null = null;
   private ready = false;
   private backoffMs = BACKOFF_START_MS;
@@ -151,6 +174,7 @@ class DxLinkFeed {
   /** Epoch ms of the last "subscription rate too high" rejection (recovered from, not an error). */
   lastRateLimitAt = 0;
   private subQueue: SubFrame[] = [];
+  private bgQueue: SubFrame[] = [];
   private recentFrames: Array<{ at: number; frame: SubFrame }> = [];
   private bucket = SUB_BURST_ITEMS;
   private bucketAt = Date.now();
@@ -176,6 +200,7 @@ class DxLinkFeed {
     this.backoffMs = BACKOFF_START_MS;
     this.states.clear();
     this.candles.clear();
+    this.flow.clear();
     if (this.ws) {
       this.ws.close(); // onclose reconnects (BACKOFF_START_MS) with a fresh token
     } else if (!this.reconnectTimer && !this.connecting) {
@@ -281,7 +306,11 @@ class DxLinkFeed {
         this.backoffMs = BACKOFF_START_MS;
         this.lastError = null;
         this.resetSubQueue();
-        this.sendSubscription([...this.subs.values()], 'add');
+        {
+          const held = [...this.subs.entries()];
+          this.sendSubscription(held.filter(([k]) => !this.backgroundKeys.has(k)).map(([, s]) => s), 'add');
+          this.sendSubscription(held.filter(([k]) => this.backgroundKeys.has(k)).map(([, s]) => s), 'add', true);
+        }
         return;
       case 'FEED_CONFIG':
         if (msg.eventFields && typeof msg.eventFields === 'object') {
@@ -292,6 +321,11 @@ class DxLinkFeed {
         this.ingest(msg.data);
         return;
       case 'ERROR':
+        if (msg.error === 'BAD_ACTION' && /size is too big/i.test(String(msg.message ?? ''))) {
+          // A frame went past the per-connection cap; the readers see it as incomplete coverage.
+          this.lastSizeLimitAt = Date.now();
+          return;
+        }
         if (msg.error === 'BAD_ACTION' && /rate/i.test(String(msg.message ?? ''))) {
           // Not fatal: back off and re-send what may have been dropped.
           this.onRateLimited();
@@ -351,12 +385,30 @@ class DxLinkFeed {
       else state.summary = event;
       state.receivedAt = now;
       this.states.set(event.eventSymbol, state);
+      // Options only (dxFeed option symbols start with "."): weight each Trade's
+      // new contracts by the delta held right now; a Greeks event settles any
+      // volume that traded before a delta was known.
+      if (event.eventSymbol.startsWith('.')) {
+        const delta = state.greeks && Number.isFinite(state.greeks.delta) ? state.greeks.delta : null;
+        const tally = this.flow.get(event.eventSymbol);
+        if (event.eventType === 'Trade') {
+          const next = recordTrade(tally, event.dayVolume, delta, now);
+          if (next) this.flow.set(event.eventSymbol, next);
+        } else if (event.eventType === 'Greeks' && tally && tally.pending > 0) {
+          const next = recordTrade(tally, tally.dayVolume, delta, now);
+          if (next) this.flow.set(event.eventSymbol, next);
+        }
+      }
     }
   }
 
-  private sendSubscription(items: Sub[], op: 'add' | 'remove'): void {
+  private sendSubscription(items: Sub[], op: 'add' | 'remove', background = false): void {
     if (!this.ready || items.length === 0) return;
-    if (items.length <= SUB_PRIORITY_MAX_ITEMS) {
+    if (background) {
+      for (let i = 0; i < items.length; i += SUB_FRAME_ITEMS) {
+        this.bgQueue.push({ op, items: items.slice(i, i + SUB_FRAME_ITEMS), background: true });
+      }
+    } else if (items.length <= SUB_PRIORITY_MAX_ITEMS) {
       // An underlying's quote or a candle series: ahead of any option backlog,
       // and allowed slightly into debt so it never waits behind one.
       this.subQueue.unshift({ op, items, priority: true });
@@ -368,13 +420,19 @@ class DxLinkFeed {
     this.pump();
   }
 
-  /** Subscription items still waiting for rate budget. */
+  /** Subscription items still waiting for rate budget (foreground lane). */
   get queuedSubscriptions(): number {
     return this.subQueue.reduce((n, f) => n + f.items.length, 0);
   }
 
+  /** Background-lane items still waiting (the flow's full chain). */
+  get queuedBackground(): number {
+    return this.bgQueue.reduce((n, f) => n + f.items.length, 0);
+  }
+
   private resetSubQueue(): void {
     this.subQueue = [];
+    this.bgQueue = [];
     this.recentFrames = [];
     this.bucket = SUB_BURST_ITEMS;
     this.bucketAt = Date.now();
@@ -388,27 +446,32 @@ class DxLinkFeed {
     const now = Date.now();
     this.bucket = Math.min(SUB_BURST_ITEMS, this.bucket + ((now - this.bucketAt) / 1000) * SUB_ITEMS_PER_SEC);
     this.bucketAt = now;
-    while (this.subQueue.length > 0 && this.ready) {
-      const queued = this.subQueue[0];
+    const nextQueue = () => (this.subQueue.length > 0 ? this.subQueue : this.bgQueue);
+    while (nextQueue().length > 0 && this.ready) {
+      const queue = nextQueue();
+      const queued = queue[0];
       // Skip what changed while queued: adds since released, removes since re-held.
       const frame: SubFrame = {
         op: queued.op,
         priority: queued.priority,
+        background: queued.background,
         items: queued.items.filter((s) => this.subs.has(`${s.type}:${s.symbol}`) === (queued.op === 'add')),
       };
       if (frame.items.length === 0) {
-        this.subQueue.shift();
+        queue.shift();
         continue;
       }
-      if (this.bucket - frame.items.length < (frame.priority ? -SUB_PRIORITY_DEBT : 0)) break;
-      this.subQueue.shift();
+      const floor = frame.priority ? -SUB_PRIORITY_DEBT : frame.background ? SUB_BACKGROUND_RESERVE : 0;
+      if (this.bucket - frame.items.length < floor) break;
+      queue.shift();
       this.bucket -= frame.items.length;
       this.send({ type: 'FEED_SUBSCRIPTION', channel: FEED_CHANNEL, [frame.op]: frame.items });
       this.recentFrames.push({ at: now, frame });
     }
     this.recentFrames = this.recentFrames.filter((r) => now - r.at < SUB_RESEND_WINDOW_MS);
-    if (this.subQueue.length === 0 || !this.ready) return;
-    const need = Math.max(1, this.subQueue[0].items.length - this.bucket);
+    if (nextQueue().length === 0 || !this.ready) return;
+    const head = nextQueue()[0];
+    const need = Math.max(1, head.items.length + (head.background ? SUB_BACKGROUND_RESERVE : 0) - this.bucket);
     this.pumpTimer = setTimeout(() => {
       this.pumpTimer = null;
       this.pump();
@@ -425,11 +488,13 @@ class DxLinkFeed {
       .map((r) => r.frame)
       .map((f) => ({
         op: f.op,
+        background: f.background,
         items: f.items.filter((s) => this.subs.has(`${s.type}:${s.symbol}`) === (f.op === 'add')),
       }))
       .filter((f) => f.items.length > 0);
     this.recentFrames = [];
-    this.subQueue = [...resend, ...this.subQueue];
+    this.subQueue = [...resend.filter((f) => !f.background), ...this.subQueue];
+    this.bgQueue = [...resend.filter((f) => f.background), ...this.bgQueue];
     this.bucket = 0;
     this.bucketAt = now + SUB_RATE_PAUSE_MS; // refill starts after the pause
     if (this.pumpTimer) clearTimeout(this.pumpTimer);
@@ -440,10 +505,25 @@ class DxLinkFeed {
     (this.pumpTimer as { unref?: () => void }).unref?.();
   }
 
-  subscribe(items: Sub[]): void {
-    const fresh = items.filter((s) => !this.subs.has(`${s.type}:${s.symbol}`));
-    for (const s of fresh) this.subs.set(`${s.type}:${s.symbol}`, s);
-    this.sendSubscription(fresh, 'add');
+  /** Background items refused because the connection was at `SUB_MAX_ITEMS`. */
+  backgroundRefused = 0;
+  /** Epoch ms dxLink last answered "subscription size is too big". */
+  lastSizeLimitAt = 0;
+
+  /** `background`: send behind every other waiting subscription (see `SubFrame`), within `SUB_MAX_ITEMS`. */
+  subscribe(items: Sub[], background = false): void {
+    let fresh = items.filter((s) => !this.subs.has(`${s.type}:${s.symbol}`));
+    if (background) {
+      const room = Math.max(0, SUB_MAX_ITEMS - this.subs.size);
+      this.backgroundRefused = Math.max(0, fresh.length - room);
+      fresh = fresh.slice(0, room);
+    }
+    for (const s of fresh) {
+      const key = `${s.type}:${s.symbol}`;
+      this.subs.set(key, s);
+      if (background) this.backgroundKeys.add(key);
+    }
+    this.sendSubscription(fresh, 'add', background);
   }
 
   /**
@@ -474,19 +554,27 @@ class DxLinkFeed {
   /** Drop these exact subscriptions (not every type on the symbol, unlike `unsubscribe`). */
   release(items: Sub[]): void {
     const gone = items.filter((s) => this.subs.delete(`${s.type}:${s.symbol}`));
+    for (const s of gone) this.backgroundKeys.delete(`${s.type}:${s.symbol}`);
     this.sendSubscription(gone, 'remove');
     const stillHeld = new Set([...this.subs.values()].map((s) => s.symbol));
     for (const s of gone) {
       if (stillHeld.has(s.symbol)) continue;
       this.states.delete(s.symbol);
       this.candles.delete(s.symbol);
+      this.flow.delete(s.symbol);
     }
   }
 
   unsubscribe(symbols: Set<string>): void {
     const gone = [...this.subs.entries()].filter(([, s]) => symbols.has(s.symbol));
-    for (const [key] of gone) this.subs.delete(key);
-    for (const s of symbols) this.states.delete(s);
+    for (const [key] of gone) {
+      this.subs.delete(key);
+      this.backgroundKeys.delete(key);
+    }
+    for (const s of symbols) {
+      this.states.delete(s);
+      this.flow.delete(s);
+    }
     this.sendSubscription(gone.map(([, s]) => s), 'remove');
   }
 }
@@ -500,6 +588,8 @@ type Holder = {
   candleOrder?: string[];
   /** Epoch ms of the last restart for a fresh (non-delayed) token. */
   lastTokenRestart?: number;
+  /** The put/call flow's whole chain (every expiration), for its one underlying. */
+  flowChain?: { underlying: string; at: number; refs: OptionRef[] };
 };
 const holder: Holder = ((globalThis as Record<symbol, unknown>)[globalKey] as Holder | undefined) ?? {
   chains: new Map(),
@@ -582,9 +672,11 @@ export async function liveSnapshot(underlying: string): Promise<{ snapshot: Feed
 
   // Least-recently-viewed underlyings are dropped so the subscription set stays bounded.
   holder.order = [symbol, ...holder.order.filter((s) => s !== symbol)];
+  // Never evict what the put/call flow holds: the same type:symbol keys back both.
+  const flowHeld = flowHeldSymbols();
   for (const old of holder.order.splice(MAX_UNDERLYINGS)) {
     const refs = holder.chains.get(old)?.refs ?? [];
-    f.unsubscribe(new Set([old, ...refs.map((r) => r.streamerSymbol)]));
+    f.unsubscribe(new Set([old, ...refs.map((r) => r.streamerSymbol)].filter((s) => !flowHeld.has(s))));
   }
 
   f.subscribe([
@@ -643,6 +735,113 @@ export async function liveSnapshot(underlying: string): Promise<{ snapshot: Feed
   }
 
   return { snapshot: { underlying: symbol, options, states: f.states }, error: f.lastError };
+}
+
+/** Option symbols the put/call flow holds subscriptions on, so the gamma eviction leaves them. */
+function flowHeldSymbols(): Set<string> {
+  const flow = holder.flowChain;
+  if (!flow) return new Set();
+  return new Set([flow.underlying, ...flow.refs.map((r) => r.streamerSymbol)]);
+}
+
+/** What `liveFlow` hands the flow reading: the feed's state for the whole chain. */
+export interface LiveFlowFeed {
+  underlying: string;
+  /** Every listed contract, every expiration. Empty when the chain could not be read. */
+  refs: OptionRef[];
+  states: Map<string, SymbolState>;
+  flow: Map<string, FlowTally>;
+  /** Flow subscription items still waiting behind the rate limit. */
+  queued: number;
+  /** Flow items not subscribed because the connection was at its cap. */
+  refused: number;
+  /** Epoch ms of the last frame of any kind from dxLink (keepalives included); 0 before one. */
+  lastMessageAt: number;
+  ready: boolean;
+  error: string | null;
+}
+
+/**
+ * Subscribe `underlying`'s wide chain — strikes within ±10% of spot,
+ * expirations within 90 days (see `WIDE_STRIKE_PCT`; the whole chain does not
+ * fit under dxLink's subscription cap) — for Trade, Greeks and Summary on the
+ * background lane, and hand back what the feed holds now. Never waits for the
+ * options: SPY's ~3.4k contracts (~10.3k items) fill in about a minute at
+ * ~150 items/s, the headline scope first. `refs` is that window; the caller
+ * judges coverage.
+ */
+export async function liveFlow(underlying: string): Promise<LiveFlowFeed> {
+  const f = feed();
+  const symbol = underlying.toUpperCase();
+  const base = (refs: OptionRef[], error: string | null): LiveFlowFeed => ({
+    underlying: symbol,
+    refs,
+    states: f.states,
+    flow: f.flow,
+    queued: f.queuedBackground,
+    refused: f.backgroundRefused,
+    lastMessageAt: f.lastMessageAt,
+    ready: f.isReady,
+    error: error ?? f.lastError,
+  });
+
+  f.subscribe([
+    { type: 'Quote', symbol },
+    { type: 'Trade', symbol },
+  ]);
+
+  let refs: OptionRef[];
+  const cached = holder.flowChain;
+  if (cached && cached.underlying === symbol && Date.now() - cached.at < CHAIN_TTL_MS) {
+    refs = cached.refs;
+  } else {
+    try {
+      refs = await fetchChain(symbol);
+    } catch (error) {
+      if (cached?.underlying === symbol) refs = cached.refs;
+      else return base([], error instanceof Error ? error.message : String(error));
+    }
+    if (cached && cached.underlying !== symbol) {
+      // One flow underlying at a time; let go of the old one's chain.
+      const keep = new Set(holder.order.flatMap((u) => [u, ...(holder.chains.get(u)?.refs ?? []).map((r) => r.streamerSymbol)]));
+      f.unsubscribe(new Set([cached.underlying, ...cached.refs.map((r) => r.streamerSymbol)].filter((s) => !keep.has(s))));
+    }
+    holder.flowChain = { underlying: symbol, at: Date.now(), refs };
+  }
+
+  const spotOf = () => {
+    const s = f.states.get(symbol);
+    const q = s?.quote;
+    if (q && q.bidPrice > 0 && q.askPrice > 0) return (q.bidPrice + q.askPrice) / 2;
+    return s?.trade && s.trade.price > 0 ? s.trade.price : null;
+  };
+  await waitFor(() => spotOf() !== null, 5_000);
+  const spot = spotOf();
+  if (spot === null) return base(refs, f.lastError ?? 'No underlying quote arrived from dxLink in time.');
+
+  // Nearest the money and soonest first; `subscribe` skips what is already held.
+  const now = new Date();
+  refs = refs.filter(
+    (r) => Math.abs(r.strike - spot) / spot <= WIDE_STRIKE_PCT && daysToExpiry(r.expiration, now) <= WIDE_MAX_DTE,
+  );
+  const lane = (r: OptionRef) =>
+    Math.abs(r.strike - spot) / spot <= NEAR_MONEY_PCT && daysToExpiry(r.expiration, now) <= HEADLINE_MAX_DTE ? 0 : 1;
+  const ordered = [...refs].sort((a, b) => {
+    const da = lane(a);
+    const db = lane(b);
+    if (da !== db) return da - db;
+    if (a.expiration !== b.expiration) return a.expiration < b.expiration ? -1 : 1;
+    return Math.abs(a.strike - spot) - Math.abs(b.strike - spot);
+  });
+  f.subscribe(
+    ordered.flatMap((r) => [
+      { type: 'Trade' as const, symbol: r.streamerSymbol },
+      { type: 'Greeks' as const, symbol: r.streamerSymbol },
+      { type: 'Summary' as const, symbol: r.streamerSymbol },
+    ]),
+    true,
+  );
+  return base(refs, null);
 }
 
 /**

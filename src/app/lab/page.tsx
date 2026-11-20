@@ -10,6 +10,7 @@ import { getLabView } from '@/lib/lab';
 import { getSwingView } from '@/lib/lab/swing';
 import { requireLabSession } from '@/lib/lab/access';
 import { HomeRedesign } from '@/components/redesign/HomeRedesign';
+import { FlowPanel } from '@/components/lab/FlowPanel';
 import { LabSourceStrip } from '@/components/lab/LiveFeed';
 import { StrikesTab } from '@/components/lab/StrikesTab';
 import { DecisionView } from '@/components/views/DecisionView';
@@ -36,6 +37,9 @@ import { formatAsOf } from '@/lib/time';
  *   highlights (`/`). Hero regime and gamma map from the feed.
  * - Ticker — `DecisionView`, the nav's Ticker Search (`/decision`). Context,
  *   levels and exposure tables from the feed.
+ * - Dashboard and Ticker both carry the SPY put/call flow panel
+ *   (`components/lab/FlowPanel`, `/api/lab/flow`): delta-weighted, volume and
+ *   OI put/call off the same stream, polled every 5 s.
  * - Consensus — `TickerView` (`/ticker`), the nine-signal consensus. It has no
  *   gamma panel, so nothing on it changes source.
  * - Strikes — top open-interest and top-volume strike per pasted ticker, off
@@ -151,6 +155,8 @@ export default async function LabPage({ searchParams }: PageProps) {
             }
           />
         )}
+        {/* SPY put/call flow off the same dxLink stream; polls on its own every 5 s. */}
+        {(tab === 'dashboard' || tab === 'ticker') && <FlowPanel />}
       </div>
 
       {/* Each replica renders its own <main>, exactly as its public route does. */}
