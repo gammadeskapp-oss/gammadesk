@@ -6,7 +6,9 @@ import type { PositioningData, Summary } from '../types';
 import { getSpotQuote } from '../spot';
 import { formatAsOf } from '../time';
 import { chooseSpot, feedDelay, formatDelay } from './candleBook';
-import { feedContracts, spotFrom } from './gex';
+import type { FeedHealth } from '../decision/exposureGate';
+import type { FeedOptionsBook } from '../ticker/liquidity';
+import { feedContracts, spotFrom, summariseBook } from './gex';
 import { mockSnapshot } from './mock';
 import { tastySourceMode } from './mode';
 import type { FeedSnapshot, TastySourceMode } from './types';
@@ -69,6 +71,18 @@ export interface LiveGammaReading {
    * "Today's activity" view. Null when the feed carries no option trades.
    */
   activity: PositioningData | null;
+  /**
+   * The stream's state for this book — how many contracts have reported open
+   * interest, how old the newest data is, whether the socket is reconnecting.
+   * The exposure gate reads it, so a stalled or half-loaded feed reads as
+   * "waiting for the feed", never as a thin chain.
+   */
+  feedHealth: FeedHealth | null;
+  /**
+   * Tradeability inputs from the same stream (Summary open interest, Trade
+   * volume, the underlying quote), so /lab never asks Cboe for them.
+   */
+  feedBook: FeedOptionsBook | null;
   error: string | null;
 }
 
@@ -84,11 +98,12 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
 
   let snapshot;
   let error: string | null = null;
+  let health: FeedHealth | null = null;
   if (mode === 'live') {
     try {
       // Imported lazily so a mock deploy never even loads the socket client.
       const { liveSnapshot } = await import('./dxlink');
-      ({ snapshot, error } = await liveSnapshot(upper));
+      ({ snapshot, error, health } = await liveSnapshot(upper));
     } catch (e) {
       return {
         mode,
@@ -104,6 +119,8 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
         summary: null,
         positioning: null,
         activity: null,
+        feedHealth: null,
+        feedBook: null,
         error: e instanceof Error ? e.message : String(e),
       };
     }
@@ -112,6 +129,8 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
     // mock levels land around the real price on the real chart. Still mock.
     const reference = referencePrice ?? (await getSpotQuote(upper).catch(() => null))?.price ?? null;
     snapshot = mockSnapshot(upper, Date.now(), reference);
+    const book = summariseBook(snapshot.options, snapshot.states);
+    health = { ...book, dataAgeMs: 0, reconnecting: false, loading: false, lastReconnectReason: null, rerequested: false };
   }
 
   const underlying = snapshot.states.get(upper);
@@ -159,7 +178,22 @@ export async function getLiveGamma(symbol: string, referencePrice?: number | nul
           : `Tastytrade dxLink · DELAYED ${delayText}`.trim();
   const positioning = spot !== null && asOfMs ? toPositioning(snapshot, spot, sourceLabel, asOfMs, 'openInterest') : null;
   const activity = positioning && spot !== null && asOfMs ? toPositioning(snapshot, spot, sourceLabel, asOfMs, 'volume') : null;
+  const quote = underlying?.quote;
+  const feedBook: FeedOptionsBook | null = health
+    ? {
+        openInterest: health.openInterest,
+        volume: health.volume,
+        optionsExpected: health.optionsExpected,
+        optionsComplete: health.optionsComplete,
+        underlyingBid: quote && Number.isFinite(quote.bidPrice) ? quote.bidPrice : null,
+        underlyingAsk: quote && Number.isFinite(quote.askPrice) ? quote.askPrice : null,
+        asOfLabel: asOfMs ? formatAsOf(new Date(asOfMs)) : null,
+        sourceLabel: mode === 'mock' ? 'Tastytrade (MOCK — not live)' : 'Tastytrade dxLink',
+      }
+    : null;
   return {
+    feedHealth: health,
+    feedBook,
     mode,
     symbol: upper,
     asOfMs,

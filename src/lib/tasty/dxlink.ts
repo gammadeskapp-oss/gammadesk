@@ -1,9 +1,12 @@
 import 'server-only';
 
+import { marketStatus } from '../marketPhase';
+import type { FeedHealth } from '../decision/exposureGate';
 import { daysToExpiry, isExpired } from '../time';
 import { getAccessToken, getStreamerToken, invalidateStreamerToken, TASTY_API_BASE } from './tokens';
 import { applyCandle, candleBars, emptyCandleBook, type CandleBook } from './candleBook';
 import { HEADLINE_MAX_DTE, NEAR_MONEY_PCT, recordTrade, WIDE_MAX_DTE, WIDE_STRIKE_PCT, type FlowTally } from './flow';
+import { summariseBook } from './gex';
 import type { DxCandle, DxEvent, FeedSnapshot, OptionRef, SymbolState } from './types';
 
 /**
@@ -39,6 +42,24 @@ const KEEPALIVE_EVERY_MS = 30_000;
 const IDLE_CLOSE_MS = 10 * 60_000;
 const MAX_UNDERLYINGS = 4;
 const CHAIN_TTL_MS = 30 * 60_000;
+/**
+ * Stall watchdog. During the session SPY's quote changes many times a second,
+ * so a stream that delivers no market data for `DATA_STALL_MS` while it holds
+ * subscriptions has stalled even if the socket still looks open (a half-dead
+ * TCP connection never fires `onclose`). The first step re-requests the
+ * underlyings; if nothing arrives within `STALL_RECOVER_MS` of that, the socket
+ * is torn down and rebuilt. Outside the session only total silence counts —
+ * dxLink keepalives arrive at least every 30 s, so `SILENT_SOCKET_MS` with
+ * nothing at all is a dead socket.
+ */
+const WATCHDOG_EVERY_MS = 5_000;
+const DATA_STALL_MS = 20_000;
+const STALL_RECOVER_MS = 15_000;
+const SILENT_SOCKET_MS = 75_000;
+/** A socket that opened but never reached CHANNEL_OPENED within this is retried. */
+const HANDSHAKE_TIMEOUT_MS = 30_000;
+/** Missing Summary/Greeks for an underlying are re-requested at most this often. */
+const REREQUEST_EVERY_MS = 20_000;
 /** Candle series (symbol × period) held at once; least recently read is dropped. */
 const MAX_CANDLE_SERIES = 6;
 
@@ -166,6 +187,14 @@ class DxLinkFeed {
   private backoffMs = BACKOFF_START_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private openedAt = 0;
+  private stallNudgedAt = 0;
+  /** Epoch ms of the last FEED_DATA frame (market data, not keepalives); 0 before one. */
+  lastDataAt = 0;
+  /** Sockets this client tore down itself because the stream stalled. */
+  forcedReconnects = 0;
+  lastReconnectReason: string | null = null;
   private compactFields: Record<string, string[]> = {};
   private lastUsed = Date.now();
   private connecting = false;
@@ -245,6 +274,9 @@ class DxLinkFeed {
     this.ready = false;
 
     ws.onopen = () => {
+      this.openedAt = Date.now();
+      this.lastMessageAt = Date.now();
+      this.startWatchdog();
       this.send({ type: 'SETUP', channel: 0, version: '0.1-DXF-JS/0.3.0', keepaliveTimeout: 60, acceptKeepaliveTimeout: 60 });
       this.keepaliveTimer = setInterval(() => this.send({ type: 'KEEPALIVE', channel: 0 }), KEEPALIVE_EVERY_MS);
     };
@@ -262,13 +294,90 @@ class DxLinkFeed {
       this.lastError = 'dxLink socket error';
     };
     ws.onclose = () => {
-      if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
-      this.keepaliveTimer = null;
-      this.ws = null;
-      this.ready = false;
-      this.resetSubQueue();
+      if (this.ws !== ws) return; // a socket the watchdog already abandoned
+      this.teardown();
       if (Date.now() - this.lastUsed < IDLE_CLOSE_MS) this.scheduleReconnect();
     };
+  }
+
+  private teardown(): void {
+    if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
+    this.keepaliveTimer = null;
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+    this.watchdogTimer = null;
+    this.ws = null;
+    this.ready = false;
+    this.stallNudgedAt = 0;
+    this.resetSubQueue();
+  }
+
+  /**
+   * Abandon the current socket and build a new one. Its handlers are detached
+   * first: on a half-dead connection `close()` can take a minute to fire
+   * `onclose`, and nothing would reconnect in the meantime. Held subscriptions
+   * are re-sent on CHANNEL_OPENED, which makes dxLink send a fresh Summary
+   * (open interest) snapshot for every option, so the book repopulates.
+   */
+  private forceReconnect(reason: string): void {
+    const ws = this.ws;
+    this.forcedReconnects += 1;
+    this.lastReconnectReason = reason;
+    this.lastError = `dxLink stream stalled (${reason}); reconnecting`;
+    if (ws) {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      try {
+        ws.close();
+      } catch {
+        // already gone
+      }
+    }
+    this.teardown();
+    this.backoffMs = BACKOFF_START_MS;
+    if (!this.reconnectTimer && !this.connecting) {
+      this.reconnectTimer = setTimeout(() => void this.connect(), 1_000);
+      (this.reconnectTimer as { unref?: () => void }).unref?.();
+    }
+  }
+
+  private startWatchdog(): void {
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+    this.watchdogTimer = setInterval(() => this.watchdog(), WATCHDOG_EVERY_MS);
+    (this.watchdogTimer as { unref?: () => void }).unref?.();
+  }
+
+  private watchdog(): void {
+    const now = Date.now();
+    if (!this.ws || now - this.lastUsed > IDLE_CLOSE_MS) return;
+    if (!this.ready) {
+      if (this.openedAt && now - this.openedAt > HANDSHAKE_TIMEOUT_MS) this.forceReconnect('handshake did not complete');
+      return;
+    }
+    if (now - this.lastMessageAt > SILENT_SOCKET_MS) {
+      this.forceReconnect(`nothing from the socket for ${Math.round((now - this.lastMessageAt) / 1000)}s`);
+      return;
+    }
+    if (this.subs.size === 0 || !marketStatus(new Date(now)).open) return;
+    const since = Math.max(this.lastDataAt, this.openedAt);
+    if (now - since <= DATA_STALL_MS) {
+      this.stallNudgedAt = 0;
+      return;
+    }
+    if (!this.stallNudgedAt) {
+      // Step one: ask again for the underlyings' quotes and trades.
+      this.stallNudgedAt = now;
+      const underlyings = [...this.subs.values()].filter(
+        (s) => (s.type === 'Quote' || s.type === 'Trade') && !s.symbol.startsWith('.'),
+      );
+      this.sendSubscription(underlyings, 'remove');
+      this.sendSubscription(underlyings, 'add');
+      return;
+    }
+    if (now - this.stallNudgedAt > STALL_RECOVER_MS) {
+      this.forceReconnect(`no market data for ${Math.round((now - since) / 1000)}s`);
+    }
   }
 
   private scheduleReconnect(): void {
@@ -318,6 +427,8 @@ class DxLinkFeed {
         }
         return;
       case 'FEED_DATA':
+        this.lastDataAt = Date.now();
+        this.stallNudgedAt = 0;
         this.ingest(msg.data);
         return;
       case 'ERROR':
@@ -517,6 +628,26 @@ class DxLinkFeed {
       const room = Math.max(0, SUB_MAX_ITEMS - this.subs.size);
       this.backgroundRefused = Math.max(0, fresh.length - room);
       fresh = fresh.slice(0, room);
+    } else {
+      /*
+       * A gamma book outranks the flow's wide chain. Once the flow has filled
+       * the connection to its cap, a new ticker's ~4k items would take it past
+       * dxLink's ~25k limit; dxLink then refuses them ("size is too big") and
+       * their Summary (open interest) never arrives. Make room by letting go
+       * of the flow's lowest-priority items — the last subscribed, farthest
+       * from the money — which the flow then reports as refused coverage.
+       */
+      const overflow = this.subs.size + fresh.length - SUB_MAX_ITEMS;
+      if (overflow > 0) {
+        const wanted = new Set(items.map((s) => `${s.type}:${s.symbol}`));
+        const shed = [...this.backgroundKeys]
+          .reverse()
+          .filter((k) => !wanted.has(k))
+          .slice(0, overflow)
+          .map((k) => this.subs.get(k))
+          .filter((s): s is Sub => Boolean(s));
+        if (shed.length > 0) this.release(shed);
+      }
     }
     for (const s of fresh) {
       const key = `${s.type}:${s.symbol}`;
@@ -565,6 +696,11 @@ class DxLinkFeed {
     }
   }
 
+  /** True while the socket is down or has not finished its handshake. */
+  get reconnecting(): boolean {
+    return !this.ready;
+  }
+
   unsubscribe(symbols: Set<string>): void {
     const gone = [...this.subs.entries()].filter(([, s]) => symbols.has(s.symbol));
     for (const [key] of gone) {
@@ -590,6 +726,8 @@ type Holder = {
   lastTokenRestart?: number;
   /** The put/call flow's whole chain (every expiration), for its one underlying. */
   flowChain?: { underlying: string; at: number; refs: OptionRef[] };
+  /** Per underlying, when missing open interest was last re-requested. */
+  rerequestedAt?: Map<string, number>;
 };
 const holder: Holder = ((globalThis as Record<symbol, unknown>)[globalKey] as Holder | undefined) ?? {
   chains: new Map(),
@@ -666,7 +804,9 @@ export async function waitFor(check: () => boolean, timeoutMs: number): Promise<
  * Subscribe `underlying` and the options within ±7% of its spot, wait (bounded)
  * for the events to arrive, and hand back what is there.
  */
-export async function liveSnapshot(underlying: string): Promise<{ snapshot: FeedSnapshot; error: string | null }> {
+export async function liveSnapshot(
+  underlying: string,
+): Promise<{ snapshot: FeedSnapshot; error: string | null; health: FeedHealth | null }> {
   const f = feed();
   const symbol = underlying.toUpperCase();
 
@@ -685,12 +825,13 @@ export async function liveSnapshot(underlying: string): Promise<{ snapshot: Feed
   ]);
 
   const empty = (): FeedSnapshot => ({ underlying: symbol, options: [], states: f.states });
+  const noBook = (): FeedHealth => bookHealth(f, [], false);
 
   let all: OptionRef[];
   try {
     all = await chainRefs(symbol);
   } catch (error) {
-    return { snapshot: empty(), error: error instanceof Error ? error.message : String(error) };
+    return { snapshot: empty(), error: error instanceof Error ? error.message : String(error), health: noBook() };
   }
 
   const spotOf = () => {
@@ -701,7 +842,13 @@ export async function liveSnapshot(underlying: string): Promise<{ snapshot: Feed
   };
   await waitFor(() => spotOf() !== null, 5_000);
   const spot = spotOf();
-  if (spot === null) return { snapshot: empty(), error: f.lastError ?? 'No underlying quote arrived from dxLink in time.' };
+  if (spot === null) {
+    return {
+      snapshot: empty(),
+      error: f.lastError ?? 'No underlying quote arrived from dxLink in time.',
+      health: noBook(),
+    };
+  }
 
   const options = all.filter((r) => Math.abs(r.strike - spot) / spot <= 0.07);
   f.subscribe(
@@ -714,27 +861,74 @@ export async function liveSnapshot(underlying: string): Promise<{ snapshot: Feed
     ]),
   );
 
-  const filled = () =>
+  const missing = () =>
     options.filter((r) => {
       const s = f.states.get(r.streamerSymbol);
-      return s?.greeks && s.summary;
-    }).length;
-  await waitFor(() => filled() >= options.length * 0.9, 6_000);
-  const have = filled();
-  if (have < options.length * 0.9 && f.queuedSubscriptions > 0) {
-    // Rate-limited, not broken. A partial book draws wrong levels (measured: a
-    // 410-of-1,436 SPY book put the flip at 742.49 against 747.16 complete), so
-    // no options go out until it fills; the spot still does.
+      return !(s?.greeks && s.summary);
+    });
+  const enough = () => options.length > 0 && options.length - missing().length >= options.length * 0.9;
+  await waitFor(enough, 6_000);
+
+  /*
+   * Nothing queued and still incomplete: the requests went out and the events
+   * did not come back — refused at the size cap, dropped across a reconnect,
+   * or a stream that stalled. Ask again for exactly what is missing (a
+   * remove + add makes dxLink resend the snapshot), at most every 20 s per
+   * underlying, and give it a moment.
+   */
+  let rerequested = false;
+  if (!enough() && f.queuedSubscriptions === 0 && f.isReady) {
+    holder.rerequestedAt ??= new Map();
+    const last = holder.rerequestedAt.get(symbol) ?? 0;
+    if (Date.now() - last > REREQUEST_EVERY_MS) {
+      holder.rerequestedAt.set(symbol, Date.now());
+      f.refresh(
+        missing().flatMap((r) => [
+          { type: 'Greeks' as const, symbol: r.streamerSymbol },
+          { type: 'Summary' as const, symbol: r.streamerSymbol },
+        ]),
+      );
+      rerequested = true;
+      await waitFor(enough, 4_000);
+    }
+  }
+
+  const health = bookHealth(f, options, rerequested);
+  if (!enough()) {
+    // A partial book draws wrong levels (measured: a 410-of-1,436 SPY book put
+    // the flip at 742.49 against 747.16 complete), so no options go out until
+    // it fills; the spot still does.
+    const have = options.length - missing().length;
     const waitS = Math.ceil(f.queuedSubscriptions / SUB_ITEMS_PER_SEC);
+    const why = f.reconnecting
+      ? 'the stream is reconnecting'
+      : f.queuedSubscriptions > 0
+        ? `dxLink limits how fast symbols can be added; complete in about ${waitS} s`
+        : 'the missing contracts were re-requested from the stream';
     return {
       snapshot: { underlying: symbol, options: [], states: f.states },
-      error:
-        f.lastError ??
-        `Still loading option data: ${have} of ${options.length} contracts so far. dxLink limits how fast symbols can be added; complete in about ${waitS} s.`,
+      error: `Waiting for the feed: open interest has arrived for ${have} of ${options.length} contracts — ${why}.`,
+      health,
     };
   }
 
-  return { snapshot: { underlying: symbol, options, states: f.states }, error: f.lastError };
+  return { snapshot: { underlying: symbol, options, states: f.states }, error: f.lastError, health };
+}
+
+/** The stream's state for one book, as `FeedHealth` (lib/decision/exposureGate). */
+function bookHealth(f: DxLinkFeed, options: OptionRef[], rerequested: boolean): FeedHealth {
+  const book = summariseBook(options, f.states);
+  return {
+    optionsExpected: book.optionsExpected,
+    optionsComplete: book.optionsComplete,
+    openInterest: book.openInterest,
+    volume: book.volume,
+    dataAgeMs: f.lastDataAt ? Date.now() - f.lastDataAt : null,
+    reconnecting: f.reconnecting,
+    loading: f.queuedSubscriptions > 0,
+    lastReconnectReason: f.lastReconnectReason,
+    rerequested,
+  };
 }
 
 /** Option symbols the put/call flow holds subscriptions on, so the gamma eviction leaves them. */

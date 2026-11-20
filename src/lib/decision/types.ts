@@ -160,16 +160,8 @@ export interface DecisionResult {
   notes: string[];
 }
 
-/**
- * Whether the dollar exposure figures may be shown at all.
- *
- * One helper, used by every consumer, so the exposure tables and the walls
- * can never disagree about whether the chain is deep enough to trust. A
- * missing assessment is treated as permissive: the tradeability lookup
- * failing is not evidence that open interest is thin, and blanking a working
- * SPY page because a secondary fetch timed out would be its own kind of lie.
+/*
+ * Whether the exposure figures may be shown is decided by `exposureGate` in
+ * ./exposureGate — one rule for the tables and the walls, which also tells a
+ * thin chain apart from data that has not arrived.
  */
-export function exposureIsReliable(liquidity: Liquidity | null): boolean {
-  if (liquidity === null) return true;
-  return liquidity.options.exposureReliable;
-}

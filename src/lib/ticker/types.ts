@@ -70,7 +70,15 @@ export interface EquityLiquidity {
 
 /** Are the contracts tradeable, and is the exposure maths worth trusting? */
 export interface OptionsLiquidity {
-  /** False when the symbol has no listed chain at all. */
+  /**
+   * `assessed` — the chain was read and the figures below are real.
+   * `not-listed` — the source answered that there is no chain (404 / empty).
+   * `unread` — the source could not be read (blocked, timed out, malformed).
+   * The last is not evidence of anything about the chain, and must never be
+   * reported as thin liquidity.
+   */
+  status: 'assessed' | 'not-listed' | 'unread';
+  /** False when the symbol has no listed chain at all, or it could not be read. */
   listed: boolean;
   /** Null only when nothing is listed. */
   tier: LiquidityLabel | null;
@@ -118,6 +126,8 @@ export interface Liquidity {
   options: OptionsLiquidity;
   /** Quote timestamp from the options feed, when it supplied one. */
   asOfLabel: string | null;
+  /** Where the options figures came from: `Cboe delayed chain`, or the live feed on /lab. */
+  sourceLabel?: string;
   notes: string[];
 }
 

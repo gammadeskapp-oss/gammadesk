@@ -1,7 +1,7 @@
 import { MIN_T } from '../blackScholes';
 import { isExpired, yearsToExpiry } from '../time';
 import type { NormalisedContract } from '../types';
-import type { FeedSnapshot, SymbolState } from './types';
+import type { FeedSnapshot, OptionRef, SymbolState } from './types';
 
 /**
  * Feed events → the public model's inputs. Pure; no I/O.
@@ -75,4 +75,29 @@ export function feedContracts(snapshot: FeedSnapshot, now: Date = new Date()): N
     });
   }
   return out;
+}
+
+/**
+ * How complete one subscribed book is, for the exposure gate and the feed's
+ * own tradeability check. A contract counts as complete once it has both an IV
+ * (Greeks) and open interest (Summary) — the same two inputs `feedContracts`
+ * needs. Totals are over the contracts that reported.
+ */
+export function summariseBook(
+  options: OptionRef[],
+  states: Map<string, SymbolState>,
+): { optionsExpected: number; optionsComplete: number; openInterest: number; volume: number } {
+  let optionsComplete = 0;
+  let openInterest = 0;
+  let volume = 0;
+  for (const ref of options) {
+    const s = states.get(ref.streamerSymbol);
+    const oi = s?.summary?.openInterest;
+    const iv = s?.greeks?.volatility;
+    if (finite(oi) && oi >= 0) openInterest += oi;
+    const dv = s?.trade?.dayVolume;
+    if (finite(dv) && dv > 0) volume += dv;
+    if (finite(oi) && oi >= 0 && finite(iv) && iv > 0) optionsComplete += 1;
+  }
+  return { optionsExpected: options.length, optionsComplete, openInterest, volume };
 }
