@@ -178,9 +178,9 @@ function Options({ options }: { options: OptionsLiquidity }) {
         }
       >
         <p className="py-2 text-2xs leading-relaxed text-term-dim">
-          No listed options chain came back for this symbol. Nothing is
-          substituted for it, and every exposure figure on this page is
-          suppressed.
+          {options.status === 'unread'
+            ? 'The options data has not been read yet — the source failed to answer or is still loading. That says nothing about the chain itself, so no options verdict is given and nothing is substituted for one.'
+            : 'No listed options chain came back for this symbol. Nothing is substituted for it, and every exposure figure on this page is suppressed.'}
         </p>
       </Block>
     );
@@ -255,8 +255,10 @@ export function TradeabilityPanel({ liquidity }: { liquidity: Liquidity }) {
 
       <p className="px-1 pb-1 text-2xs leading-relaxed text-term-faint">
         Share figures are averaged over the last {liquidity.equity.sessions}{' '}
-        sessions of daily bars. Options figures and both spreads come from the
-        listed chain and are delayed
+        sessions of daily bars. Options figures and both spreads come from{' '}
+        {liquidity.sourceLabel && liquidity.sourceLabel !== 'Cboe delayed chain'
+          ? `the ${liquidity.sourceLabel} stream`
+          : 'the listed chain and are delayed'}
         {liquidity.asOfLabel ? `, quoted ${liquidity.asOfLabel}` : ''}. The
         option spread covers only the{' '}
         {liquidity.options.spreadStrikesEachSide} strikes above and below the

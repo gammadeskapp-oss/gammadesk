@@ -31,7 +31,9 @@ import {
 } from '@/lib/decision';
 import { getLiveGamma, type LiveGammaReading } from '@/lib/tasty';
 import type { ViewSource } from './source';
-import { exposureIsReliable, type Check, type Grade } from '@/lib/decision/types';
+import type { Check, Grade } from '@/lib/decision/types';
+import { exposureGate } from '@/lib/decision/exposureGate';
+import { assessFeedLiquidity } from '@/lib/ticker/liquidity';
 import { readLog } from '@/lib/log/store';
 import {
   summarisePositioningRecord,
@@ -135,8 +137,11 @@ function Decision({
   tracksLog,
   marketClosed,
   sessionDateLabel,
+  showExposure,
 }: {
   data: DecisionResult;
+  /** From `exposureGate`, so the walls and the tables cannot disagree. */
+  showExposure: boolean;
   /** True when there is no live session — the volume view is the last one. */
   marketClosed: boolean;
   /** The session the volume is from, e.g. "Sep 18". */
@@ -161,14 +166,6 @@ function Decision({
   methodology: Methodology | null;
 }) {
   const { context: c, walls, conviction, verdict, liquidity } = data;
-
-  /*
-   * Every dollar exposure figure is open interest times a modelled greek, so
-   * on a chain too thin to trust they are suppressed rather than printed —
-   * the same rule the positioning page applies, read from the same helper so
-   * the two pages cannot disagree.
-   */
-  const showExposure = exposureIsReliable(liquidity);
 
   return (
     <>
@@ -425,6 +422,10 @@ export async function DecisionView({
         positioning: live.positioning,
         activity: live.activity,
         spot: { price: live.spot, asOfIso: new Date(live.asOfMs).toISOString() },
+        // Tradeability from the same stream's open interest — never Cboe on /lab.
+        liquidity: live.feedBook
+          ? await assessFeedLiquidity(query, live.feedBook).catch(() => null)
+          : null,
       });
     } else {
       data = await peekDecision(query);
@@ -454,11 +455,16 @@ export async function DecisionView({
         ),
       };
     } else {
+      const waiting = live && e instanceof Error && /^Waiting for the feed/.test(e.message);
       error = {
-        message: live
-          ? `Could not read the Tastytrade feed for ${query}${e instanceof Error ? ` — ${e.message}` : ''}.`
-          : `Could not read the option chain for ${query}.`,
-        detail: chartStillBelow,
+        message: waiting
+          ? (e as Error).message
+          : live
+            ? `Could not read the Tastytrade feed for ${query}${e instanceof Error ? ` — ${e.message}` : ''}.`
+            : `Could not read the option chain for ${query}.`,
+        detail: waiting
+          ? `This is the live stream still delivering, not a verdict on ${query}'s options. The page re-reads the feed every few seconds and fills in once the book is complete. ${chartStillBelow}`
+          : chartStillBelow,
       };
     }
   }
@@ -596,6 +602,20 @@ export async function DecisionView({
   const market = marketStatus();
   const marketClosed = !market.open;
   const sessionDateLabel = formatSessionDate(market.lastSession.date);
+
+  /*
+   * Whether the exposure figures may be shown, and if not, whether that is a
+   * thin chain or the data not having arrived. On /lab the gate judges the
+   * feed's own book (its Summary open interest and the stream's health); on
+   * the public page, the tradeability lookup — where a failed read is never
+   * taken as a thin chain. See lib/decision/exposureGate.
+   */
+  const gate = exposureGate({
+    symbol,
+    liquidity: data?.liquidity ?? null,
+    feed: live?.feedHealth ?? null,
+    marketOpen: market.open,
+  });
 
   /*
    * From the chain snapshot fetched alongside the decision, so the drawer
@@ -823,6 +843,7 @@ export async function DecisionView({
                   tracksLog={tracksLog}
                   marketClosed={marketClosed}
                   sessionDateLabel={sessionDateLabel}
+                  showExposure={gate.show}
                 />
               )
             }
@@ -874,8 +895,26 @@ export async function DecisionView({
               </span>
             }
           >
-            {exposureIsReliable(data?.liquidity ?? null) ? (
-              <ExposureTables data={positioning} />
+            {gate.show ? (
+              <>
+                {gate.caveat && (
+                  <p
+                    className="panel mb-2 border-l-2 border-l-flip/60 px-3.5 py-2 text-2xs leading-relaxed text-flip"
+                    data-testid="exposure-caveat"
+                  >
+                    {gate.caveat}
+                  </p>
+                )}
+                <ExposureTables data={positioning} />
+              </>
+            ) : gate.reason === 'feed' ? (
+              <div
+                className="panel border-l-2 border-l-term-dim/60 px-4 py-6 text-center text-xs"
+                data-testid="exposure-waiting"
+              >
+                <p className="font-bold text-term-text">{gate.headline}</p>
+                <p className="mx-auto mt-2 max-w-lg leading-relaxed text-term-dim">{gate.detail}</p>
+              </div>
             ) : (
               /*
                 The whole table is GEX, VEX and CEX. On a chain under the open

@@ -13,6 +13,7 @@ import { clearsSpotDeadZone, nearestStrongWall } from '../simple/walls';
 import { formatAsOf, formatExpiryLabel } from '../time';
 import { normaliseSymbol } from '../ticker/bars';
 import { getTradeability } from '../ticker/liquidity';
+import type { Liquidity } from '../ticker/types';
 import { confirmedByVolume } from './activity';
 import { buildConviction } from './conviction';
 import { buildLevelMap } from './levelMap';
@@ -201,6 +202,14 @@ export interface DecisionPositioningOverride {
   /** The same book weighted by volume, for "Today's activity"; null when unavailable. */
   activity: PositioningData | null;
   spot: { price: number; asOfIso: string } | null;
+  /**
+   * Tradeability built by the caller from the same source as `positioning`
+   * (on /lab, the feed's own Summary open interest — see
+   * `assessFeedLiquidity`). When an override is given this is used as-is and
+   * the production lookup (`getTradeability`, which reads Cboe) is never
+   * called, so /lab has no Cboe request in its path.
+   */
+  liquidity: Liquidity | null;
 }
 
 async function build(symbol: string, override?: DecisionPositioningOverride): Promise<DecisionResult> {
@@ -316,7 +325,7 @@ async function build(symbol: string, override?: DecisionPositioningOverride): Pr
    */
   const [intraday, liquidity] = await Promise.all([
     getBars(symbol, CONVICTION_TF).catch(() => null),
-    getTradeability(symbol),
+    override ? Promise.resolve(override.liquidity) : getTradeability(symbol),
   ]);
 
   if (intraday) {
